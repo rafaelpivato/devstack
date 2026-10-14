@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for stable Devstack releases
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=30min
+RandomizedDelaySec=5min
+Persistent=true
+Unit=devstack-update.service
+
+[Install]
+WantedBy=timers.target
