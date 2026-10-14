@@ -39,7 +39,7 @@ apt-get install -y -qq python3-venv python3-pip git curl ca-certificates
 
 install -d -m 0755 /opt/devstack /usr/local/lib/devstack
 install -d -m 0700 /etc/devstack
-install -d -o "$user" -g "$(id -gn "$user")" -m 0700 /var/lib/devstack
+install -d -o root -g root -m 0700 /var/lib/devstack
 install -d -o "$user" -g "$(id -gn "$user")" -m 0700 "$home/.config/devstack"
 if [[ ! -e "$home/.config/devstack/projects.toml" ]]; then
   install -o "$user" -g "$(id -gn "$user")" -m 0600 /dev/null "$home/.config/devstack/projects.toml"
@@ -74,7 +74,10 @@ install -m 0644 "$tmpdir/devstack-update.timer" /etc/systemd/system/devstack-upd
 systemctl daemon-reload
 systemctl enable devstack.service
 systemctl enable --now devstack-update.timer
-systemctl start devstack-update.service
+if ! systemctl start devstack-update.service; then
+  echo "No working release installed yet (or update failed). See updater journal." >&2
+  echo "The timer will retry when a valid stable GitHub release exists." >&2
+fi
 
 echo "Devstack installed. Dashboard listens on 127.0.0.1:8765 only."
 echo "Configure private network access before using the dashboard from your phone."
