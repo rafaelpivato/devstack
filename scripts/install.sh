@@ -36,6 +36,14 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq python3-venv python3-pip git curl ca-certificates
+# Rootful Docker is deliberately enabled for this single-user private server.
+# Membership in the docker group is root-equivalent. Do not grant it to
+# unrelated users. Use Ubuntu's packages to avoid dependence on cloud tooling.
+if [[ "${DEVSTACK_INSTALL_DOCKER:-1}" == "1" ]]; then
+  apt-get install -y -qq docker.io docker-compose-v2
+  systemctl enable --now docker.service
+  usermod -aG docker "$user"
+fi
 
 install -d -m 0755 /opt/devstack /usr/local/lib/devstack
 install -d -m 0700 /etc/devstack
@@ -94,6 +102,8 @@ if ! systemctl start devstack-update.service; then
   echo "The timer will retry when a valid stable GitHub release exists." >&2
 fi
 
+# Refresh the service after changing Docker group membership: systemd assigns
+# supplementary groups only at process startup.
 # Updating a running host replaces its service unit, but an "already running"
 # release does not restart the application. Restart here to activate
 # RuntimeDirectory and its new watcher without waiting for another release.

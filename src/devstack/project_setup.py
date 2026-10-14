@@ -114,6 +114,10 @@ def create_project(name: str) -> None:
         projects = data.setdefault("projects", [])
         if any(item["name"] == name for item in projects):
             raise ProjectSetupError("That project already exists")
+        workspace = Path.home() / "workspaces" / name
+        if workspace.is_symlink():
+            raise ProjectSetupError("Project workspace must not be a symlink")
+        workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
         projects.append({"name": name, "repos": [], "services": []})
         _write_config(path, data)
 
