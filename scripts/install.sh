@@ -64,19 +64,21 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 base="https://raw.githubusercontent.com/$repo/main"
-for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer; do
+for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh scripts/bootstrap.py deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer deploy/devstack-bootstrap.service; do
   curl --fail --silent --show-error --location --retry 3 "$base/$item" \
     --output "$tmpdir/$(basename "$item")"
 done
 install -m 0644 "$tmpdir/updater.py" /usr/local/lib/devstack/updater.py
 install -m 0644 "$tmpdir/private_access.py" /usr/local/lib/devstack/private_access.py
 install -m 0755 "$tmpdir/enable-tailscale.sh" /usr/local/lib/devstack/enable-tailscale.sh
+install -m 0755 "$tmpdir/bootstrap.py" /usr/local/lib/devstack/bootstrap.py
 sed -e "s|@DEVSTACK_USER@|$user|g" -e "s|@DEVSTACK_HOME@|$home|g" \
   "$tmpdir/devstack.service" > /etc/systemd/system/devstack.service
 install -m 0644 "$tmpdir/devstack-update.service" /etc/systemd/system/devstack-update.service
 install -m 0644 "$tmpdir/devstack-update.timer" /etc/systemd/system/devstack-update.timer
 install -m 0644 "$tmpdir/devstack-tailscale-finish.service" /etc/systemd/system/devstack-tailscale-finish.service
 install -m 0644 "$tmpdir/devstack-tailscale-finish.timer" /etc/systemd/system/devstack-tailscale-finish.timer
+install -m 0644 "$tmpdir/devstack-bootstrap.service" /etc/systemd/system/devstack-bootstrap.service
 
 # App service is enabled but starts only after a valid release is installed.
 systemctl daemon-reload
@@ -93,13 +95,42 @@ echo "  sudo /usr/local/lib/devstack/enable-tailscale.sh"
 echo "Do not publicly expose port 8765."
 echo "Logs: journalctl -u devstack -u devstack-update --no-pager -n 100"
 
-# Browser-first activation needs no pre-provisioned credential.
-# Private HTTPS is configured later by an independent timer after approval.
-# Advanced: supplying a root-only auth-key file selects credential-based setup.
+# Optional short-lived HTTP first-boot portal. The bootstrap secret is
+# supplied by the instance owner in cloud-init, and ONLY its SHA-256 digest
+# is written to disk. A strong random secret is required.
+if [[ -n "${DEVSTACK_BOOTSTRAP_SECRET:-}" ]]; then
+  if [[ "${DEVSTACK_TAILSCALE:-0}" != "1" ]]; then
+    echo "DEVSTACK_BOOTSTRAP_SECRET requires DEVSTACK_TAILSCALE=1." >&2
+    exit 1
+  fi
+  if [[ -e /var/lib/devstack/tailscale-identity.json || -e /etc/devstack/bootstrap.env ]]; then
+    echo "Refusing to recreate the one-time onboarding portal." >&2
+    exit 1
+  fi
+  if (( ${#DEVSTACK_BOOTSTRAP_SECRET} < 24 )); then
+    echo "Use a random first-time bootstrap secret of at least 24 characters." >&2
+    exit 1
+  fi
+  secret_digest="$(printf %s "$DEVSTACK_BOOTSTRAP_SECRET" | sha256sum | cut -d' ' -f1)"
+  printf 'DEVSTACK_BOOTSTRAP_HASH=%s\n' "$secret_digest" > /etc/devstack/bootstrap.env
+  chmod 0600 /etc/devstack/bootstrap.env
+  install -d -o "$user" -g "$(id -gn "$user")" -m 0700 /var/lib/devstack-bootstrap
+  unset DEVSTACK_BOOTSTRAP_SECRET secret_digest
+  echo "One-time HTTP activation portal will listen on port 80."
+  echo "Open http://<instance-public-ip>/ and enter the setup secret you supplied in EC2 User Data."
+fi
+
+# Tailscale is initialized without pre-provisioned Tailscale credentials.
+# A private systemd timer completes Serve only after browser authorization.
 if [[ "${DEVSTACK_TAILSCALE:-0}" == "1" ]]; then
   systemctl enable --now devstack-tailscale-finish.timer
   if [[ -n "${TAILSCALE_AUTH_KEY_FILE:-}" ]]; then
     TAILSCALE_NONINTERACTIVE=1 /usr/local/lib/devstack/enable-tailscale.sh
+  elif [[ -e /etc/devstack/bootstrap.env ]]; then
+    TAILSCALE_BROWSER_ACTIVATION=1 \
+      TAILSCALE_LOGIN_JSON_FILE=/var/lib/devstack-bootstrap/activation-url \
+      /usr/local/lib/devstack/enable-tailscale.sh
+    systemctl enable --now devstack-bootstrap.service
   else
     TAILSCALE_BROWSER_ACTIVATION=1 /usr/local/lib/devstack/enable-tailscale.sh
   fi

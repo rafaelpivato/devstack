@@ -141,7 +141,18 @@ def finish_if_connected() -> str:
     state = parse_json(run_cli("status", "--json"))
     if state.get("BackendState") != "Running":
         return "Awaiting first Tailscale browser authorization"
-    return configure()
+    result = configure()
+    # Close temporary port 80 only after a successfully configured private
+    # HTTPS route. The service is stopped before its secret is deleted.
+    if Path("/etc/devstack/bootstrap.env").exists():
+        try:
+            subprocess.run(
+                ["/usr/bin/python3", "/usr/local/lib/devstack/bootstrap.py", "--finish"],
+                capture_output=True, text=True, check=True, timeout=45,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            raise PrivateAccessError("Private HTTPS is active but bootstrap cleanup failed") from exc
+    return result
 
 
 def main() -> int:

@@ -61,7 +61,18 @@ if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/n
     # a systemd timer finishes private Serve configuration after approval.
     echo "DEVSTACK ACTIVATION: open the Tailscale login URL below."
     echo "Authorize only from your own Tailscale account; confirm the device afterward."
-    if tailscale up --timeout=20s; then
+    if [[ -n "${TAILSCALE_LOGIN_JSON_FILE:-}" ]]; then
+      # Capture machine-readable browser URL without writing it to boot logs.
+      # The setup page discloses it only after a valid one-time secret.
+      umask 077
+      if tailscale up --json --timeout=20s > "$TAILSCALE_LOGIN_JSON_FILE"; then
+        echo "Tailscale authorized during bootstrap."
+      else
+        echo "Tailscale authorization pending; use the temporary setup page."
+      fi
+      chown devstack:devstack "$TAILSCALE_LOGIN_JSON_FILE"
+      chmod 0600 "$TAILSCALE_LOGIN_JSON_FILE"
+    elif tailscale up --timeout=20s; then
       echo "Tailscale activated during bootstrap."
     else
       echo "DEVSTACK ACTIVATION: pending browser approval."
