@@ -247,3 +247,29 @@ to the public Internet to recover access.
 
 The post-secret success view now provides an explicit Tailscale authorization
 link instead of depending on cross-site POST redirection in mobile browsers.
+
+## GitHub SSH and multi-repository onboarding (v0.1.3)
+
+Open **GitHub SSH settings** from the private dashboard. Generate a dedicated
+Ed25519 key pair (private file remains owned by the `devstack` service
+account), then copy **only its public key** into
+[GitHub SSH keys](https://github.com/settings/keys). Use the **Test GitHub
+SSH** button to verify the account and check if organizational SSO approval is
+needed. Never reuse your personal private key or paste any private key into
+the browser. The GitHub account SSH key can carry write access to all
+repositories the GitHub identity can access, so keep your Tailscale device
+grants restricted.
+
+The GitHub server host keys are obtained through authenticated
+`https://api.github.com/meta`, not blindly trusted via SSH. Git operations
+use `StrictHostKeyChecking=yes` and the specific Devstack key.
+
+Use **Create project**, then **Add GitHub repository** as often as required
+for the same project. You can choose a different initial branch per repo.
+Devstack clones into `~/workspaces/<project>/<repo>`, writes paths into
+`projects.toml` atomically, and keeps repositories separate from service
+definitions. **Service configuration is still managed by projects.toml;**
+the dashboard's service editor is a separate future feature.
+
+Both SSH and HTTPS GitHub repository URLs are accepted, but cloning always
+uses GitHub SSH authentication and never embeds secrets in remote URLs.

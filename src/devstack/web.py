@@ -7,6 +7,9 @@ import secrets
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 
+from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
+from .project_setup import ProjectSetupError, create_project, add_github_repository
+
 from .core import (
     OperationError, load_projects, project_action, repo_branch, repo_dirty,
     repo_switch, repo_update, service_logs, service_status,
@@ -60,6 +63,55 @@ def create_app(config: dict | None = None) -> Flask:
                     repos.append((r.name, f"Unavailable: {exc}", False))
             rows.append((p, services, repos))
         return render_template("dashboard.html", rows=rows, csrf=token())
+
+    @app.get("/settings/github")
+    def github_settings():
+        try:
+            key = public_key()
+        except GitHubSSHError as exc:
+            flash(str(exc), "error")
+            key = None
+        return render_template("github_settings.html", public_key=key, csrf=token())
+
+    @app.post("/settings/github/generate")
+    def github_generate():
+        try:
+            generate_key()
+            flash("GitHub SSH key generated. Add the public key to your GitHub account.", "ok")
+        except GitHubSSHError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("github_settings"))
+
+    @app.post("/settings/github/test")
+    def github_test():
+        try:
+            account = test_connection()
+            flash(f"GitHub SSH authenticated as {account}.", "ok")
+        except GitHubSSHError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("github_settings"))
+
+    @app.post("/projects/new")
+    def project_create():
+        try:
+            create_project(request.form.get("name", "").strip())
+            flash("Project created. Add one or more repositories below.", "ok")
+        except (ProjectSetupError, ValueError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("index"))
+
+    @app.post("/projects/<name>/repos/new")
+    def repo_add(name):
+        try:
+            result = add_github_repository(
+                name, request.form.get("url", ""),
+                repo_name=request.form.get("name", ""),
+                branch=request.form.get("branch", ""),
+            )
+            flash(f"Cloned repository {result} successfully.", "ok")
+        except (ProjectSetupError, ValueError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("index"))
 
     @app.post("/projects/<name>/<action>")
     def operate(name, action):

@@ -38,3 +38,48 @@ class WebTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SetupRoutesTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.public_key", return_value="ssh-ed25519 AAAATEST demo")
+    def test_public_only_ssh_page(self, key):
+        response = self.client.get("/settings/github")
+        self.assertIn(b"ssh-ed25519 AAAATEST demo", response.data)
+        self.assertNotIn(b"PRIVATE KEY", response.data)
+
+    @patch("devstack.web.generate_key")
+    def test_generate_key_requires_csrf(self, generate):
+        response = self.client.post("/settings/github/generate")
+        self.assertEqual(response.status_code, 403)
+        generate.assert_not_called()
+        response = self.client.post(
+            "/settings/github/generate", data={"_csrf": self.csrf}
+        )
+        self.assertEqual(response.status_code, 302)
+        generate.assert_called_once_with()
+
+    @patch("devstack.web.create_project")
+    def test_create_project(self, create):
+        response = self.client.post("/projects/new",
+                                    data={"_csrf": self.csrf, "name": "demo"})
+        self.assertEqual(response.status_code, 302)
+        create.assert_called_once_with("demo")
+
+    @patch("devstack.web.add_github_repository")
+    def test_add_repo(self, add):
+        response = self.client.post("/projects/demo/repos/new", data={
+            "_csrf": self.csrf, "url": "git@github.com:org/api.git",
+            "name": "api", "branch": "develop",
+        })
+        self.assertEqual(response.status_code, 302)
+        add.assert_called_once_with(
+            "demo", "git@github.com:org/api.git",
+            repo_name="api", branch="develop"
+        )
+
