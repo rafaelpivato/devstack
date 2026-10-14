@@ -313,3 +313,84 @@ explain why the manual update button is disabled.
 The live status is advisory; a root-level update failure will show a failure
 indicator, while detailed logs remain in
 `sudo journalctl -u devstack-update.service --no-pager -n 100`.
+
+## Docker-first projects (v0.2.0)
+
+Devstack's stable dashboard continues to run as a host systemd service;
+Docker is only used for project development. Rootful Docker Engine and
+Compose are installed on Ubuntu by the reviewed installer. The unprivileged
+`devstack` account belongs to the `docker` group, which is **root-equivalent**:
+this feature is for the owner's private trusted Tailscale network, not
+untrusted multi-user use. Never publish Docker's daemon socket or Devstack's
+administrator dashboard.
+
+### Existing EC2 machines: one-time installation
+
+**Important:** A Devstack release update only updates the application.
+It does not install Docker or refresh systemd/service group permissions.
+After merging this PR and receiving the verified `v0.2.0` release, use the
+reviewed installer *once* through a trusted Ubuntu terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh | sudo bash
+```
+
+The installer installs Ubuntu's `docker.io` and `docker-compose-v2`
+packages, enables Docker, adds the `devstack` account to the Docker group,
+and restarts the dashboard so its group membership becomes active. Existing
+GitHub SSH identities, Tailscale registration and project records are retained.
+Set `DEVSTACK_INSTALL_DOCKER=0` if opting out of Docker installation.
+
+### Managing a project
+
+Create a project from the dashboard (or use **Install smoke example** for a
+disposable test). Then choose **Manage Docker Compose** on its card.
+
+The editor writes to:
+
+```text
+~/workspaces/<project>/
+  .devstack/
+    compose.yaml
+    jobs/                 # Local action logs/status
+  .secrets/               # Private local env files
+  <repository-one>/
+  <repository-two>/
+```
+
+The Compose file uses standard Docker Compose YAML; relative build contexts
+can point to cloned repositories such as `../beacon-django` or
+`../beacon-web`. New files never touch Git worktrees. The dashboard's
+**Validate and save** button invokes `docker compose config --quiet`, then
+atomically replaces the managed file. Invalid changes leave the old definition
+intact. Multiple containers, ports, networks and named volumes are native
+Docker Compose features.
+
+Start/rebuild, build, restart, stop and down are explicit, asynchronous
+actions. The dashboard polls job state and recent logs. **Down does not remove
+named volumes**. Container status and logs are available from the same page.
+Background workers have a 15-minute command timeout; they are not guaranteed
+to survive reboot or service cgroup termination. Stale jobs eventually show
+as stale. Operations may contain secrets in their log output; treat the
+private dashboard as privileged.
+
+Project Compose files may publish loopback ports explicitly, for example
+`127.0.0.1:18000:8000`. A new project's default Compose example does not
+publish any host port. **Avoid wildcard/public port mappings**, since Docker
+can expose published ports independently of host firewall expectations.
+Private Tailscale previews and public Funnel webhooks are future milestones.
+
+### Smoke fixture
+
+The bundled `examples/smoke/` includes a Python HTTP server, Redis and
+PostgreSQL (with a named database volume). **Install smoke example** copies
+it to `~/workspaces/smoke`; use its Docker page to **Start / rebuild**,
+inspect containers and logs, then **Down**. HTTP is bound only to
+`127.0.0.1:18080` and is not yet previewed via Tailscale Serve.
+GitHub Actions' Docker smoke workflow builds and starts the same stack and
+checks its `/health` endpoint.
+
+### Deliberately deferred
+
+Container command runner / saved tasks, direct previews, Tailscale Funnel,
+ngrok, and export/import of manifests and secrets come in later milestones.

@@ -37,6 +37,14 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 <button type="submit">Create project</button>
 </form>
 </section>
+<section class="card">
+<h2>Docker development</h2>
+<p>Managed Compose files live outside Git repositories in each project's <code>.devstack/</code> directory.</p>
+<form method="post" action="{{url_for('smoke_import')}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit" class="secondary">Install smoke example</button>
+</form>
+</section>
 <section class="card" id="devstack-updates">
 <div class="heading"><h2>Devstack updates</h2><small id="devstack-update-phase" aria-live="polite">Checking…</small></div>
 <div class="update-meta">
@@ -57,6 +65,7 @@ Scheduled checks continue in the background.</small></p>
 {% for project, services, repos in rows %}
 <section class="card">
 <div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ services|length }} services</small></div>
+<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose →</a></p>
 <div class="row">
 {% for action,label,style in [('start','Start',''),('stop','Stop','stop'),('update','Update repos','secondary')] %}
 <form method="post" action="{{url_for('operate',name=project.name,action=action)}}">

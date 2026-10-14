@@ -11,6 +11,10 @@ from .update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
     check_request_directory, request_update,
 )
+from .docker_stacks import (
+    DockerError, docker_available, read_compose, save_compose, stack_status,
+    stack_logs, current_job, job_log, queue_action, import_smoke,
+)
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
 
@@ -93,6 +97,75 @@ def create_app(config: dict | None = None) -> Flask:
         except UpdateControlError as exc:
             return {"ok": False, "message": str(exc)}, 503
         return {"ok": True, "message": message}, 202
+
+    @app.get("/projects/<name>/docker")
+    def docker_project(name):
+        project = get_project(name)
+        try:
+            content = read_compose(name)
+            job = current_job(name)
+        except DockerError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index"))
+        return render_template(
+            "docker_project.html", project=project, compose=content,
+            docker_ready=docker_available(), job=job, csrf=token(),
+        )
+
+    @app.post("/projects/<name>/docker/save")
+    def docker_save(name):
+        get_project(name)
+        try:
+            save_compose(name, request.form.get("compose", ""))
+            flash("Compose definition saved successfully.", "ok")
+        except DockerError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("docker_project", name=name))
+
+    @app.post("/projects/<name>/docker/action/<action>")
+    def docker_action(name, action):
+        get_project(name)
+        try:
+            queue_action(name, action)
+            flash(f"Docker {action} queued. Follow progress below.", "ok")
+        except DockerError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("docker_project", name=name))
+
+    @app.get("/api/projects/<name>/docker/status")
+    def docker_status(name):
+        get_project(name)
+        job = current_job(name)
+        return {"job": job, "log": job_log(name)}
+
+    @app.get("/projects/<name>/docker/containers")
+    def docker_containers(name):
+        get_project(name)
+        try:
+            output = stack_status(name)
+        except DockerError as exc:
+            output = str(exc)
+        return render_template("docker_output.html", project=name, title="Containers",
+                               output=output)
+
+    @app.get("/projects/<name>/docker/logs")
+    def docker_logs(name):
+        get_project(name)
+        try:
+            output = stack_logs(name)
+        except DockerError as exc:
+            output = str(exc)
+        return render_template("docker_output.html", project=name, title="Container logs",
+                               output=output)
+
+    @app.post("/projects/smoke/import")
+    def smoke_import():
+        try:
+            import_smoke()
+            flash("Smoke project imported. Open its Docker Compose page to build and run.", "ok")
+        except (DockerError, ValueError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("index"))
 
     @app.get("/settings/github")
     def github_settings():
