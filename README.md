@@ -211,3 +211,20 @@ application health before accepting the new version.
 
 Do not assume a successful CI run proves first-boot cloud-init or Tailscale
 browser activation works: those still need a smoke test on a fresh Ubuntu VM.
+
+## First-time setup from a phone (no cloud-init log access)
+
+For a fresh server, Devstack can optionally serve a **secret-gated setup
+page on HTTP port 80**. You provide a strong random one-time setup code
+in EC2 User Data, visit the VM's public IPv4 address from your phone,
+enter the code, and follow the Tailscale device authorization link. Once
+private Tailscale HTTPS is configured, the temporary HTTP service is
+automatically disabled.
+
+**HTTP does not encrypt the code in transit**; this option is convenient
+but less secure than the existing console-log or HTTPS-based onboarding.
+Do not expose Devstack itself on the internet. Manually remove the
+inbound TCP/80 AWS security-group rule after activation.
+
+See [one-time HTTP onboarding](docs/one-time-http-onboarding.md) for the
+cloud-init script, limitations, and security precautions.

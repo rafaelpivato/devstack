@@ -32,6 +32,9 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertIn('TAILSCALE_BROWSER_ACTIVATION=1', script)
         self.assertIn('TAILSCALE_NONINTERACTIVE=1', script)
         self.assertIn('devstack-tailscale-finish.timer', script)
+        self.assertIn('devstack-bootstrap.service', script)
+        self.assertIn('DEVSTACK_BOOTSTRAP_SECRET', script)
+        self.assertIn('TAILSCALE_LOGIN_JSON_FILE', script)
 
 
 if __name__ == "__main__":
