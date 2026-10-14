@@ -196,3 +196,18 @@ intended tailnet before using it. A bootstrap browser authorization link is
 not itself a Devstack dashboard or a substitute for authenticated first
 contact. The credential-file flow remains an **advanced pre-provisioned-key
 alternative**, not the default.
+
+## Versioned release workflow
+
+After merging a change into `main`, GitHub Actions installs Devstack and runs
+the full unit-test suite. If the version from `pyproject.toml` (e.g. `0.1.0`)
+has **not** already been tagged, the workflow publishes the corresponding
+stable GitHub Release (e.g. `v0.1.0`) using that tested commit.
+
+For later releases, **bump `[project].version` in the feature PR**.
+Ordinary code merges without a version bump do not publish another release.
+The independent updater installs only published stable releases and checks
+application health before accepting the new version.
+
+Do not assume a successful CI run proves first-boot cloud-init or Tailscale
+browser activation works: those still need a smoke test on a fresh Ubuntu VM.
