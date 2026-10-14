@@ -31,6 +31,7 @@ class DockerStacksTests(unittest.TestCase):
         self.assertEqual(path, self.root / ".devstack" / "compose.yaml")
         self.assertFalse(path.exists())
         self.assertIn("nginx", d.read_compose("my-project"))
+        self.assertIn('expose:', d.read_compose("my-project"))
 
     @patch("devstack.docker_stacks.subprocess.run")
     def test_validate_then_save_and_keep_existing_on_error(self, run):

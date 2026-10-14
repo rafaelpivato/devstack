@@ -118,6 +118,11 @@ def create_project(name: str) -> None:
         if workspace.is_symlink():
             raise ProjectSetupError("Project workspace must not be a symlink")
         workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        secrets = workspace / ".secrets"
+        if secrets.is_symlink():
+            raise ProjectSetupError("Project secrets directory must not be a symlink")
+        secrets.mkdir(mode=0o700, exist_ok=True)
+        secrets.chmod(0o700)
         projects.append({"name": name, "repos": [], "services": []})
         _write_config(path, data)
 

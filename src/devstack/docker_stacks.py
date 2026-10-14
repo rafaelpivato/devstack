@@ -38,8 +38,8 @@ name: devstack-project
 services:
   app:
     image: nginx:alpine
-    ports:
-      - "127.0.0.1:18080:80"
+    expose:
+      - "80"
 """
 
 
@@ -316,6 +316,7 @@ def import_smoke() -> str:
         raise DockerError("A smoke project is already registered")
     shutil.copytree(source, destination)
     try:
+        (destination / ".devstack").chmod(0o700)
         create_project("smoke")
     except Exception:
         shutil.rmtree(destination)
