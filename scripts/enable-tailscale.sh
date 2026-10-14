@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optional private HTTPS for Ubuntu: interactive or unattended.
+# Optional private HTTPS: manual login, browser activation, or pre-provisioned credential.
 set -Eeuo pipefail
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -51,6 +51,21 @@ if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/n
       exit 1
     fi
     tailscale up "--auth-key=file:$key_file"
+  elif [[ "${TAILSCALE_BROWSER_ACTIVATION:-0}" == "1" ]]; then
+    # Print the login URL to cloud-init output. Do not block indefinitely:
+    # a systemd timer finishes private Serve configuration after approval.
+    echo "DEVSTACK ACTIVATION: open the Tailscale login URL below."
+    echo "Authorize only from your own Tailscale account; confirm the device afterward."
+    if tailscale up --timeout=20s; then
+      echo "Tailscale activated during bootstrap."
+    else
+      echo "DEVSTACK ACTIVATION: pending browser approval."
+      echo "Retrieve the URL from your cloud provider's startup/instance logs."
+    fi
+    if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/null 2>&1; then
+      echo "Devstack remains private until Tailscale authorization completes."
+      exit 0
+    fi
   else
     echo "Sign in to Tailscale using the browser URL printed below."
     tailscale up

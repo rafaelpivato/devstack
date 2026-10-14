@@ -1,0 +1,11 @@
+[Unit]
+Description=Configure Devstack tailnet-only HTTPS after first device approval
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+Persistent=true
+Unit=devstack-tailscale-finish.service
+
+[Install]
+WantedBy=timers.target

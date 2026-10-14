@@ -96,15 +96,29 @@ def configure() -> str:
     return f"Private dashboard: https://{hostname}/"
 
 
+def finish_if_connected() -> str:
+    """Used by a systemd timer after first browser approval; never re-enroll."""
+    state = parse_json(run_cli("status", "--json"))
+    if state.get("BackendState") != "Running":
+        return "Awaiting first Tailscale browser authorization"
+    return configure()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check-connected", action="store_true",
         help="Exit 0 when authenticated to a tailnet, 1 otherwise"
     )
+    parser.add_argument(
+        "--finish-if-connected", action="store_true",
+        help="Complete private Serve after browser activation, without re-authenticating"
+    )
     args = parser.parse_args()
     try:
-        if args.check_connected:
+        if args.finish_if_connected:
+            print(finish_if_connected())
+        elif args.check_connected:
             connected_hostname(parse_json(run_cli("status", "--json")))
         else:
             print(configure())

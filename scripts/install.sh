@@ -64,7 +64,7 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 base="https://raw.githubusercontent.com/$repo/main"
-for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer; do
+for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer; do
   curl --fail --silent --show-error --location --retry 3 "$base/$item" \
     --output "$tmpdir/$(basename "$item")"
 done
@@ -75,6 +75,8 @@ sed -e "s|@DEVSTACK_USER@|$user|g" -e "s|@DEVSTACK_HOME@|$home|g" \
   "$tmpdir/devstack.service" > /etc/systemd/system/devstack.service
 install -m 0644 "$tmpdir/devstack-update.service" /etc/systemd/system/devstack-update.service
 install -m 0644 "$tmpdir/devstack-update.timer" /etc/systemd/system/devstack-update.timer
+install -m 0644 "$tmpdir/devstack-tailscale-finish.service" /etc/systemd/system/devstack-tailscale-finish.service
+install -m 0644 "$tmpdir/devstack-tailscale-finish.timer" /etc/systemd/system/devstack-tailscale-finish.timer
 
 # App service is enabled but starts only after a valid release is installed.
 systemctl daemon-reload
@@ -91,8 +93,14 @@ echo "  sudo /usr/local/lib/devstack/enable-tailscale.sh"
 echo "Do not publicly expose port 8765."
 echo "Logs: journalctl -u devstack -u devstack-update --no-pager -n 100"
 
-# Opt-in unattended Tailscale setup. The auth key must have been provisioned
-# separately into a root-only file before running cloud-init/user-data.
+# Browser-first activation needs no pre-provisioned credential.
+# Private HTTPS is configured later by an independent timer after approval.
+# Advanced: supplying a root-only auth-key file selects credential-based setup.
 if [[ "${DEVSTACK_TAILSCALE:-0}" == "1" ]]; then
-  TAILSCALE_NONINTERACTIVE=1 /usr/local/lib/devstack/enable-tailscale.sh
+  systemctl enable --now devstack-tailscale-finish.timer
+  if [[ -n "${TAILSCALE_AUTH_KEY_FILE:-}" ]]; then
+    TAILSCALE_NONINTERACTIVE=1 /usr/local/lib/devstack/enable-tailscale.sh
+  else
+    TAILSCALE_BROWSER_ACTIVATION=1 /usr/local/lib/devstack/enable-tailscale.sh
+  fi
 fi

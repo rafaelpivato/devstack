@@ -21,10 +21,17 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertIn("stat -c %u", script)
         self.assertIn("-perm /077", script)
 
+    def test_cloud_init_activation_is_bounded(self):
+        script = (ROOT / "scripts/enable-tailscale.sh").read_text()
+        self.assertIn("TAILSCALE_BROWSER_ACTIVATION", script)
+        self.assertIn("tailscale up --timeout=20s", script)
+
     def test_install_is_opt_in(self):
         script = (ROOT / "scripts/install.sh").read_text()
         self.assertIn('DEVSTACK_TAILSCALE:-0', script)
+        self.assertIn('TAILSCALE_BROWSER_ACTIVATION=1', script)
         self.assertIn('TAILSCALE_NONINTERACTIVE=1', script)
+        self.assertIn('devstack-tailscale-finish.timer', script)
 
 
 if __name__ == "__main__":

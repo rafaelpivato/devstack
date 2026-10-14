@@ -75,5 +75,23 @@ class PrivateAccessTests(unittest.TestCase):
             parse_json("<html>not json</html>")
 
 
+    @patch("scripts.private_access.configure", return_value="Private dashboard: https://devstack.example.ts.net/")
+    @patch("scripts.private_access.run_cli")
+    def test_finish_after_browser_approval(self, cli, configure):
+        from scripts.private_access import finish_if_connected
+        cli.return_value = connected()
+        self.assertIn("Private dashboard:", finish_if_connected())
+        configure.assert_called_once_with()
+
+    @patch("scripts.private_access.configure")
+    @patch("scripts.private_access.run_cli")
+    def test_finish_waits_without_reenrolling(self, cli, configure):
+        from scripts.private_access import finish_if_connected
+        cli.return_value = '{"BackendState":"NeedsLogin"}'
+        self.assertIn("Awaiting", finish_if_connected())
+        configure.assert_not_called()
+
+
+
 if __name__ == "__main__":
     unittest.main()
