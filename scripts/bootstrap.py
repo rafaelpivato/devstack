@@ -50,7 +50,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "DevstackSetup/1"
     sys_version = ""
 
-    def headers(self, status: int, mime: str = "text/html; charset=utf-8") -> None:
+    def send_protected_headers(self, status: int, mime: str = "text/html; charset=utf-8") -> None:
         self.send_response(status)
         self.send_header("Content-Type", mime)
         self.send_header("Cache-Control", "no-store, max-age=0")
@@ -66,9 +66,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path != "/":
-            self.headers(404)
+            self.send_protected_headers(404)
             return
-        self.headers(200)
+        self.send_protected_headers(200)
         self.wfile.write(b"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Devstack activation</title>
@@ -89,19 +89,19 @@ listed in Tailscale Machines. Never enter your Tailscale password here.</small>
 
     def do_POST(self) -> None:
         if self.path != "/activate":
-            self.headers(404)
+            self.send_protected_headers(404)
             return
         ip = self.client_address[0]
         count, start = FAILURES.get(ip, (0, time.monotonic()))
         if time.monotonic() - start > 900:
             count, start = 0, time.monotonic()
         if count >= 6:
-            self.headers(429)
+            self.send_protected_headers(429)
             self.wfile.write(b"Too many attempts. Try again later.")
             return
         length_str = self.headers.get("Content-Length", "")
         if not length_str.isdigit() or not 0 < int(length_str) <= 2048:
-            self.headers(400)
+            self.send_protected_headers(400)
             return
         try:
             params = parse_qs(
@@ -109,19 +109,19 @@ listed in Tailscale Machines. Never enter your Tailscale password here.</small>
                 keep_blank_values=True,
             )
         except UnicodeError:
-            self.headers(400)
+            self.send_protected_headers(400)
             return
         supplied = params.get("secret", [""])[0]
         expected = os.environ.get("DEVSTACK_BOOTSTRAP_HASH", "")
         if not valid_setup_secret(supplied, expected):
             FAILURES[ip] = (count + 1, start)
-            self.headers(403)
+            self.send_protected_headers(403)
             self.wfile.write(b"Invalid activation secret.")
             return
         try:
             url = extract_login_url(URL_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            self.headers(503)
+            self.send_protected_headers(503)
             self.wfile.write(b"Authentication URL not yet available. Check Tailscale setup.")
             return
         FAILURES.pop(ip, None)
