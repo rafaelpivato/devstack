@@ -126,3 +126,60 @@ class ManualUpdaterWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json["manual_available"])
         self.assertEqual(response.json["latest"], "v0.1.4")
+
+
+class DockerWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects",
+           return_value={"demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())})
+    @patch("devstack.web.read_compose", return_value="services:\n  web: {}")
+    @patch("devstack.web.docker_available", return_value=True)
+    @patch("devstack.web.current_job", return_value=None)
+    def test_editor_shows_yaml_without_repo_changes(self, job, ready, read, projects):
+        result = self.client.get("/projects/demo/docker")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn(b"services:", result.data)
+        self.assertIn(b"Validate and save", result.data)
+
+    @patch("devstack.web.load_projects",
+           return_value={"demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())})
+    @patch("devstack.web.save_compose")
+    def test_compose_save_requires_csrf(self, save, projects):
+        self.assertEqual(
+            self.client.post("/projects/demo/docker/save", data={"compose":"foo"}).status_code,
+            403
+        )
+        save.assert_not_called()
+        self.assertEqual(
+            self.client.post("/projects/demo/docker/save",
+                             data={"_csrf":self.csrf,"compose":"services: {}"}).status_code,
+            302
+        )
+        save.assert_called_once_with("demo","services: {}")
+
+    @patch("devstack.web.load_projects",
+           return_value={"demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())})
+    @patch("devstack.web.queue_action")
+    def test_compose_action_allowed(self, run, projects):
+        result=self.client.post("/projects/demo/docker/action/build",
+                                data={"_csrf":self.csrf})
+        self.assertEqual(result.status_code, 302)
+        run.assert_called_once_with("demo","build")
+
+    @patch("devstack.web.import_smoke", return_value="smoke")
+    def test_smoke_import(self, smoke):
+        self.assertEqual(
+            self.client.post("/projects/smoke/import", data={"_csrf":self.csrf}).status_code,
+            302
+        )
+        smoke.assert_called_once_with()
+
+    @patch("devstack.web.load_projects",return_value={})
+    def test_unknown_project_stays_404(self, projects):
+        self.assertEqual(self.client.get("/projects/nope/docker").status_code, 404)
