@@ -97,7 +97,13 @@ def docker_available() -> bool:
             ["docker", "compose", "version"], capture_output=True, text=True,
             timeout=5, check=False,
         )
-        return result.returncode == 0
+        if result.returncode != 0:
+            return False
+        daemon = subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        return daemon.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
