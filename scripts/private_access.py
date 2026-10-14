@@ -116,7 +116,7 @@ def pin_initial_identity(status: dict[str, Any]) -> None:
     else:
         with os.fdopen(descriptor, "w", encoding="utf-8") as output:
             json.dump(identity, output)
-            output.write("\\n")
+            output.write("\n")
 
 
 def configure() -> str:
