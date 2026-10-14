@@ -1,0 +1,11 @@
+[Unit]
+Description=Finish Devstack Tailscale private HTTPS after browser approval
+After=network-online.target tailscaled.service
+Wants=network-online.target
+ConditionPathExists=/usr/local/lib/devstack/private_access.py
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/lib/devstack/private_access.py --finish-if-connected
+TimeoutStartSec=60

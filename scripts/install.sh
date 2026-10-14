@@ -47,9 +47,13 @@ fi
 
 if [[ ! -f /etc/devstack/app.env ]]; then
   secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-  printf 'DEVSTACK_SECRET_KEY=%s\nDEVSTACK_CONFIG=%s/.config/devstack/projects.toml\n' \
+  printf 'DEVSTACK_SECRET_KEY=%s\nDEVSTACK_CONFIG=%s/.config/devstack/projects.toml\nDEVSTACK_SECURE_COOKIES=1\n' \
     "$secret" "$home" > /etc/devstack/app.env
   chmod 0600 /etc/devstack/app.env
+fi
+# Preserve existing settings while hardening sessions for HTTPS access.
+if ! grep -q '^DEVSTACK_SECURE_COOKIES=' /etc/devstack/app.env; then
+  printf 'DEVSTACK_SECURE_COOKIES=1\n' >> /etc/devstack/app.env
 fi
 if [[ ! -f /etc/devstack/update.env ]]; then
   printf 'DEVSTACK_ROOT=/opt/devstack\nDEVSTACK_STATE=/var/lib/devstack\nDEVSTACK_REPO=%s\n' \
@@ -60,15 +64,19 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 base="https://raw.githubusercontent.com/$repo/main"
-for item in scripts/updater.py deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer; do
+for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer; do
   curl --fail --silent --show-error --location --retry 3 "$base/$item" \
     --output "$tmpdir/$(basename "$item")"
 done
 install -m 0644 "$tmpdir/updater.py" /usr/local/lib/devstack/updater.py
+install -m 0644 "$tmpdir/private_access.py" /usr/local/lib/devstack/private_access.py
+install -m 0755 "$tmpdir/enable-tailscale.sh" /usr/local/lib/devstack/enable-tailscale.sh
 sed -e "s|@DEVSTACK_USER@|$user|g" -e "s|@DEVSTACK_HOME@|$home|g" \
   "$tmpdir/devstack.service" > /etc/systemd/system/devstack.service
 install -m 0644 "$tmpdir/devstack-update.service" /etc/systemd/system/devstack-update.service
 install -m 0644 "$tmpdir/devstack-update.timer" /etc/systemd/system/devstack-update.timer
+install -m 0644 "$tmpdir/devstack-tailscale-finish.service" /etc/systemd/system/devstack-tailscale-finish.service
+install -m 0644 "$tmpdir/devstack-tailscale-finish.timer" /etc/systemd/system/devstack-tailscale-finish.timer
 
 # App service is enabled but starts only after a valid release is installed.
 systemctl daemon-reload
@@ -80,5 +88,19 @@ if ! systemctl start devstack-update.service; then
 fi
 
 echo "Devstack installed. Dashboard listens on 127.0.0.1:8765 only."
-echo "Configure private network access before using the dashboard from your phone."
+echo "For optional, interactive private HTTPS setup, run:"
+echo "  sudo /usr/local/lib/devstack/enable-tailscale.sh"
+echo "Do not publicly expose port 8765."
 echo "Logs: journalctl -u devstack -u devstack-update --no-pager -n 100"
+
+# Browser-first activation needs no pre-provisioned credential.
+# Private HTTPS is configured later by an independent timer after approval.
+# Advanced: supplying a root-only auth-key file selects credential-based setup.
+if [[ "${DEVSTACK_TAILSCALE:-0}" == "1" ]]; then
+  systemctl enable --now devstack-tailscale-finish.timer
+  if [[ -n "${TAILSCALE_AUTH_KEY_FILE:-}" ]]; then
+    TAILSCALE_NONINTERACTIVE=1 /usr/local/lib/devstack/enable-tailscale.sh
+  else
+    TAILSCALE_BROWSER_ACTIVATION=1 /usr/local/lib/devstack/enable-tailscale.sh
+  fi
+fi

@@ -114,3 +114,85 @@ It requires operator review of releases. A failed first install has no previous
 release to roll back to and leaves the web service stopped. The independent
 updater is updated by re-running a reviewed installer, not automatically with
 every application release.
+
+
+## Optional private iPhone access (Tailscale Serve)
+
+Devstack continues to listen **only** on `127.0.0.1:8765`. No public cloud
+ports, reverse proxy, custom domain, or app login are required for a private
+single-user MVP. The private network provides the access boundary; **all users
+and devices permitted by your Tailscale ACL/grants may reach this administrative
+interface**, so restrict permissions to yourself. Do not use Tailscale Funnel,
+which publishes the service to the public Internet.
+
+After installing Devstack on an Ubuntu VM (and publishing the first stable
+release), run this **once interactively** from the VM:
+
+```bash
+sudo /usr/local/lib/devstack/enable-tailscale.sh
+```
+
+This optional script installs Tailscale from its official signed Ubuntu APT
+repository if needed, guides you through Tailscale sign-in, then configures a
+private HTTPS reverse proxy to the existing local application. The script
+refuses to overwrite other Serve/Funnel configurations. You can also connect
+Tailscale manually and run
+`sudo python3 /usr/local/lib/devstack/private_access.py`.
+
+On the iPhone:
+
+1. Install the official Tailscale iOS app and sign in to the **same tailnet**.
+2. Enable Tailscale VPN in the iPhone app.
+3. Open the printed `https://<device>.<tailnet>.ts.net/` URL in Safari.
+
+Tailscale's Serve publishes tailnet-only HTTPS with managed TLS certificates.
+The main installation enables Secure session cookies for browser access via
+HTTPS. App sessions do not confer authorization independently; access is
+controlled by your Tailscale network and its explicit device/user policies.
+
+**Recovery independent of the dashboard:** You can inspect
+`sudo tailscale serve status`, `sudo tailscale status`,
+`sudo systemctl status devstack`, and
+`sudo journalctl -u devstack --no-pager -n 100` from a rescue console.
+If Tailscale is not connected, private access will be unavailable without
+affecting the local Devstack process. Do not configure cloud firewalls to
+open port 8765.
+
+The Tailscale installation is optional: Devstack remains cloud/provider
+agnostic and can use any separately authenticated, encrypted private proxy.
+
+## Preferred first setup: automatic install, browser approval
+
+**No Tailscale key is required.** Use `DEVSTACK_TAILSCALE=1` during Ubuntu
+cloud-init. The installer starts Tailscale and prints an initial login URL to
+the host's startup output (usually the cloud-init output log; availability in
+the cloud provider's console varies by provider). It uses a **bounded**
+authentication wait so provisioning can finish without waiting for you.
+
+Open the login URL from the **trusted cloud-provider console** on your phone,
+sign into **your** Tailscale account, and approve the new machine. Turn on
+Tailscale **device approval** in your tailnet beforehand if you want an
+additional administrator approval gate. Once registered, an independent
+`systemd` timer completes **private** HTTPS Serve. You can find its final
+device DNS name in Tailscale's Machines page. A separate consent to enable
+HTTPS certificates for Serve may be required in the Tailscale admin console.
+
+For cloud-init scripts, after reviewing the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh \
+  | sudo env DEVSTACK_TAILSCALE=1 bash
+```
+
+The first successful registration pins the device identity and tailnet in
+`/var/lib/devstack/tailscale-identity.json`. Subsequent runs refuse a
+different device/tailnet and do not automatically re-enroll a disconnected
+device. Recovery must be handled from a separately trusted server console.
+
+**Limitations:** This is trust-on-first-use, not cryptographic attestation.
+Anyone with administrative access to a fresh VM or its bootstrap logs before
+you claim it could interfere. You must verify that the machine joins your
+intended tailnet before using it. A bootstrap browser authorization link is
+not itself a Devstack dashboard or a substitute for authenticated first
+contact. The credential-file flow remains an **advanced pre-provisioned-key
+alternative**, not the default.

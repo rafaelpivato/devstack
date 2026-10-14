@@ -18,6 +18,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.config.update(
         SECRET_KEY=os.environ.get("DEVSTACK_SECRET_KEY") or secrets.token_hex(32),
         SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SECURE=os.environ.get("DEVSTACK_SECURE_COOKIES", "0") == "1",
         SESSION_COOKIE_SAMESITE="Strict",
     )
     if config:

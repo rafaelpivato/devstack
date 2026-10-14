@@ -9,6 +9,10 @@ class WebTests(unittest.TestCase):
         self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
         self.client = self.app.test_client()
 
+    def test_secure_cookie_configuration(self):
+        secure = create_app({"TESTING": True, "SESSION_COOKIE_SECURE": True})
+        self.assertTrue(secure.config["SESSION_COOKIE_SECURE"])
+
     def test_health(self):
         response = self.client.get("/healthz")
         self.assertEqual(response.status_code, 200)
