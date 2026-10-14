@@ -1,60 +1,61 @@
-# Unattended Tailscale provisioning
+# First-time browser activation (recommended)
 
-Devstack runs on Ubuntu and listens only on localhost. Tailscale Serve
-provides optional **private, tailnet-only HTTPS** access. Do not expose
-port 8765 to the public Internet or enable Tailscale Funnel.
+Installation itself is automatic. First-time Tailscale **authorization**
+requires one browser action; no secret file, auth key, or SSH session is
+needed. We call this **browser activation**, not fully unattended
+authentication.
 
-## Prepare a one-time authentication key
+## Flow
 
-1. Generate a **one-off, preferably pre-authorized** device auth key in
-   the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
-   Use the narrowest permissions and expiration practical.
-2. Securely deliver it to your VM *before* invoking the Devstack installer.
-   The auth-key file must be a nonempty, regular, root-owned file with mode
-   0600 or 0400. For example: `/run/secrets/devstack-tailscale-key`.
-3. **Never put the key itself in cloud-init user-data**, shell history,
-   git repositories, or application logs. Each cloud provider has its own
-   secret-delivery mechanism; Devstack deliberately does not depend on one.
+1. Before creating a VM, sign in to your own Tailscale account. For additional
+   assurance, enable **device approval** for the tailnet.
+2. Add the following **non-secret** cloud-init user-data command to a fresh
+   Ubuntu 24.04 server:
 
-## Call from cloud-init / startup scripts
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh \
+     | sudo env DEVSTACK_TAILSCALE=1 bash
+   ```
 
-After the key file exists, run the normal installer with **nonsecret**
-environment variables:
+3. Retrieve the Tailscale activation URL from startup output via the trusted
+   cloud-provider console. Some providers do not surface all cloud-init logs;
+   in that case use their serial console/recovery access.
+4. Open the URL on your iPhone. Sign in with **your** Tailscale account.
+   Check the new device in Tailscale Machines; approve it if your tailnet
+   requires device approval.
+5. A local `systemd` timer notices the connected device and configures
+   **private HTTPS** Serve. If your tailnet requires enabling HTTPS
+   certificates or first-use consent, complete that in the Tailscale admin
+   console. The timer retries configuration without re-enrolling the device.
+6. Install the Tailscale app on your phone, join the same tailnet, and open
+   the machine's `https://<device>.<tailnet>.ts.net` address from Machines.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh \
-  | sudo env DEVSTACK_TAILSCALE=1 \
-      TAILSCALE_AUTH_KEY_FILE=/run/secrets/devstack-tailscale-key bash
-```
+Devstack itself stays on `127.0.0.1:8765`. Do not expose that port publicly
+or use Tailscale Funnel. Limit tailnet access to yourself.
 
-The installer installs the Tailscale service (if needed), authenticates the
-host without a browser prompt using `tailscale up --auth-key=file:<path>`,
-then configures **private** HTTPS Serve. An already-connected host doesn't
-need reauthentication, and existing incompatible Serve/Funnel settings
-are preserved rather than overwritten.
+## First-use security
 
-The local auth-key file can be removed after successful registration if your
-provisioning system does not handle removal itself. Never log its contents.
+The first successful registration is pinned on disk in
+`/var/lib/devstack/tailscale-identity.json`, and further automatic
+re-enrollment is refused. This detects later tailnet changes but cannot
+guarantee a clean VM wasn't previously tampered with. Your cloud-provider
+account and first-boot output form the trusted enrollment channel.
+For independent recovery, use the host console, `systemctl`, and
+`journalctl` rather than relying on the dashboard.
 
-### Interactive fallback
+## Advanced: credential-based provisioning
 
-Omit `DEVSTACK_TAILSCALE=1` during installation. When you can use an
-interactive terminal, execute:
+A one-off key in a root-owned, mode-0600 secret file may be used for CI or
+repeatable fleet provisioning, but obtaining and delivering such a key is
+**extra provisioning work**. It is not the preferred first-time onboarding.
+
+After securely providing a key file, set
+`DEVSTACK_TAILSCALE=1` and `TAILSCALE_AUTH_KEY_FILE` for the installer.
+Never embed secrets directly in cloud-init user data or source control.
+
+To perform an interactive local setup instead, install normally (no
+`DEVSTACK_TAILSCALE=1`) and run:
 
 ```bash
 sudo /usr/local/lib/devstack/enable-tailscale.sh
 ```
-
-Complete sign-in from your browser. The iPhone or Android device must also
-be connected to the same tailnet through its Tailscale app.
-
-## Security boundaries
-
-- Tailnet grants/ACLs must limit access to the administrative dashboard;
-  Devstack does not currently have its own login system.
-- Key-file security depends on your cloud provisioning implementation.
-- The VM still requires private HTTPS certificate support/MagicDNS configured
-  in your tailnet.
-- This approach remains provider-neutral *after the key is provisioned*.
-- The install command above is for code on **main after merging this PR**;
-  for stricter reproducibility, pin the installer to a reviewed commit.

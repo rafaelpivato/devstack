@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -81,8 +83,46 @@ def is_our_private_serve(status: dict[str, Any]) -> bool:
     }
 
 
+def pin_initial_identity(status: dict[str, Any]) -> None:
+    """Trust-on-first-use pin; reject changed tailnets/devices on later runs.
+
+    This detects *later* re-enrollment. It cannot establish who controlled
+    a brand-new VM before the first approved authentication.
+    """
+    node = status.get("Self") or {}
+    tailnet = status.get("CurrentTailnet") or {}
+    if not isinstance(node, dict) or not isinstance(tailnet, dict):
+        raise PrivateAccessError("Cannot read Tailscale identity")
+    identity = {"node_id": node.get("ID"), "tailnet": tailnet.get("Name")}
+    if not all(isinstance(v, str) and v for v in identity.values()):
+        raise PrivateAccessError("Tailscale identity is incomplete; refusing enrollment")
+    path = Path(os.environ.get(
+        "DEVSTACK_TAILSCALE_IDENTITY", "/var/lib/devstack/tailscale-identity.json"
+    ))
+    if path.is_symlink():
+        raise PrivateAccessError("Refusing identity file symlink")
+    try:
+        descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise PrivateAccessError("Existing identity pin is invalid") from exc
+        if saved != identity:
+            raise PrivateAccessError(
+                "Tailscale device or tailnet changed after initial enrollment; "
+                "refusing private proxy configuration. Investigate via recovery console."
+            )
+    else:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(identity, output)
+            output.write("\\n")
+
+
 def configure() -> str:
-    hostname = connected_hostname(parse_json(run_cli("status", "--json")))
+    status = parse_json(run_cli("status", "--json"))
+    hostname = connected_hostname(status)
+    pin_initial_identity(status)
     serve_state = parse_json(run_cli("serve", "status", "--json"))
     if is_our_private_serve(serve_state):
         return f"Private dashboard already configured: https://{hostname}/"

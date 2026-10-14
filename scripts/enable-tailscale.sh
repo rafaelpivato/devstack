@@ -40,6 +40,11 @@ fi
 
 systemctl enable --now tailscaled
 if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/null 2>&1; then
+  # Automatic re-enrollment after first activation is forbidden.
+  if [[ -e /var/lib/devstack/tailscale-identity.json ]]; then
+    echo "Previously enrolled Tailscale identity is offline or expired; refusing automatic re-enrollment." >&2
+    exit 1
+  fi
   if [[ "${TAILSCALE_NONINTERACTIVE:-0}" == "1" ]]; then
     key_file="${TAILSCALE_AUTH_KEY_FILE:-}"
     if [[ -z "$key_file" || ! -f "$key_file" || -L "$key_file" || ! -s "$key_file" ]]; then

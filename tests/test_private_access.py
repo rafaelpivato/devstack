@@ -20,10 +20,24 @@ def example_serve(target=LOCAL_TARGET, funnel=False):
 
 
 def connected():
-    return '{"BackendState":"Running","Self":{"DNSName":"devstack.example.ts.net."}}'
+    return '{"BackendState":"Running","Self":{"DNSName":"devstack.example.ts.net.","ID":"n-devstack"},"CurrentTailnet":{"Name":"example.ts.net"}}'
 
 
 class PrivateAccessTests(unittest.TestCase):
+    def setUp(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = patch.dict(os.environ, {
+            "DEVSTACK_TAILSCALE_IDENTITY": self.tmp.name + "/identity.json"
+        })
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
     def test_authenticated_hostname(self):
         self.assertEqual(
             connected_hostname(parse_json(connected())),
@@ -91,6 +105,38 @@ class PrivateAccessTests(unittest.TestCase):
         self.assertIn("Awaiting", finish_if_connected())
         configure.assert_not_called()
 
+
+class IdentityPinTests(unittest.TestCase):
+    def test_pins_first_identity_and_refuses_reenrollment(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from scripts.private_access import pin_initial_identity
+        import os
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "identity.json"
+            status = json.loads(connected())
+            with patch.dict(os.environ, {"DEVSTACK_TAILSCALE_IDENTITY": str(target)}):
+                pin_initial_identity(status)
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+                pin_initial_identity(status)
+                status["CurrentTailnet"]["Name"] = "other.ts.net"
+                with self.assertRaisesRegex(PrivateAccessError, "changed"):
+                    pin_initial_identity(status)
+
+    def test_incomplete_identity_fails_closed(self):
+        import tempfile
+        import os
+        from unittest.mock import patch
+        from scripts.private_access import pin_initial_identity
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {
+                "DEVSTACK_TAILSCALE_IDENTITY": directory + "/pin.json"
+            }):
+                with self.assertRaises(PrivateAccessError):
+                    pin_initial_identity({"Self": {"DNSName": "test.ts.net"}})
 
 
 if __name__ == "__main__":

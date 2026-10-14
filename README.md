@@ -160,3 +160,39 @@ open port 8765.
 
 The Tailscale installation is optional: Devstack remains cloud/provider
 agnostic and can use any separately authenticated, encrypted private proxy.
+
+## Preferred first setup: automatic install, browser approval
+
+**No Tailscale key is required.** Use `DEVSTACK_TAILSCALE=1` during Ubuntu
+cloud-init. The installer starts Tailscale and prints an initial login URL to
+the host's startup output (usually the cloud-init output log; availability in
+the cloud provider's console varies by provider). It uses a **bounded**
+authentication wait so provisioning can finish without waiting for you.
+
+Open the login URL from the **trusted cloud-provider console** on your phone,
+sign into **your** Tailscale account, and approve the new machine. Turn on
+Tailscale **device approval** in your tailnet beforehand if you want an
+additional administrator approval gate. Once registered, an independent
+`systemd` timer completes **private** HTTPS Serve. You can find its final
+device DNS name in Tailscale's Machines page. A separate consent to enable
+HTTPS certificates for Serve may be required in the Tailscale admin console.
+
+For cloud-init scripts, after reviewing the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh \
+  | sudo env DEVSTACK_TAILSCALE=1 bash
+```
+
+The first successful registration pins the device identity and tailnet in
+`/var/lib/devstack/tailscale-identity.json`. Subsequent runs refuse a
+different device/tailnet and do not automatically re-enroll a disconnected
+device. Recovery must be handled from a separately trusted server console.
+
+**Limitations:** This is trust-on-first-use, not cryptographic attestation.
+Anyone with administrative access to a fresh VM or its bootstrap logs before
+you claim it could interfere. You must verify that the machine joins your
+intended tailnet before using it. A bootstrap browser authorization link is
+not itself a Devstack dashboard or a substitute for authenticated first
+contact. The credential-file flow remains an **advanced pre-provisioned-key
+alternative**, not the default.
