@@ -228,3 +228,22 @@ inbound TCP/80 AWS security-group rule after activation.
 
 See [one-time HTTP onboarding](docs/one-time-http-onboarding.md) for the
 cloud-init script, limitations, and security precautions.
+
+## Updating the temporary HTTP activation page
+
+Starting with v0.1.2, the onboarding systemd service loads its code from the
+**active release checkout**, and the release updater restarts an active
+bootstrap service after each successful update. The ordinary update timer
+checks releases every ~30–35 minutes.
+
+**Important for already-provisioned v0.1.1 VMs:** The existing service
+references a separately copied file outside the versioned application.
+Automatic app updates **cannot** update that HTTP portal. You must perform
+a one-time reinstall of the service units using a trusted recovery channel
+(e.g. AWS Systems Manager Run Command, if already configured), or replace
+the disposable instance. After that, future bootstrap fixes will be delivered
+through normal verified releases. Never expose the full Devstack dashboard
+to the public Internet to recover access.
+
+The post-secret success view now provides an explicit Tailscale authorization
+link instead of depending on cross-site POST redirection in mobile browsers.

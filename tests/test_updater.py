@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, call
 
 from scripts import updater
 
@@ -47,7 +47,13 @@ class DeploymentTests(unittest.TestCase):
             status = updater.activate("v1.0.0", "rafaelpivato/devstack", root, state)
             self.assertIn("Activated", status)
             self.assertEqual(updater.current_release(root / "current"), release)
-            execute.assert_called_once_with("systemctl", "restart", "devstack.service", timeout=30)
+            self.assertEqual(
+                execute.call_args_list,
+                [
+                    call("systemctl", "restart", "devstack.service", timeout=30),
+                    unittest.mock.call("systemctl", "try-restart", "devstack-bootstrap.service", timeout=30),
+                ],
+            )
 
     @patch("scripts.updater.subprocess.run")
     @patch("scripts.updater.execute")

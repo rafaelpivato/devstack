@@ -75,10 +75,13 @@ class BootstrapTests(unittest.TestCase):
                         conn.request("POST", "/activate", payload,
                                      {"Content-Type": "application/x-www-form-urlencoded"})
                         response = conn.getresponse()
-                        self.assertEqual(response.status, 303)
-                        self.assertEqual(
-                            response.getheader("Location"),
-                            "https://login.tailscale.com/a/abc123",
+                        self.assertEqual(response.status, 200)
+                        html = response.read()
+                        self.assertIn(b"Setup code accepted", html)
+                        self.assertIn(b"Continue to Tailscale", html)
+                        self.assertIn(
+                            b'https://login.tailscale.com/a/abc123',
+                            html,
                         )
                         conn.close()
         finally:

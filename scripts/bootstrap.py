@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
 import os
@@ -125,11 +126,27 @@ listed in Tailscale Machines. Never enter your Tailscale password here.</small>
             self.wfile.write(b"Authentication URL not yet available. Check Tailscale setup.")
             return
         FAILURES.pop(ip, None)
-        self.send_response(303)
-        self.send_header("Location", url)
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.end_headers()
+        # Don't rely on cross-site POST redirects on mobile browsers.
+        # Render a clear, tappable link so successful validation is visible.
+        safe_url = escape(url, quote=True)
+        html = (
+            '<!doctype html><html lang="en"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Authorize Devstack</title>'
+            '<style>body{font:16px system-ui,sans-serif;max-width:31rem;'
+            'margin:3rem auto;padding:0 1rem;line-height:1.6}'
+            'a{display:block;padding:1rem;border:1px solid;'
+            'border-radius:.5rem;text-align:center}</style>'
+            '<h1>Setup code accepted</h1>'
+            '<p>Open the official Tailscale website to authorize this server.</p>'
+            f'<a href="{safe_url}" rel="noreferrer noopener">'
+            'Continue to Tailscale</a>'
+            '<p>After approving the device, find your private HTTPS address '
+            'in the Tailscale Machines page. Do not enter your setup code '
+            'or Tailscale credentials into any other website.</p></html>'
+        )
+        self.send_protected_headers(200)
+        self.wfile.write(html.encode("utf-8"))
 
     def log_message(self, format: str, *args: object) -> None:
         # Never log form values, query strings, or the authorization URL.
