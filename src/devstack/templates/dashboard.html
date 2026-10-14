@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Devstack</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}
+body{max-width:860px;margin:auto;padding:20px 14px;background:#10151c;color:#eaf0f5}
+header,.heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+small,aside{color:#9caaba} .card{background:#1b2530;border:1px solid #344251;border-radius:14px;margin:16px 0;padding:16px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
+button,input{font:inherit;border-radius:8px;padding:9px 12px}
+button{border:0;background:#3d75bf;color:white;cursor:pointer}
+button.secondary{background:#354354}button.stop{background:#78404a}
+input{max-width:150px;border:1px solid #455564;background:#10151c;color:white}
+form{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+a{color:#9dccff}p{line-height:1.5} .message{padding:12px;border-radius:8px;background:#354354}
+.message.error{background:#63333d}.repo{padding:8px 0;border-top:1px solid #354354}
+.status{font-size:.85rem;color:#b9cadb} h1{margin-bottom:0}h3{margin-bottom:6px}
+</style></head><body>
+<header><div><h1>Devstack</h1><small>Remote development control</small></div><small>Local/private access only</small></header>
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for kind,message in messages %}<p role="status" class="message {{kind}}">{{message}}</p>{% endfor %}
+{% endwith %}
+{% if not rows %}
+<section class="card"><h2>No projects configured</h2>
+<p>Add projects to <code>~/.config/devstack/projects.toml</code> (or set <code>DEVSTACK_CONFIG</code>).</p>
+</section>
+{% endif %}
+{% for project, services, repos in rows %}
+<section class="card">
+<div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ services|length }} services</small></div>
+<div class="row">
+{% for action,label,style in [('start','Start',''),('stop','Stop','stop'),('update','Update repos','secondary')] %}
+<form method="post" action="{{url_for('operate',name=project.name,action=action)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button class="{{style}}" type="submit">{{label}}</button></form>
+{% endfor %}
+</div>
+<h3>Services</h3>
+{% for name,status in services %}
+<div class="row"><strong>{{name}}</strong><span class="status">{{status}}</span>
+<a href="{{url_for('logs',name=project.name,service_name=name)}}">View logs</a></div>
+{% else %}<p class="status">No services configured</p>{% endfor %}
+<h3>Repositories</h3>
+{% for name,branch,dirty in repos %}
+<div class="repo"><div class="row"><strong>{{name}}</strong><small>{{branch}}{% if dirty %} · modified{% endif %}</small></div>
+<form method="post" action="{{url_for('switch',name=project.name,repo_name=name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<input aria-label="New branch for {{name}}" name="branch" placeholder="Branch name" required>
+<button type="submit" class="secondary">Switch</button></form></div>
+{% else %}<p class="status">No repositories configured</p>{% endfor %}
+</section>
+{% endfor %}
+</body></html>

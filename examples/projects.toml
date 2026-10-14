@@ -1,0 +1,26 @@
+# Copy to ~/.config/devstack/projects.toml and edit paths.
+# Repositories and services are explicit and intentionally separate.
+
+[[projects]]
+name = "trusted-outreach"
+
+[[projects.repos]]
+name = "beacon-django"
+path = "/home/dev/work/trusted-outreach/beacon-django"
+
+[[projects.repos]]
+name = "beacon-cloud"
+path = "/home/dev/work/trusted-outreach/beacon-cloud"
+
+# Optional: a Docker Compose-based development stack.
+[[projects.services]]
+name = "web"
+kind = "compose"
+cwd = "/home/dev/work/trusted-outreach/beacon-django"
+compose_file = "compose.dev.yml"
+
+# Alternatively, for a service supervised by a user-level systemd unit:
+# [[projects.services]]
+# name = "worker"
+# kind = "systemd"
+# unit = "dev-worker.service"

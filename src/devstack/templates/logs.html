@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{service.name}} logs · Devstack</title><style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif}
+body{max-width:960px;margin:auto;padding:16px;background:#10151c;color:#eaf0f5}
+a{color:#9dccff}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1b2530;padding:12px;border-radius:10px;font-size:12px}
+</style></head><body>
+<a href="{{url_for('index')}}">← Projects</a>
+<h2>{{project.name}} / {{service.name}}</h2>
+<p>Last 100 log lines · <a href="">Refresh</a></p>
+<pre>{{output}}</pre>
+</body></html>
