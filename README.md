@@ -114,3 +114,49 @@ It requires operator review of releases. A failed first install has no previous
 release to roll back to and leaves the web service stopped. The independent
 updater is updated by re-running a reviewed installer, not automatically with
 every application release.
+
+
+## Optional private iPhone access (Tailscale Serve)
+
+Devstack continues to listen **only** on `127.0.0.1:8765`. No public cloud
+ports, reverse proxy, custom domain, or app login are required for a private
+single-user MVP. The private network provides the access boundary; **all users
+and devices permitted by your Tailscale ACL/grants may reach this administrative
+interface**, so restrict permissions to yourself. Do not use Tailscale Funnel,
+which publishes the service to the public Internet.
+
+After installing Devstack on an Ubuntu VM (and publishing the first stable
+release), run this **once interactively** from the VM:
+
+```bash
+sudo /usr/local/lib/devstack/enable-tailscale.sh
+```
+
+This optional script installs Tailscale from its official signed Ubuntu APT
+repository if needed, guides you through Tailscale sign-in, then configures a
+private HTTPS reverse proxy to the existing local application. The script
+refuses to overwrite other Serve/Funnel configurations. You can also connect
+Tailscale manually and run
+`sudo python3 /usr/local/lib/devstack/private_access.py`.
+
+On the iPhone:
+
+1. Install the official Tailscale iOS app and sign in to the **same tailnet**.
+2. Enable Tailscale VPN in the iPhone app.
+3. Open the printed `https://<device>.<tailnet>.ts.net/` URL in Safari.
+
+Tailscale's Serve publishes tailnet-only HTTPS with managed TLS certificates.
+The main installation enables Secure session cookies for browser access via
+HTTPS. App sessions do not confer authorization independently; access is
+controlled by your Tailscale network and its explicit device/user policies.
+
+**Recovery independent of the dashboard:** You can inspect
+`sudo tailscale serve status`, `sudo tailscale status`,
+`sudo systemctl status devstack`, and
+`sudo journalctl -u devstack --no-pager -n 100` from a rescue console.
+If Tailscale is not connected, private access will be unavailable without
+affecting the local Devstack process. Do not configure cloud firewalls to
+open port 8765.
+
+The Tailscale installation is optional: Devstack remains cloud/provider
+agnostic and can use any separately authenticated, encrypted private proxy.
