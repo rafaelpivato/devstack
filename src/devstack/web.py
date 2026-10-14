@@ -7,6 +7,10 @@ import secrets
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 
+from .update_control import (
+    UpdateControlError, installed_version, latest_version, update_state,
+    check_request_directory, request_update,
+)
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
 
@@ -63,6 +67,32 @@ def create_app(config: dict | None = None) -> Flask:
                     repos.append((r.name, f"Unavailable: {exc}", False))
             rows.append((p, services, repos))
         return render_template("dashboard.html", rows=rows, csrf=token())
+
+    @app.get("/api/devstack/update-status")
+    def devstack_update_status():
+        """Polling endpoint; GitHub outages never prevent showing local state."""
+        status = update_state()
+        status["installed"] = installed_version()
+        try:
+            status["latest"] = latest_version()
+        except UpdateControlError as exc:
+            status["latest"] = None
+            status["release_error"] = str(exc)
+        try:
+            check_request_directory()
+            status["manual_available"] = True
+        except UpdateControlError as exc:
+            status["manual_available"] = False
+            status["setup_error"] = str(exc)
+        return status
+
+    @app.post("/api/devstack/update-now")
+    def devstack_update_now():
+        try:
+            message = request_update()
+        except UpdateControlError as exc:
+            return {"ok": False, "message": str(exc)}, 503
+        return {"ok": True, "message": message}, 202
 
     @app.get("/settings/github")
     def github_settings():

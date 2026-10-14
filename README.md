@@ -273,3 +273,43 @@ the dashboard's service editor is a separate future feature.
 
 Both SSH and HTTPS GitHub repository URLs are accepted, but cloning always
 uses GitHub SSH authentication and never embeds secrets in remote URLs.
+
+## Manual Update Now (v0.1.4)
+
+The dashboard has a **Devstack updates** panel showing the installed package
+version, GitHub's latest stable release, and systemd updater state. Press
+**Check & update now** to immediately request the existing independently
+supervised updater, which performs the usual health check and rollback.
+The normal ~30-35-minute timer continues as a fallback.
+
+The Flask service runs as the unprivileged `devstack` user and cannot run
+`sudo` or `systemctl start`. Instead, the service creates only an empty,
+private marker in its systemd-owned `RuntimeDirectory`. PID 1 watches that
+marker with a narrowly defined `devstack-update-request.path` unit. A
+root-owned oneshot removes the marker, then invokes only
+`systemctl --no-block start devstack-update.service`. There is **no
+user-controlled command, argument, path or release tag**. The existing updater
+serializes update attempts via `/var/lib/devstack/update.lock`.
+
+### One-time activation on an existing installation
+
+**Important:** The independent installer and systemd units live outside
+versioned releases and are not automatically upgraded by the release updater.
+After v0.1.4 is published and installed, run the following once in a
+**trusted root shell** (EC2 Instance Connect is suitable), after reviewing
+the current installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh | sudo bash
+```
+
+That refreshes the service units, restarts the already running dashboard to
+activate its private runtime directory, and enables the marker watcher.
+**Do not supply DEVSTACK_BOOTSTRAP_SECRET or DEVSTACK_TAILSCALE=1** when
+refreshing an already enrolled instance. The existing Tailscale identity and
+project settings remain intact. Before that activation, the dashboard will
+explain why the manual update button is disabled.
+
+The live status is advisory; a root-level update failure will show a failure
+indicator, while detailed logs remain in
+`sudo journalctl -u devstack-update.service --no-pager -n 100`.
