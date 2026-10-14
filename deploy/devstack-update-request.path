@@ -1,7 +1,6 @@
 [Unit]
 Description=Watch for a Devstack dashboard update request
 After=devstack.service
-Requires=devstack.service
 
 [Path]
 PathExists=/run/devstack-update-request/trigger
