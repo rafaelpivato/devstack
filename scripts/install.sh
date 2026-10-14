@@ -90,3 +90,9 @@ echo "For optional, interactive private HTTPS setup, run:"
 echo "  sudo /usr/local/lib/devstack/enable-tailscale.sh"
 echo "Do not publicly expose port 8765."
 echo "Logs: journalctl -u devstack -u devstack-update --no-pager -n 100"
+
+# Opt-in unattended Tailscale setup. The auth key must have been provisioned
+# separately into a root-only file before running cloud-init/user-data.
+if [[ "${DEVSTACK_TAILSCALE:-0}" == "1" ]]; then
+  TAILSCALE_NONINTERACTIVE=1 /usr/local/lib/devstack/enable-tailscale.sh
+fi
