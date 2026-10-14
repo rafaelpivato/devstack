@@ -64,3 +64,53 @@ Specify a different config with `DEVSTACK_CONFIG=/path/to/projects.toml`.
 3. Independently supervised, release-based self-update with health check and rollback.
 4. Project previews and browser-side error reporting.
 5. Optional carefully scoped ChatGPT integration.
+
+## Portable Ubuntu install and independent release updates
+
+**Deployment is not enabled until a stable GitHub Release exists.** The installer,
+user-service configuration and independent updater are being developed and
+reviewed in a PR. Only install after that PR is merged and a tested release is
+published. Use a fresh **Ubuntu 24.04 LTS** instance.
+
+To bootstrap on a **trusted private server**, in cloud-init user data or an
+interactive root shell:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh | sudo bash
+```
+
+This command executes code from GitHub with elevated privileges. Inspect the
+installer first, or pin its URL to a reviewed commit SHA for a stronger
+supply-chain boundary. User-data support depends on the provider's cloud-init
+configuration. The same command can be run on any Ubuntu VM.
+
+The installer provisions the non-root `devstack` service account, persistent
+application environment, `devstack.service`, and a **separate**, root-owned
+`devstack-update.service` plus `devstack-update.timer`. The web app binds
+**only to 127.0.0.1:8765**; no public HTTP/HTTPS exposure or login is configured.
+Private authenticated access (for instance via a private tunnel) must be set up
+separately before accessing it from an iPhone.
+
+Releases must be tagged `vMAJOR.MINOR.PATCH` and published as stable GitHub
+Releases. Release publishing has its own CI job that runs the unit tests.
+A periodic timer checks the latest stable release and installs it into
+`/opt/devstack/releases/<tag>`, then atomically swaps the `current` symlink,
+restarts the service and verifies `/healthz`. On failure it restores the
+previous version and records that the failed tag should not be retried
+automatically. The updater itself is outside the versioned application path.
+
+Useful host-level recovery commands (do not depend on Devstack working):
+
+```bash
+sudo systemctl status devstack devstack-update.timer
+sudo journalctl -u devstack -u devstack-update --no-pager -n 100
+sudo systemctl start devstack-update.service
+```
+
+**Deliberate limitations:** This initial release system does not manage
+databases or reversible migrations, public authentication, HTTPS, cloud
+firewall policies, application preview ports or user-project process permissions.
+It requires operator review of releases. A failed first install has no previous
+release to roll back to and leaves the web service stopped. The independent
+updater is updated by re-running a reviewed installer, not automatically with
+every application release.
