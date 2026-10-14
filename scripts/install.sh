@@ -51,6 +51,10 @@ if [[ ! -f /etc/devstack/app.env ]]; then
     "$secret" "$home" > /etc/devstack/app.env
   chmod 0600 /etc/devstack/app.env
 fi
+# Preserve existing settings while hardening sessions for HTTPS access.
+if ! grep -q '^DEVSTACK_SECURE_COOKIES=' /etc/devstack/app.env; then
+  printf 'DEVSTACK_SECURE_COOKIES=1\\n' >> /etc/devstack/app.env
+fi
 if [[ ! -f /etc/devstack/update.env ]]; then
   printf 'DEVSTACK_ROOT=/opt/devstack\nDEVSTACK_STATE=/var/lib/devstack\nDEVSTACK_REPO=%s\n' \
     "$repo" > /etc/devstack/update.env
