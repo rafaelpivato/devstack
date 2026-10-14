@@ -12,19 +12,31 @@ button,input{font:inherit;border-radius:8px;padding:9px 12px}
 button{border:0;background:#3d75bf;color:white;cursor:pointer}
 button.secondary{background:#354354}button.stop{background:#78404a}
 input{max-width:150px;border:1px solid #455564;background:#10151c;color:white}
+input.wide{max-width:520px;width:100%} form.stacked{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+form.stacked input{box-sizing:border-box} label{color:#dbe5ef}
+
 form{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 a{color:#9dccff}p{line-height:1.5} .message{padding:12px;border-radius:8px;background:#354354}
 .message.error{background:#63333d}.repo{padding:8px 0;border-top:1px solid #354354}
 .status{font-size:.85rem;color:#b9cadb} h1{margin-bottom:0}h3{margin-bottom:6px}
 </style></head><body>
-<header><div><h1>Devstack</h1><small>Remote development control</small></div><small>Local/private access only</small></header>
+<header><div><h1>Devstack</h1><small>Remote development control</small></div><div><small>Tailnet/private only</small><p><a href="{{url_for('github_settings')}}">GitHub SSH settings</a></p></div></header>
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% for kind,message in messages %}<p role="status" class="message {{kind}}">{{message}}</p>{% endfor %}
 {% endwith %}
-{% if not rows %}
-<section class="card"><h2>No projects configured</h2>
-<p>Add projects to <code>~/.config/devstack/projects.toml</code> (or set <code>DEVSTACK_CONFIG</code>).</p>
+<section class="card">
+<h2>Create project</h2>
+<p>Projects can contain multiple independent GitHub repositories and services.
+Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a> before cloning private repos.</p>
+<form method="post" action="{{url_for('project_create')}}" class="stacked">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label for="new-project-name">Project name</label>
+<input id="new-project-name" class="wide" name="name" placeholder="my-project" maxlength="80" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]*">
+<button type="submit">Create project</button>
+</form>
 </section>
+{% if not rows %}
+<section class="card"><h2>No projects configured</h2><p>Create your first project above.</p></section>
 {% endif %}
 {% for project, services, repos in rows %}
 <section class="card">
@@ -49,6 +61,18 @@ a{color:#9dccff}p{line-height:1.5} .message{padding:12px;border-radius:8px;backg
 <input aria-label="New branch for {{name}}" name="branch" placeholder="Branch name" required>
 <button type="submit" class="secondary">Switch</button></form></div>
 {% else %}<p class="status">No repositories configured</p>{% endfor %}
+<h3>Add GitHub repository</h3>
+<p class="status">Each repository has its own branch. Clone URLs can be SSH or HTTPS from github.com; Devstack uses its dedicated SSH identity.</p>
+<form method="post" class="stacked" action="{{url_for('repo_add',name=project.name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label for="repo-url-{{loop.index}}">GitHub repository URL</label>
+<input id="repo-url-{{loop.index}}" name="url" class="wide" type="text" placeholder="git@github.com:owner/repo.git" required>
+<label>Repository label (optional)</label>
+<input name="name" class="wide" placeholder="Defaults to repository name">
+<label>Initial branch (optional)</label>
+<input name="branch" class="wide" placeholder="Defaults to repository default">
+<button type="submit">Clone repository</button>
+</form>
 </section>
 {% endfor %}
 </body></html>
