@@ -39,8 +39,10 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.before_request
     def protect_writes():
-        if request.method == "POST" and not secrets.compare_digest(
-            str(session.get("_csrf", "")), str(request.form.get("_csrf", ""))
+        if request.method == "POST" and (
+            not session.get("_csrf")
+            or not request.form.get("_csrf")
+            or not secrets.compare_digest(session["_csrf"], request.form["_csrf"])
         ):
             abort(403)
 
