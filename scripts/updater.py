@@ -151,6 +151,13 @@ def activate(
         )
         failed.write_text(str(exc)[:1000] + "\n", encoding="utf-8")
         raise RuntimeError(f"Update to {tag} failed, restored previous release: {exc}") from exc
+    # The public first-use portal is independent from the Flask app. If it is
+    # running, reload it from the same reviewed release as the main service.
+    # The unit points at /opt/devstack/current/source/scripts/bootstrap.py.
+    try:
+        execute("systemctl", "try-restart", "devstack-bootstrap.service", timeout=30)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        print(f"Devstack bootstrap reload warning: {exc}", file=sys.stderr, flush=True)
     return f"Activated {tag}"
 
 
