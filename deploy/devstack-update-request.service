@@ -1,0 +1,11 @@
+[Unit]
+Description=Dispatch a Devstack manual update request without granting app privileges
+After=devstack.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStartPre=/usr/bin/rm -f /run/devstack-update-request/trigger
+ExecStart=/usr/bin/systemctl --no-block start devstack-update.service
+NoNewPrivileges=true
+PrivateTmp=true

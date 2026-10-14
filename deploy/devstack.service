@@ -12,6 +12,11 @@ Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+# A dedicated, private runtime path is the only IPC surface the app can write.
+# PID 1 watches for a marker; the app cannot invoke the root updater itself.
+RuntimeDirectory=devstack-update-request
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
 UMask=0077
 
 [Install]

@@ -55,6 +55,9 @@ fi
 if ! grep -q '^DEVSTACK_SECURE_COOKIES=' /etc/devstack/app.env; then
   printf 'DEVSTACK_SECURE_COOKIES=1\n' >> /etc/devstack/app.env
 fi
+if ! grep -q '^DEVSTACK_RELEASE_REPO=' /etc/devstack/app.env; then
+  printf 'DEVSTACK_RELEASE_REPO=%s\n' "$repo" >> /etc/devstack/app.env
+fi
 if [[ ! -f /etc/devstack/update.env ]]; then
   printf 'DEVSTACK_ROOT=/opt/devstack\nDEVSTACK_STATE=/var/lib/devstack\nDEVSTACK_REPO=%s\n' \
     "$repo" > /etc/devstack/update.env
@@ -64,7 +67,7 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 base="https://raw.githubusercontent.com/$repo/main"
-for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh scripts/bootstrap.py deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer deploy/devstack-bootstrap.service; do
+for item in scripts/updater.py scripts/private_access.py scripts/enable-tailscale.sh scripts/bootstrap.py deploy/devstack.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-update-request.service deploy/devstack-update-request.path deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer deploy/devstack-bootstrap.service; do
   curl --fail --silent --show-error --location --retry 3 "$base/$item" \
     --output "$tmpdir/$(basename "$item")"
 done
@@ -76,6 +79,8 @@ sed -e "s|@DEVSTACK_USER@|$user|g" -e "s|@DEVSTACK_HOME@|$home|g" \
   "$tmpdir/devstack.service" > /etc/systemd/system/devstack.service
 install -m 0644 "$tmpdir/devstack-update.service" /etc/systemd/system/devstack-update.service
 install -m 0644 "$tmpdir/devstack-update.timer" /etc/systemd/system/devstack-update.timer
+install -m 0644 "$tmpdir/devstack-update-request.service" /etc/systemd/system/devstack-update-request.service
+install -m 0644 "$tmpdir/devstack-update-request.path" /etc/systemd/system/devstack-update-request.path
 install -m 0644 "$tmpdir/devstack-tailscale-finish.service" /etc/systemd/system/devstack-tailscale-finish.service
 install -m 0644 "$tmpdir/devstack-tailscale-finish.timer" /etc/systemd/system/devstack-tailscale-finish.timer
 install -m 0644 "$tmpdir/devstack-bootstrap.service" /etc/systemd/system/devstack-bootstrap.service
@@ -88,6 +93,14 @@ if ! systemctl start devstack-update.service; then
   echo "No working release installed yet (or update failed). See updater journal." >&2
   echo "The timer will retry when a valid stable GitHub release exists." >&2
 fi
+
+# Updating a running host replaces its service unit, but an "already running"
+# release does not restart the application. Restart here to activate
+# RuntimeDirectory and its new watcher without waiting for another release.
+if systemctl is-active --quiet devstack.service; then
+  systemctl restart devstack.service
+fi
+systemctl enable --now devstack-update-request.path
 
 echo "Devstack installed. Dashboard listens on 127.0.0.1:8765 only."
 echo "For optional, interactive private HTTPS setup, run:"
