@@ -464,6 +464,7 @@ def work(project: str, identifier: str) -> int:
     image = entry.get("image") or ""
     network = entry.get("network", "none")
     task = _task("worker", service, mode, list(argv), image=image, network=network)
+    from . import runtime
     container_name = ("devstack-task-" + identifier) if (mode == "run" or image) else None
     result = 1
     status = "failed"
@@ -488,7 +489,6 @@ def work(project: str, identifier: str) -> int:
                             ["run", "--rm", "--no-deps", "-T",
                              "--name", container_name, service, *argv])
                     args = compose_command(project) + tail
-                from . import runtime
                 with runtime.admit(project):
                     latest = _record(meta)
                     if (marker.exists() or latest.get("id") != identifier or
