@@ -155,6 +155,7 @@ jobs:
                   patch.object(docker_stacks, "compose_command", return_value=cmd),
                   patch.object(docker_stacks, "compose_name", return_value="devstack-smoke"),
                   patch.object(command_runner, "compose_name", return_value="devstack-smoke"),
+                  patch.object(command_runner, "project_root", return_value=Path.cwd()),
                   patch.object(docker_stacks, "project_root", return_value=Path.cwd()),
               ):
                   runtime._write({"phase": "active", "project": name})
