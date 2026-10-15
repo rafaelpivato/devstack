@@ -1,0 +1,19 @@
+[Unit]
+Description=Devstack webhook ingress (loopback listener, Funnel opt-in)
+After=network.target devstack.service docker.service
+PartOf=devstack.service
+
+[Service]
+Type=simple
+User=@DEVSTACK_USER@
+EnvironmentFile=/etc/devstack/app.env
+WorkingDirectory=@DEVSTACK_HOME@
+ExecStart=/opt/devstack/current/venv/bin/gunicorn --bind 127.0.0.1:8767 --workers 1 --threads 6 --timeout 30 'devstack.webhooks:create_webhook_app()'
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
