@@ -98,7 +98,9 @@ Scheduled checks continue in the background.</small></p>
 <div class="app-row">
 <div class="row"><strong>{{app.name}}</strong>
 <span class="app-status {{status}}">{{status}}</span>
-<small>{{app.service}}{% if app.port %} · container port {{app.port}}{% endif %}</small></div>
+<small>{{app.service}}{% if app.port %} · container port {{app.port}}{% endif %}</small>
+{% set url = preview_link(project.name, app) %}
+{% if url %}<a href="{{url}}" target="_blank" rel="noopener noreferrer">Private preview ↗</a>{% endif %}</div>
 <details><summary>Edit application</summary>
 <form method="post" action="{{url_for('application_edit', name=project.name, app_name=app.name)}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
