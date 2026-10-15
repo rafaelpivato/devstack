@@ -75,19 +75,19 @@ fi
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 base="https://raw.githubusercontent.com/$repo/main"
-for item in scripts/updater.py scripts/private_access.py scripts/enable-previews.py scripts/enable-tailscale.sh scripts/bootstrap.py deploy/devstack.service deploy/devstack-preview.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-update-request.service deploy/devstack-update-request.path deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer deploy/devstack-bootstrap.service; do
+for item in scripts/updater.py scripts/private_access.py scripts/webhook_funnel.py scripts/enable-tailscale.sh scripts/bootstrap.py deploy/devstack.service deploy/devstack-webhooks.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-update-request.service deploy/devstack-update-request.path deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer deploy/devstack-bootstrap.service; do
   curl --fail --silent --show-error --location --retry 3 "$base/$item" \
     --output "$tmpdir/$(basename "$item")"
 done
 install -m 0644 "$tmpdir/updater.py" /usr/local/lib/devstack/updater.py
 install -m 0644 "$tmpdir/private_access.py" /usr/local/lib/devstack/private_access.py
-install -m 0755 "$tmpdir/enable-previews.py" /usr/local/lib/devstack/enable-previews.py
+install -m 0755 "$tmpdir/webhook_funnel.py" /usr/local/lib/devstack/webhook_funnel.py
 install -m 0755 "$tmpdir/enable-tailscale.sh" /usr/local/lib/devstack/enable-tailscale.sh
 install -m 0755 "$tmpdir/bootstrap.py" /usr/local/lib/devstack/bootstrap.py
 sed -e "s|@DEVSTACK_USER@|$user|g" -e "s|@DEVSTACK_HOME@|$home|g" \
   "$tmpdir/devstack.service" > /etc/systemd/system/devstack.service
 sed -e "s|@DEVSTACK_USER@|$user|g" -e "s|@DEVSTACK_HOME@|$home|g" \
-  "$tmpdir/devstack-preview.service" > /etc/systemd/system/devstack-preview.service
+  "$tmpdir/devstack-webhooks.service" > /etc/systemd/system/devstack-webhooks.service
 install -m 0644 "$tmpdir/devstack-update.service" /etc/systemd/system/devstack-update.service
 install -m 0644 "$tmpdir/devstack-update.timer" /etc/systemd/system/devstack-update.timer
 install -m 0644 "$tmpdir/devstack-update-request.service" /etc/systemd/system/devstack-update-request.service
@@ -99,9 +99,8 @@ install -m 0644 "$tmpdir/devstack-bootstrap.service" /etc/systemd/system/devstac
 # App service is enabled but starts only after a valid release is installed.
 systemctl daemon-reload
 systemctl enable devstack.service
-# Private preview proxy listens only on localhost until explicitly configured
-# with Tailscale Serve. PartOf ensures restarts track release activation.
-systemctl enable devstack-preview.service
+# Webhook-only ingress listens on loopback; no Funnel is enabled automatically.
+systemctl enable devstack-webhooks.service
 systemctl enable --now devstack-update.timer
 if ! systemctl start devstack-update.service; then
   echo "No working release installed yet (or update failed). See updater journal." >&2
@@ -115,8 +114,8 @@ fi
 # RuntimeDirectory and its new watcher without waiting for another release.
 if systemctl is-active --quiet devstack.service; then
   systemctl restart devstack.service
-  if ! systemctl start devstack-preview.service; then
-    echo "Private preview listener not yet available; check devstack-preview.service." >&2
+  if ! systemctl start devstack-webhooks.service; then
+    echo "Webhook ingress listener not yet available; check devstack-webhooks.service." >&2
   fi
 fi
 systemctl enable --now devstack-update-request.path
@@ -124,9 +123,9 @@ systemctl enable --now devstack-update-request.path
 echo "Devstack installed. Dashboard listens on 127.0.0.1:8765 only."
 echo "For optional, interactive private HTTPS setup, run:"
 echo "  sudo /usr/local/lib/devstack/enable-tailscale.sh"
-echo "Do not publicly expose ports 8765 or 8766."
-echo "Optional private previews (after enabling Tailscale):"
-echo "  sudo python3 /usr/local/lib/devstack/enable-previews.py"
+echo "Do not publicly expose ports 8765 or 8767."
+echo "Optional public webhook ingress (explicit opt-in only):"
+echo "  sudo python3 /usr/local/lib/devstack/webhook_funnel.py"
 echo "Logs: journalctl -u devstack -u devstack-update --no-pager -n 100"
 
 # Optional short-lived HTTP first-boot portal. The bootstrap secret is
