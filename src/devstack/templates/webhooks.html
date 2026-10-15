@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{project.name}} · Public webhook routes · Devstack</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}
+body{max-width:800px;margin:auto;padding:18px;background:#10151c;color:#eaf0f5}
+section{background:#1b2530;border:1px solid #344251;border-radius:12px;padding:15px;margin:16px 0}
+form.stacked{display:flex;flex-direction:column;gap:10px}
+input,select,button{font:inherit;border-radius:7px;padding:9px;box-sizing:border-box}
+input,select{width:100%;background:#10151c;color:#fff;border:1px solid #455564}
+button{background:#3971b6;border:0;color:white;cursor:pointer}
+button.danger{background:#78404a}
+a{color:#9dccff}small,p{color:#aec0d0;line-height:1.5}
+code{overflow-wrap:anywhere}
+.route{border-top:1px solid #344251;padding:10px 0}
+</style></head><body>
+<p><a href="{{url_for('index')}}">← Dashboard</a></p>
+<h1>{{project.name}} · Public webhooks</h1>
+<p>Only the named POST routes configured here can be forwarded. The Devstack dashboard and all other application paths remain private. Adding a route does <strong>not</strong> enable public access.</p>
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% for kind,message in messages %}<section role="status">{{message}}</section>{% endfor %}
+{% endwith %}
+{% if error %}<section><p>{{error}}</p></section>{% endif %}
+<section>
+<h2>Configured routes</h2>
+{% for hook in routes %}
+<div class="route">
+<strong>{{hook.name}}</strong>
+<p><small>When Funnel is enabled, publish this HTTPS endpoint on port 8443:</small></p>
+<code>/hooks/{{project.name}}/{{hook.name}}</code>
+<p>Forward POST to <code>{{hook.application}} → {{hook.path}}</code></p>
+<form method="post" action="{{url_for('webhooks_remove',name=project.name,route_name=hook.name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button class="danger" type="submit">Remove route</button>
+</form></div>
+{% else %}<p>No public webhook routes configured.</p>{% endfor %}
+</section>
+<section>
+<h2>Add webhook route</h2>
+<form class="stacked" method="post" action="{{url_for('webhooks_add',name=project.name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label>Public route name
+<input name="webhook_name" placeholder="stripe" maxlength="40" required pattern="[a-z0-9][a-z0-9-]*"></label>
+<label>Destination application
+<select name="application" required>
+{% for a in applications %}<option value="{{a.name}}">{{a.name}} · {{a.service}}:{{a.port}}</option>{% endfor %}
+</select></label>
+<label>Exact application POST path
+<input name="path" placeholder="/webhooks/stripe" maxlength="255" required pattern="/[A-Za-z0-9_./-]*"></label>
+<button type="submit" {% if not applications %}disabled{% endif %}>Add route</button>
+</form>
+<p><small>Only registered applications with a declared container port are selectable. The application must verify the provider's webhook signature or token. Routes are not authentication.</small></p>
+</section>
+<section>
+<h2>Public access is a separate decision</h2>
+<p>After installation, an administrator can explicitly enable a webhook-only Tailscale Funnel on HTTPS 8443. This is never enabled by saving a route. It does not expose the dashboard on 443 or ordinary development ports.</p>
+<p><code>sudo python3 /usr/local/lib/devstack/webhook_funnel.py</code></p>
+<p>To disable this public endpoint:</p>
+<p><code>sudo python3 /usr/local/lib/devstack/webhook_funnel.py --disable</code></p>
+</section>
+</body></html>
