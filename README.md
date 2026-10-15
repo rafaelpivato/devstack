@@ -439,3 +439,19 @@ Older explicitly configured `projects.toml` services have a distinct
 the managed Docker stack. Existing project and repository data are preserved.
 This is an ordinary application release; no host installer refresh is needed
 for v0.2.1.
+
+### Keeping the smoke fixture's application list current
+
+New imports of `examples/smoke` contain the bundled
+`.devstack/project.toml`, which registers **Web** (`web:8000`) immediately.
+Existing `smoke` workspaces copied in v0.2.0 do not receive files when the
+Devstack application updates. After upgrading to v0.2.1, use **Refresh smoke
+applications** on the smoke project card. This adds missing bundled application
+entries once, preserving any previously added or customized applications.
+It does not replace Compose YAML or source files, rebuild containers, publish
+ports, or touch PostgreSQL volumes. It is safe to repeat: already registered
+service names and labels are not duplicated.
+
+For this milestone, refreshing a project's complete template or upgrading
+its Compose definition is intentionally **not** automatic. Such migrations
+need explicit review to avoid overwriting local developer changes.
