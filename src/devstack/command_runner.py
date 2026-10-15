@@ -475,7 +475,7 @@ def work(project: str, identifier: str) -> int:
                 else:
                     result = proc.returncode
                     status = "success" if result == 0 else "failed"
-    except (OSError, DockerError, subprocess.TimeoutExpired) as exc:
+    except (OSError, DockerError, CommandError, subprocess.TimeoutExpired):
         with log.open("ab") as stream:
             stream.write(b"\nCommand could not start or terminate cleanly.\n")
     entry["state"] = status
