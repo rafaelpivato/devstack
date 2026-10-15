@@ -29,6 +29,13 @@ class RunnerTests(unittest.TestCase):
         home = patch("devstack.docker_stacks.Path.home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
+        from contextlib import nullcontext
+        admit = patch("devstack.runtime.admit", return_value=nullcontext())
+        admit.start()
+        self.addCleanup(admit.stop)
+        active = patch("devstack.runtime.is_active", return_value=True)
+        active.start()
+        self.addCleanup(active.stop)
 
     def test_saved_tasks_round_trip_without_repo_modifications(self):
         (self.root / "repo").mkdir()

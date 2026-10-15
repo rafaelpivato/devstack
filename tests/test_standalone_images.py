@@ -30,6 +30,13 @@ class StandaloneImageTests(unittest.TestCase):
         h = patch("devstack.docker_stacks.Path.home", return_value=self.home)
         h.start()
         self.addCleanup(h.stop)
+        from contextlib import nullcontext
+        admit = patch("devstack.runtime.admit", return_value=nullcontext())
+        admit.start()
+        self.addCleanup(admit.stop)
+        active = patch("devstack.runtime.is_active", return_value=True)
+        active.start()
+        self.addCleanup(active.stop)
 
     def test_image_task_roundtrip_and_legacy_compose_tasks(self):
         save_task("demo", "lint", "", "run", "python --version",
@@ -79,6 +86,8 @@ class StandaloneImageTests(unittest.TestCase):
         argv = popen.call_args.args[0]
         self.assertEqual(argv, [
             "docker", "run", "--rm", "--name", "devstack-task-" + token,
+            "--label", "devstack.project=" + __import__(
+                "devstack.docker_stacks", fromlist=["compose_name"]).compose_name("demo"),
             "--network", "none", "--security-opt", "no-new-privileges",
             "--cap-drop", "ALL", "python:3.12-alpine",
             "python", "--version",
