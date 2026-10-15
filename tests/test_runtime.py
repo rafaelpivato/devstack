@@ -125,11 +125,28 @@ class RuntimeTests(unittest.TestCase):
                 pass
 
     @patch("devstack.runtime.subprocess.Popen")
-    def test_mutex_blocks_concurrent_activation(self, popen):
-        with runtime._locked():
-            with self.assertRaisesRegex(runtime.RuntimeControlError, "in progress"):
+    def test_mutex_serializes_concurrent_activation(self, popen):
+        import threading
+        finished = threading.Event()
+        errors = []
+
+        def activate():
+            try:
                 runtime.request_transition("activate")
-        popen.assert_not_called()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        with runtime._locked():
+            worker = threading.Thread(target=activate, daemon=True)
+            worker.start()
+            self.assertFalse(finished.wait(timeout=.2))
+            popen.assert_not_called()
+        worker.join(timeout=3)
+        self.assertTrue(finished.is_set())
+        self.assertEqual(errors, [])
+        popen.assert_called_once()
 
     def test_state_corruption_rejected(self):
         (self.root / "runtime.json").write_text('{"phase":"active","project":[]}')
