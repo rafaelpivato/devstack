@@ -24,6 +24,7 @@ from .project_setup import (
 )
 from .applications import ApplicationError, _parse as parse_applications
 from .command_runner import CommandError, _parse_tasks
+from .project_sync import record_initial_baseline
 
 _GITHUB = re.compile(
     r"^/(?P<owner>[A-Za-z0-9-]{1,39})/"
@@ -253,13 +254,17 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
                 if compose is not None:
                     (managed / "compose.yaml").write_text(compose, encoding="utf-8")
                     (managed / "compose.yaml").chmod(0o600)
-                    import_meta = (
-                        "[origin]\n"
-                        f"repository = {json.dumps(repo)}\n"
-                        f"subdirectory = {json.dumps(relative.as_posix() if relative != Path('.') else '')}\n"
-                    )
-                    (managed / "import.toml").write_text(import_meta, encoding="utf-8")
-                    (managed / "import.toml").chmod(0o600)
+                import_meta = (
+                    "[origin]\n"
+                    f"repository = {json.dumps(repo)}\n"
+                    f"subdirectory = {json.dumps(relative.as_posix() if relative != Path('.') else '')}\n"
+                )
+                (managed / "import.toml").write_text(import_meta, encoding="utf-8")
+                (managed / "import.toml").chmod(0o600)
+                record_initial_baseline(
+                    managed,
+                    {"project.toml": content, "tasks.toml": tasks, "compose.yaml": compose},
+                )
                 data["projects"].append({
                     "name": name,
                     "repos": [{"name": repo, "path": str(target)}],
