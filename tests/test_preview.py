@@ -189,5 +189,33 @@ class PreviewTargetTests(unittest.TestCase):
             _container("demo", "web")
 
 
+class PreviewDashboardTests(unittest.TestCase):
+    @patch("devstack.web.source_directory", side_effect=__import__("devstack.project_sync", fromlist=["SyncError"]).SyncError("unlinked"))
+    @patch("devstack.web.compose_states", return_value={"web": "running"})
+    @patch("devstack.web.load_applications", return_value=(
+        Application("Web", "web", 8000),))
+    @patch("devstack.web.load_projects", return_value={"smoke": Project("smoke", (), ())})
+    def test_private_preview_link_uses_separate_8443_origin(self, projects, apps, states, origin):
+        # Link generation must never return arbitrary user-supplied Host destinations.
+        from devstack.web import create_app
+        client = create_app({"TESTING": True}).test_client()
+        response = client.get("/", base_url="https://devstack.example.ts.net")
+        self.assertIn(
+            b"https://devstack.example.ts.net:8443/p/smoke/Web/",
+            response.data,
+        )
+
+    @patch("devstack.web.source_directory", side_effect=__import__("devstack.project_sync", fromlist=["SyncError"]).SyncError("unlinked"))
+    @patch("devstack.web.compose_states", return_value={"web": "running"})
+    @patch("devstack.web.load_applications", return_value=(
+        Application("Web", "web", 8000),))
+    @patch("devstack.web.load_projects", return_value={"smoke": Project("smoke", (), ())})
+    def test_untrusted_host_has_no_preview_link(self, projects, apps, states, origin):
+        from devstack.web import create_app
+        client = create_app({"TESTING": True}).test_client()
+        response = client.get("/", base_url="https://evil.example")
+        self.assertNotIn(b"Private preview", response.data)
+
+
 if __name__ == "__main__":
     unittest.main()
