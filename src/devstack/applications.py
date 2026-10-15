@@ -27,7 +27,7 @@ class ApplicationError(RuntimeError):
 class Application:
     name: str
     service: str
-    port: int
+    port: int | None
 
 
 SERVICE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
@@ -48,12 +48,18 @@ def _valid_service(value: str) -> str:
     return value
 
 
-def _valid_port(value: int | str) -> int:
+def _valid_port(value: int | str | None) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ApplicationError("Container port must be between 1 and 65535")
+    if isinstance(value, str) and (not value.isascii() or not value.isdecimal()):
+        raise ApplicationError("Container port must be between 1 and 65535")
     try:
         port = int(value)
     except (ValueError, TypeError) as exc:
         raise ApplicationError("Container port must be between 1 and 65535") from exc
-    if not 1 <= port <= 65535 or isinstance(value, bool):
+    if not 1 <= port <= 65535:
         raise ApplicationError("Container port must be between 1 and 65535")
     return port
 
@@ -77,15 +83,15 @@ def _parse(content: str) -> tuple[Application, ...]:
     results = []
     names = set()
     for entry in data.get("applications", []):
-        if not isinstance(entry, dict) or set(entry) != {"name", "service", "port"}:
-            raise ApplicationError("Applications require name, service and port fields")
+        if not isinstance(entry, dict) or not {"name", "service"} <= set(entry) or set(entry) - {"name", "service", "port"}:
+            raise ApplicationError("Applications require name and service fields")
         if not isinstance(entry["name"], str) or not isinstance(entry["service"], str):
             raise ApplicationError("Application names and services must be strings")
         name = _valid_name(entry["name"])
         service = _valid_service(entry["service"])
-        if type(entry["port"]) is not int:
+        if "port" in entry and type(entry["port"]) is not int:
             raise ApplicationError("Application port must be an integer")
-        port = _valid_port(entry["port"])
+        port = _valid_port(entry.get("port"))
         if name.casefold() in names:
             raise ApplicationError("Application names must be unique")
         names.add(name.casefold())
@@ -110,8 +116,9 @@ def _render(applications: tuple[Application, ...]) -> str:
     for app in applications:
         lines += ["", "[[applications]]",
                   "name = " + json.dumps(app.name, ensure_ascii=False),
-                  "service = " + json.dumps(app.service),
-                  "port = " + str(app.port)]
+                  "service = " + json.dumps(app.service)]
+        if app.port is not None:
+            lines += ["port = " + str(app.port)]
     return "\n".join(lines) + "\n"
 
 
@@ -150,7 +157,7 @@ def _edit(project: str, callback) -> None:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def add_application(project: str, name: str, service: str, port: int | str) -> None:
+def add_application(project: str, name: str, service: str, port: int | str | None = None) -> None:
     entry = Application(_valid_name(name), _valid_service(service.strip()), _valid_port(port))
 
     def add(before):
@@ -159,6 +166,21 @@ def add_application(project: str, name: str, service: str, port: int | str) -> N
         return (*before, entry)
 
     _edit(project, add)
+
+
+def update_application(project: str, previous_name: str, name: str,
+                       service: str, port: int | str | None = None) -> None:
+    changed = Application(_valid_name(name), _valid_service(service.strip()), _valid_port(port))
+
+    def update(before):
+        if not any(app.name == previous_name for app in before):
+            raise ApplicationError("Application not found")
+        if any(app.name != previous_name and app.name.casefold() == changed.name.casefold()
+               for app in before):
+            raise ApplicationError("An application with that name already exists")
+        return tuple(changed if app.name == previous_name else app for app in before)
+
+    _edit(project, update)
 
 
 def remove_application(project: str, name: str) -> None:
