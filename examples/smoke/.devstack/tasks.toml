@@ -1,0 +1,20 @@
+# Predefined tasks for the disposable smoke example.
+# Run these inside the built web Compose service.
+
+[[tasks]]
+name = "tests"
+service = "web"
+mode = "exec"
+command = ["python", "-m", "unittest", "discover", "-v"]
+
+[[tasks]]
+name = "tests-fresh"
+service = "web"
+mode = "run"
+command = ["python", "-m", "unittest", "discover", "-v"]
+
+[[tasks]]
+name = "python-version"
+service = "web"
+mode = "exec"
+command = ["python", "--version"]

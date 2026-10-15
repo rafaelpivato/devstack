@@ -23,6 +23,7 @@ from .project_setup import (
     ProjectSetupError, _edit, _write_config, checked_name, github_ssh_url,
 )
 from .applications import ApplicationError, _parse as parse_applications
+from .command_runner import CommandError, _parse_tasks
 
 _GITHUB = re.compile(
     r"^/(?P<owner>[A-Za-z0-9-]{1,39})/"
@@ -195,6 +196,18 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
             parse_applications(content)
         except ApplicationError as exc:
             raise ImportError("Invalid project template: " + str(exc)) from exc
+        tasks_file = source_dir / "tasks.toml"
+        tasks = None
+        if tasks_file.is_symlink():
+            raise ImportError("Refusing symlinked task template")
+        if tasks_file.is_file():
+            if tasks_file.stat().st_size > _MAX_CONFIG:
+                raise ImportError("Task file too large")
+            tasks = tasks_file.read_text(encoding="utf-8")
+            try:
+                _parse_tasks(tasks)
+            except CommandError as exc:
+                raise ImportError("Invalid task template: " + str(exc)) from exc
         compose = None
         if compose_file.is_file():
             if compose_file.stat().st_size > _MAX_CONFIG:
@@ -234,6 +247,9 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
                 (dest / ".secrets").mkdir(mode=0o700)
                 (managed / "project.toml").write_text(content, encoding="utf-8")
                 (managed / "project.toml").chmod(0o600)
+                if tasks is not None:
+                    (managed / "tasks.toml").write_text(tasks, encoding="utf-8")
+                    (managed / "tasks.toml").chmod(0o600)
                 if compose is not None:
                     (managed / "compose.yaml").write_text(compose, encoding="utf-8")
                     (managed / "compose.yaml").chmod(0o600)
