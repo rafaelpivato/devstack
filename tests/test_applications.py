@@ -100,10 +100,11 @@ class ApplicationStateTests(unittest.TestCase):
         self.project = "example"
         self.app = Application("API", "api", 8000)
 
+    @patch("devstack.applications.compose_command", return_value=["docker", "compose", "-f", "fake"])
     @patch("devstack.applications.project_root")
     @patch("devstack.applications.compose_path")
     @patch("devstack.applications.subprocess.run")
-    def test_explicit_application_status_from_compose_json(self, run, path, root):
+    def test_explicit_application_status_from_compose_json(self, run, path, root, command):
         path.return_value.is_file.return_value = True
         run.return_value = subprocess.CompletedProcess(
             [], 0, json.dumps([
@@ -120,10 +121,11 @@ class ApplicationStateTests(unittest.TestCase):
         self.assertIn("ps", run.call_args.args[0])
         self.assertNotIn("up", run.call_args.args[0])
 
+    @patch("devstack.applications.compose_command", return_value=["docker", "compose", "-f", "fake"])
     @patch("devstack.applications.project_root")
     @patch("devstack.applications.compose_path")
     @patch("devstack.applications.subprocess.run")
-    def test_ndjson_status_and_unhealthy(self, run, path, root):
+    def test_ndjson_status_and_unhealthy(self, run, path, root, command):
         path.return_value.is_file.return_value = True
         run.return_value = subprocess.CompletedProcess(
             [], 0, '{"Service":"api","State":"running","Health":"unhealthy"}\n'
