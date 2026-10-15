@@ -37,8 +37,9 @@ MAX_APPLICATIONS = 30
 
 def _valid_name(name: str) -> str:
     name = name.strip()
-    if not name or len(name) > 64 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
-        raise ApplicationError("Application name must be 1–64 printable characters")
+    if (not name or len(name) > 64 or "/" in name or "\\" in name
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)):
+        raise ApplicationError("Application name must be 1–64 printable characters without slashes")
     return name
 
 
