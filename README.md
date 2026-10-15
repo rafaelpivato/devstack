@@ -551,3 +551,43 @@ Devstack does not offer arbitrary host-shell execution, public terminal
 access, or webhook-triggered commands in this release. No host installer
 refresh is required for v0.3.0. Private previews and proxy/webhooks remain
 v0.4.0 goals.
+
+### Standalone Docker images (v0.3.0)
+
+The command runner also accepts an image reference **without defining a
+Compose service**. Select **Standalone Docker image**, enter an image like
+`python:3.12-alpine` or `registry.example.com/tool:latest`, and run a
+command; these tasks always create a fresh `docker run --rm` container.
+Saved tasks can use the same feature:
+
+```toml
+[[tasks]]
+name = "python-version"
+image = "python:3.12-alpine"
+command = ["python", "--version"]
+
+[[tasks]]
+name = "redis-ping"
+image = "redis:7-alpine"
+network = "project"
+command = ["redis-cli", "-h", "redis", "ping"]
+```
+
+The default is `network = "none"`, with **no volumes, bind mounts,
+environment variables, secrets or published ports** supplied by Devstack.
+Standalone containers have `--security-opt no-new-privileges` and
+`--cap-drop ALL`. Image-defined users, application behavior and Docker
+daemon privileges still require trusted images and code.
+
+Use `network = "project"` only when the project's **default Compose
+network is already running**. Devstack identifies that specific network
+using Docker Compose labels, not a guessed name. Attached utility
+containers can reach services by Compose DNS names, for example
+`redis:6379`, while still receiving no project files or secrets.
+
+Containers are removed after completion; Devstack retains the stdout,
+stderr, status and exit code in command history. Cancel/timeout attempts
+to remove temporary standalone containers, just as for temporary Compose
+runs. No Compose service is added, and the image is never shown on the
+application dashboard. A future milestone may add opt-in read-only project
+mounts and explicit secret injection, but neither is enabled here.
