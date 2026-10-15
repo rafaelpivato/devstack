@@ -274,3 +274,31 @@ class ApplicationWebTests(unittest.TestCase):
                                     data={"_csrf": self.csrf})
         self.assertEqual(response.status_code, 302)
         sync.assert_called_once_with()
+
+
+class GithubProjectImportWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.import_github_project", return_value=("smoke-git", "main"))
+    def test_import_project_requires_csrf(self, import_project):
+        path = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+        response = self.client.post("/projects/import", data={"url": path})
+        self.assertEqual(response.status_code, 403)
+        import_project.assert_not_called()
+        response = self.client.post("/projects/import", data={
+            "_csrf": self.csrf, "url": path, "name": "smoke-git",
+        })
+        self.assertEqual(response.status_code, 302)
+        import_project.assert_called_once_with(path, "smoke-git")
+
+    @patch("devstack.web.import_github_project")
+    def test_dashboard_shows_import_url_form(self, import_project):
+        response = self.client.get("/")
+        self.assertIn(b"Import GitHub project", response.data)
+        self.assertIn(b"/projects/import", response.data)
+        import_project.assert_not_called()

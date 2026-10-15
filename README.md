@@ -455,3 +455,40 @@ service names and labels are not duplicated.
 For this milestone, refreshing a project's complete template or upgrading
 its Compose definition is intentionally **not** automatic. Such migrations
 need explicit review to avoid overwriting local developer changes.
+
+## Import projects directly from GitHub (v0.2.2)
+
+Use **Import GitHub project** on the private dashboard and paste either
+`https://github.com/rafaelpivato/devstack` or
+`https://github.com/rafaelpivato/devstack/tree/main/examples/smoke`.
+Optionally supply a project name, e.g. `smoke-git` when the existing
+`smoke` fixture is already installed.
+
+Devstack clones the repository using its established GitHub SSH identity,
+then follows a small convention:
+
+- A URL targeting a directory selects that directory's
+  `.devstack/project.toml` and optional `.devstack/compose.yaml`.
+- A repository-root URL uses a root manifest if one exists; otherwise it
+  discovers **exactly one** nested manifest. If several are found, use an
+  explicit GitHub `/tree/<branch>/<folder>` URL to disambiguate.
+- Git branch names containing slashes are supported using Git's remote refs.
+
+The application shortlist and Compose YAML are **copied** into the new
+`~/workspaces/<project>/.devstack/` directory. The cloned Git repository is
+not modified. An `import.toml` stores the source subdirectory, so Docker Compose
+continues to resolve relative build contexts and mounts from the source's
+`.devstack` directory, even though the editable Compose YAML lives outside
+the repository. Changes to the Git template are not automatically reimported
+on repository updates; explicit refresh/migration is a future improvement.
+
+A valid, working Docker Compose installation is required when the template
+defines Compose services. Import validates the configuration but **does not
+start or publish anything**. Review Compose carefully before running
+rootful Docker; an imported Dockerfile is executable code. Ports published
+by imported services remain subject to their explicit Compose definitions.
+
+Existing projects, including the v0.2.0 smoke fixture, are not overwritten
+by importing another copy; provide a distinct project name when necessary.
+The original dedicated **Install smoke example** button is retained for
+backward compatibility. No Ubuntu installer refresh is required for v0.2.2.

@@ -20,6 +20,22 @@ jobs:
           docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke up -d --build --wait --wait-timeout 120
           curl --fail --retry 10 --retry-delay 2 --retry-connrefused http://127.0.0.1:18080/health
           docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke ps
+      - name: Validate imported Compose path base
+        run: |
+          set -euo pipefail
+          tempdir="$(mktemp -d)"
+          cp examples/smoke/.devstack/compose.yaml "$tempdir/compose.yaml"
+          docker compose -p devstack-import-smoke \
+            --project-directory "$PWD/examples/smoke/.devstack" \
+            -f "$tempdir/compose.yaml" config --format json > "$tempdir/resolved.json"
+          python3 - "$tempdir/resolved.json" "$PWD/examples/smoke/app" <<'PY'
+          import json, pathlib, sys
+          with open(sys.argv[1]) as stream:
+              data = json.load(stream)
+          actual = pathlib.Path(data["services"]["web"]["build"]["context"])
+          expected = pathlib.Path(sys.argv[2])
+          assert actual == expected, f"Expected build context {expected}, got {actual}"
+          PY
       - name: Inspect service logs
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke logs --no-color --tail 50

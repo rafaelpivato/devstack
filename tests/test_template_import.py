@@ -107,6 +107,8 @@ class ImportProjectTests(unittest.TestCase):
         patch("devstack.project_setup.config_path", return_value=self.config).start()
         patch("devstack.template_import.git_environment", return_value={}).start()
         patch("devstack.template_import.ssh_command", return_value="ssh -i /fake").start()
+        patch("devstack.docker_stacks.load_projects",
+              side_effect=lambda: load_projects(self.config)).start()
 
     def command(self, args, **kwargs):
         if args[:2] == ["git", "clone"]:
