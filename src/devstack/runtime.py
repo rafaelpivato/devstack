@@ -115,6 +115,14 @@ def admit(name: str):
         yield
 
 
+def boot_id() -> str | None:
+    """Linux boot identity, used to invalidate orphaned workers after reboot."""
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+    except OSError:
+        return None
+
+
 def is_active(name: str) -> bool:
     """Advisory poll for running workers, which must stop on deactivation."""
     try:

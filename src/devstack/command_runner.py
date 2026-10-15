@@ -341,8 +341,10 @@ def start_command(project: str, service: str, mode: str,
             raise CommandError("Another command is running in this project")
         identifier = secrets.token_hex(10)
         meta, log, _ = _paths(project, identifier)
+        from . import runtime
         record = {"id": identifier, "service": task.service, "mode": task.mode,
-                  "argv": list(task.argv), "state": "queued", "started": time.time()}
+                  "argv": list(task.argv), "state": "queued",
+                  "boot_id": runtime.boot_id(), "started": time.time()}
         if task.image:
             record["image"] = task.image
             record["network"] = task.network
@@ -390,22 +392,33 @@ def cancel_all(project: str, *, timeout: float = 14) -> None:
     Markers terminate the corresponding Docker CLI and temporary containers.
     For `exec`, Compose down subsequently stops the owning service container.
     """
-    active = [record["id"] for record in recent_jobs(project)
-              if record.get("state") in ("queued", "running")]
+    from . import runtime
+    folder = _history_dir(project)
+    active = []
+    for path in folder.glob("*.json"):
+        if path.is_symlink() or not IDENTIFIER.fullmatch(path.stem):
+            raise CommandError("Unexpected command history entry")
+        record = _record(path)
+        if record.get("id") != path.stem:
+            raise CommandError("Invalid command job identity")
+        if record.get("state") in ("queued", "running"):
+            active.append(record["id"])
     for identifier in active:
         meta, _, marker = _paths(project, identifier)
         marker.touch(mode=0o600, exist_ok=True)
         # Queued workers haven't acquired execution admission. Invalidate
         # metadata so a worker started after this point cannot execute.
         entry = get_job(project, identifier)
-        if entry.get("state") == "queued":
+        if (entry.get("state") == "queued" or
+                (entry.get("boot_id") and runtime.boot_id() and
+                 entry["boot_id"] != runtime.boot_id())):
             _atomic_write(meta, json.dumps({
                 **entry, "state": "cancelled", "finished": time.time(),
                 "exit_code": None,
             }))
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not any(get_job(project, identifier).get("state") in ("queued", "running")
+        if not any(_record(_paths(project, identifier)[0]).get("state") in ("queued", "running")
                    for identifier in active):
             return
         time.sleep(.2)

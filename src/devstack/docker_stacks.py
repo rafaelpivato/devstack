@@ -289,8 +289,9 @@ def queue_action(name: str, action: str) -> None:
         if info and info.get("state") in ("queued", "running"):
             raise DockerError("A Docker operation is already running")
         job_id = secrets.token_hex(8)
+        from . import runtime
         info = {"id": job_id, "action": action, "state": "queued",
-                "started": time.time()}
+                "boot_id": runtime.boot_id(), "started": time.time()}
         from . import runtime
         try:
             with runtime.admit(name):
@@ -333,7 +334,10 @@ def cancel_all(name: str, *, timeout: float = 14) -> None:
     (folder / "latest.cancel").touch(mode=0o600, exist_ok=True)
     # A worker that was queued but never launched can be invalidated.
     # run_job must recheck both identifier and queued/running admission.
-    if current.get("state") == "queued":
+    from . import runtime
+    if (current.get("state") == "queued" or
+            (current.get("boot_id") and runtime.boot_id() and
+             current["boot_id"] != runtime.boot_id())):
         _write_job(folder, {**current, "state": "cancelled",
                             "finished": time.time(), "exit_code": None})
     deadline = time.monotonic() + timeout
