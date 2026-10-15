@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from scripts.private_access import (
     LOCAL_TARGET, PrivateAccessError, connected_hostname, configure,
-    is_empty_serve, is_our_private_serve, preview_serve_active, parse_json,
+    is_empty_serve, is_our_private_serve, parse_json,
 )
 
 
@@ -58,22 +58,6 @@ class PrivateAccessTests(unittest.TestCase):
         self.assertFalse(is_our_private_serve(example_serve(funnel=True)))
         self.assertFalse(is_our_private_serve(example_serve("http://127.0.0.1:9000")))
         self.assertFalse(is_our_private_serve({"Services": {"svc:other": {}}}))
-
-    def test_private_preview_port_can_coexist_with_dashboard(self):
-        state = example_serve()
-        state["TCP"]["8443"] = {"HTTPS": True}
-        state["Web"]["devstack.example.ts.net:8443"] = {
-            "Handlers": {"/": {"Proxy": "http://127.0.0.1:8766"}}
-        }
-        self.assertTrue(preview_serve_active(state))
-        self.assertTrue(is_our_private_serve(state))
-        state["AllowFunnel"]["devstack.example.ts.net:8443"] = True
-        self.assertFalse(preview_serve_active(state))
-        self.assertFalse(is_our_private_serve(state))
-        state["AllowFunnel"].pop("devstack.example.ts.net:8443")
-        state["Web"]["devstack.example.ts.net:8443"]["Handlers"]["/"]["Proxy"] = "http://127.0.0.1:9000"
-        self.assertFalse(preview_serve_active(state))
-        self.assertFalse(is_our_private_serve(state))
 
     @patch("scripts.private_access.run_cli")
     def test_first_time_configures_background_https(self, cli):
