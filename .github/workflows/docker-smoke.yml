@@ -54,6 +54,46 @@ jobs:
           test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
           docker run --rm --network "$network" --security-opt no-new-privileges \
             --cap-drop ALL redis:7-alpine redis-cli -h redis ping
+      - name: Verify explicit webhook forwarding to actual Compose container
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/devstack-webhook-ci
+          /tmp/devstack-webhook-ci/bin/pip install -q -e .
+          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          from pathlib import Path
+          from unittest.mock import patch
+          from devstack.applications import Application
+          from devstack.core import Project
+          from devstack.webhooks import Webhook, create_webhook_app
+
+          compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
+          with (
+              patch("devstack.webhooks.load_projects",
+                    return_value={"smoke": Project("smoke", (), ())}),
+              patch("devstack.webhooks.load_webhooks", return_value=(
+                  Webhook("test", "Web", "/webhooks/smoke"),
+              )),
+              patch("devstack.webhooks.load_applications", return_value=(
+                  Application("Web", "web", 8000),
+              )),
+              patch("devstack.webhooks.compose_name", return_value="devstack-smoke"),
+              patch("devstack.webhooks.compose_path", return_value=compose),
+              patch("devstack.webhooks.project_root", return_value=Path.cwd()),
+              patch("devstack.webhooks.compose_command", return_value=[
+                  "docker", "compose", "-p", "devstack-smoke",
+                  "-f", str(compose),
+              ]),
+          ):
+              client = create_webhook_app({"TESTING": True}).test_client()
+              body = b'{"test":"webhook"}'
+              response = client.post("/hooks/smoke/test", data=body,
+                  headers={"Content-Type": "application/json",
+                           "X-Signature-Test": "signed"})
+              assert response.status_code == 200, response.data
+              assert response.data == body, response.data
+              assert client.post("/hooks/smoke/not-allowed", data=body).status_code == 404
+              assert client.get("/hooks/smoke/test").status_code == 405
+          PY
       - name: Inspect service logs
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke logs --no-color --tail 50
