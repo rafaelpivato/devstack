@@ -18,7 +18,15 @@ form.stacked input{box-sizing:border-box} label{color:#dbe5ef}
 form{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 a{color:#9dccff}p{line-height:1.5} .message{padding:12px;border-radius:8px;background:#354354}
 .message.error{background:#63333d}.repo{padding:8px 0;border-top:1px solid #354354}
-.status{font-size:.85rem;color:#b9cadb}.update-meta{display:flex;flex-wrap:wrap;gap:6px 16px}
+.status{font-size:.85rem;color:#b9cadb}
+.app-status{display:inline-flex;gap:5px;align-items:center;border-radius:999px;padding:3px 10px;background:#354354;font-size:.82rem}
+.app-status.running{color:#99e5af}.app-status.unhealthy{color:#ffb7a6}
+.app-row{border-top:1px solid #354354;padding:9px 0}
+.app-row details{margin-top:7px}.app-row summary{color:#9dccff;cursor:pointer}
+.app-row form{margin-top:8px}.app-row input{max-width:110px}
+.app-row input.app-name{max-width:170px}
+.section-detail{font-size:.85rem;color:#9caaba}
+.update-meta{display:flex;flex-wrap:wrap;gap:6px 16px}
 .update-meta span{overflow-wrap:anywhere}.update-status{font-size:.9rem;min-height:1.4em}.update-status.error{color:#ffadb7}
 button:disabled{opacity:.55;cursor:not-allowed} h1{margin-bottom:0}h3{margin-bottom:6px}
 </style></head><body>
@@ -40,10 +48,14 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 <section class="card">
 <h2>Docker development</h2>
 <p>Managed Compose files live outside Git repositories in each project's <code>.devstack/</code> directory.</p>
+{% if smoke_installed %}
+<p class="section-detail">Smoke fixture already installed. Refresh its default app registration on the smoke project card below.</p>
+{% else %}
 <form method="post" action="{{url_for('smoke_import')}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button type="submit" class="secondary">Install smoke example</button>
 </form>
+{% endif %}
 </section>
 <section class="card" id="devstack-updates">
 <div class="heading"><h2>Devstack updates</h2><small id="devstack-update-phase" aria-live="polite">Checking…</small></div>
@@ -62,22 +74,67 @@ Scheduled checks continue in the background.</small></p>
 {% if not rows %}
 <section class="card"><h2>No projects configured</h2><p>Create your first project above.</p></section>
 {% endif %}
-{% for project, services, repos in rows %}
-<section class="card">
-<div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ services|length }} services</small></div>
-<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose →</a></p>
+{% for project, services, repos, apps, app_error in rows %}
+<section class="card" id="project-{{project.name}}">
+<div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ apps|length }} applications</small></div>
+<h3>Applications</h3>
+<p class="section-detail">Only applications you choose appear here. Docker infrastructure and utilities remain in Compose management. Registration does not expose network ports.</p>
+{% if app_error %}<p class="message error">Could not read applications: {{app_error}}</p>{% endif %}
+{% for app,status in apps %}
+<div class="app-row">
+<div class="row"><strong>{{app.name}}</strong>
+<span class="app-status {{status}}">{{status}}</span>
+<small>{{app.service}}{% if app.port %} · container port {{app.port}}{% endif %}</small></div>
+<details><summary>Edit application</summary>
+<form method="post" action="{{url_for('application_edit', name=project.name, app_name=app.name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label>Label <input class="app-name" name="application_name" value="{{app.name}}" required maxlength="64"></label>
+<label>Compose service <input name="service" value="{{app.service}}" required></label>
+<label>Container port <input name="port" type="number" min="1" max="65535" placeholder="Optional" value="{{app.port or ''}}"></label>
+<button type="submit" class="secondary">Save</button>
+</form>
+<form method="post" action="{{url_for('application_remove',name=project.name,app_name=app.name)}}" onsubmit="return confirm('Remove application from dashboard? Containers will remain running.')">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit" class="stop">Remove</button>
+</form>
+</details></div>
+{% else %}<p class="status">No applications registered. Add your API or frontend below.</p>{% endfor %}
+<form method="post" action="{{url_for('application_create',name=project.name)}}" class="stacked">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label>Application label <input name="application_name" class="wide" placeholder="API" maxlength="64" required></label>
+<label>Compose service <input name="service" class="wide" placeholder="api" required></label>
+<label>Container port (optional, for future previews) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
+<button type="submit">Add application</button>
+</form>
+{% if project.name == 'smoke' %}
+<form method="post" action="{{url_for('smoke_sync_applications')}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit" class="secondary">Refresh smoke applications</button>
+</form>
+<p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
+{% endif %}
+<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a></p>
+{% if services %}
+<h3>Legacy services</h3>
+<p class="section-detail">Configured in the older projects.toml format; independent of managed Docker stacks.</p>
 <div class="row">
-{% for action,label,style in [('start','Start',''),('stop','Stop','stop'),('update','Update repos','secondary')] %}
+{% for action,label,style in [('start','Start legacy services',''),('stop','Stop legacy services','stop')] %}
 <form method="post" action="{{url_for('operate',name=project.name,action=action)}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button class="{{style}}" type="submit">{{label}}</button></form>
 {% endfor %}
 </div>
-<h3>Services</h3>
 {% for name,status in services %}
 <div class="row"><strong>{{name}}</strong><span class="status">{{status}}</span>
 <a href="{{url_for('logs',name=project.name,service_name=name)}}">View logs</a></div>
-{% else %}<p class="status">No services configured</p>{% endfor %}
+{% endfor %}
+{% endif %}
+{% if repos %}
+<form method="post" action="{{url_for('operate',name=project.name,action='update')}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit" class="secondary">Update repositories</button>
+</form>
+{% endif %}
 <h3>Repositories</h3>
 {% for name,branch,dirty in repos %}
 <div class="repo"><div class="row"><strong>{{name}}</strong><small>{{branch}}{% if dirty %} · modified{% endif %}</small></div>

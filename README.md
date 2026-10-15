@@ -394,3 +394,64 @@ checks its `/health` endpoint.
 
 Container command runner / saved tasks, direct previews, Tailscale Funnel,
 ngrok, and export/import of manifests and secrets come in later milestones.
+
+## Explicitly selected dashboard applications (v0.2.1)
+
+A project dashboard is an **application shortlist**, not an inventory of
+all Docker containers. Register only the applications you want to see,
+such as **API** and **Frontend**, using each project's **Add application**
+form. Choose a label and the matching Docker Compose **service** name;
+optionally provide its internal container port for future preview routing.
+A port is *metadata only*: registration does not change `compose.yaml`,
+publish the port, create a proxy, or start containers.
+
+The applications are stored in:
+`~/workspaces/<project>/.devstack/project.toml`
+outside cloned repositories, using standard TOML, for example:
+
+```toml
+[[applications]]
+name = "API"
+service = "backend"
+port = 8000
+
+[[applications]]
+name = "Frontend"
+service = "web"
+port = 5173
+```
+
+Registered applications show their read-only Docker Compose container state
+(running, stopped, unhealthy or unavailable). All other services (database,
+Redis, workers and auxiliary tunnels) remain accessible on the **Manage
+Docker Compose** page, even when absent from the main dashboard.
+Applications can be edited or removed from the dashboard without stopping,
+rebuilding or deleting Docker containers.
+
+For the bundled smoke fixture, register **Web** with Compose service
+`web` and port `8000`. The PostgreSQL and Redis services will not appear
+on the dashboard unless you add them deliberately. The HTTP port remains
+bound only to the host loopback; this release adds **no private preview**.
+Private URLs, proxy routing and public webhooks remain future milestones.
+
+Older explicitly configured `projects.toml` services have a distinct
+**Legacy services** section so they are not confused with applications or
+the managed Docker stack. Existing project and repository data are preserved.
+This is an ordinary application release; no host installer refresh is needed
+for v0.2.1.
+
+### Keeping the smoke fixture's application list current
+
+New imports of `examples/smoke` contain the bundled
+`.devstack/project.toml`, which registers **Web** (`web:8000`) immediately.
+Existing `smoke` workspaces copied in v0.2.0 do not receive files when the
+Devstack application updates. After upgrading to v0.2.1, use **Refresh smoke
+applications** on the smoke project card. This adds missing bundled application
+entries once, preserving any previously added or customized applications.
+It does not replace Compose YAML or source files, rebuild containers, publish
+ports, or touch PostgreSQL volumes. It is safe to repeat: already registered
+service names and labels are not duplicated.
+
+For this milestone, refreshing a project's complete template or upgrading
+its Compose definition is intentionally **not** automatic. Such migrations
+need explicit review to avoid overwriting local developer changes.

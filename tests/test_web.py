@@ -183,3 +183,94 @@ class DockerWebTests(unittest.TestCase):
     @patch("devstack.web.load_projects",return_value={})
     def test_unknown_project_stays_404(self, projects):
         self.assertEqual(self.client.get("/projects/nope/docker").status_code, 404)
+
+
+class ApplicationWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.load_applications", return_value=(
+        __import__("devstack.applications", fromlist=["Application"]).Application(
+            "API", "backend", 8000
+        ),
+    ))
+    @patch("devstack.web.compose_states", return_value={"backend": "running"})
+    def test_dashboard_shows_registered_app_not_infrastructure(self, states, apps, projects):
+        result = self.client.get("/")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn(b"API", result.data)
+        self.assertIn(b"backend", result.data)
+        self.assertIn(b"running", result.data)
+        self.assertIn(b"1 applications", result.data)
+        self.assertNotIn(b"PostgreSQL", result.data)
+        self.assertNotIn(b"No services configured", result.data)
+        states.assert_called_once_with("demo")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.add_application")
+    def test_create_requires_csrf_and_never_calls_compose(self, add, projects):
+        self.assertEqual(
+            self.client.post("/projects/demo/applications/new", data={
+                "application_name": "Frontend", "service": "web", "port": "5173"
+            }).status_code, 403
+        )
+        add.assert_not_called()
+        self.assertEqual(
+            self.client.post("/projects/demo/applications/new", data={
+                "_csrf": self.csrf, "application_name": "Frontend",
+                "service": "web", "port": "5173"
+            }).status_code, 302
+        )
+        add.assert_called_once_with("demo", "Frontend", "web", "5173")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.update_application")
+    def test_edit_does_not_modify_containers(self, change, projects):
+        result = self.client.post("/projects/demo/applications/API/edit", data={
+            "_csrf": self.csrf, "application_name": "Backend",
+            "service": "backend", "port": ""
+        })
+        self.assertEqual(result.status_code, 302)
+        change.assert_called_once_with("demo", "API", "Backend", "backend", "")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.remove_application")
+    def test_remove_does_not_modify_containers(self, remove, projects):
+        result = self.client.post("/projects/demo/applications/API/remove",
+                                  data={"_csrf": self.csrf})
+        self.assertEqual(result.status_code, 302)
+        remove.assert_called_once_with("demo", "API")
+
+    @patch("devstack.web.load_projects", return_value={})
+    def test_unknown_project_not_created(self, projects):
+        result = self.client.post("/projects/missing/applications/new",
+                                  data={"_csrf": self.csrf, "application_name": "API",
+                                        "service": "api", "port": ""})
+        self.assertEqual(result.status_code, 404)
+
+
+    @patch("devstack.web.load_projects", return_value={
+        "smoke": __import__("devstack.core", fromlist=["Project"]).Project("smoke", (), ())
+    })
+    @patch("devstack.web.sync_smoke_applications", return_value=1)
+    def test_sync_smoke_apps_is_csrf_protected(self, sync, projects):
+        response = self.client.post("/projects/smoke/sync-applications")
+        self.assertEqual(response.status_code, 403)
+        sync.assert_not_called()
+        response = self.client.post("/projects/smoke/sync-applications",
+                                    data={"_csrf": self.csrf})
+        self.assertEqual(response.status_code, 302)
+        sync.assert_called_once_with()
