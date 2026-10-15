@@ -79,6 +79,8 @@ def load_project(path: Path | None = None) -> Project | None:
     raw_services = entry.get("services", [])
     if not isinstance(raw_repos, list) or not isinstance(raw_services, list):
         raise ValueError("Repositories and services must be arrays")
+    if raw_services:
+        raise ValueError("Legacy services are not supported in v0.5; use managed Docker Compose")
     repos = []
     seen = set()
     for r in raw_repos:

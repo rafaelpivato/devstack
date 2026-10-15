@@ -32,12 +32,10 @@ class ConfigTests(unittest.TestCase):
 
 class CommandTests(unittest.TestCase):
     @patch("devstack.core.run")
-    def test_compose_start(self, run):
-        service_action(Service("web", "compose", Path("/tmp/project"), "compose.yml"), "start")
-        run.assert_called_once_with(
-            ["docker", "compose", "-f", "compose.yml", "up", "-d"],
-            cwd=Path("/tmp/project"), timeout=180,
-        )
+    def test_legacy_compose_execution_is_disabled(self, run):
+        with self.assertRaisesRegex(OperationError, "disabled"):
+            service_action(Service("web", "compose", Path("/tmp/project"), "compose.yml"), "start")
+        run.assert_not_called()
 
     @patch("devstack.core.run")
     def test_systemd_logs(self, run):

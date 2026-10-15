@@ -25,6 +25,13 @@ class DockerStacksTests(unittest.TestCase):
                   return_value=Path(self.temp.name))
         p.start()
         self.addCleanup(p.stop)
+        admission = patch("devstack.runtime.admit", return_value=__import__(
+            "contextlib", fromlist=["nullcontext"]).nullcontext())
+        admission.start()
+        self.addCleanup(admission.stop)
+        active = patch("devstack.runtime.is_active", return_value=True)
+        active.start()
+        self.addCleanup(active.stop)
 
     def test_compose_definition_is_project_owned(self):
         path = d.compose_path("my-project")
@@ -75,23 +82,24 @@ class DockerStacksTests(unittest.TestCase):
         self.assertEqual(info["action"], "build")
         self.assertEqual(len(info["id"]), 16)
         with self.assertRaisesRegex(d.DockerError, "already running"):
-            d.queue_action("my-project", "up")
+            d.queue_action("my-project", "restart")
         self.assertEqual(popen.call_count, 1)
 
-    @patch("devstack.docker_stacks.subprocess.run")
-    def test_run_job_records_completion(self, run):
+    @patch("devstack.docker_stacks.subprocess.Popen")
+    def test_run_job_records_completion(self, popen):
         d.managed_dir("my-project").mkdir()
         d.compose_path("my-project").write_text("services:\n  web:\n    image: nginx\n")
         folder = d._jobs_dir("my-project")
-        d._write_job(folder, {"id": "a" * 16, "action": "up",
+        d._write_job(folder, {"id": "a" * 16, "action": "restart",
                               "state": "queued", "started": 123})
-        run.return_value = subprocess.CompletedProcess([], 0)
-        self.assertEqual(d.run_job("my-project", "up", "a" * 16), 0)
+        proc = popen.return_value
+        proc.poll.return_value = 0
+        proc.returncode = 0
+        self.assertEqual(d.run_job("my-project", "restart", "a" * 16), 0)
         info = d.current_job("my-project")
         self.assertEqual(info["state"], "success")
         self.assertEqual(info["exit_code"], 0)
-        self.assertEqual(run.call_args.args[0][-3:],
-                         ["up", "--detach", "--build"])
+        self.assertEqual(popen.call_args.args[0][-1:], ["restart"])
 
     def test_cannot_read_absent_project(self):
         with self.assertRaisesRegex(d.DockerError, "not found"):

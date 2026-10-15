@@ -25,10 +25,7 @@ from .core import load_projects
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 ACTIONS = {
     "build": ("build",),
-    "up": ("up", "--detach", "--build"),
-    "stop": ("stop",),
-    "restart": ("restart",),
-    "down": ("down",),  # Intentionally preserves named volumes.
+    "restart": ("restart",),  # Starting/stopping belongs to runtime.activate/deactivate.
 }
 MAX_COMPOSE_BYTES = 128 * 1024
 MAX_JOB_SECONDS = 900
@@ -292,21 +289,26 @@ def queue_action(name: str, action: str) -> None:
         if info and info.get("state") in ("queued", "running"):
             raise DockerError("A Docker operation is already running")
         job_id = secrets.token_hex(8)
+        from . import runtime
         info = {"id": job_id, "action": action, "state": "queued",
-                "started": time.time()}
-        (folder / "latest.log").write_text("", encoding="utf-8")
-        _write_job(folder, info)
+                "boot_id": runtime.boot_id(), "started": time.time()}
+        from . import runtime
         try:
-            # A separate interpreter avoids blocking Gunicorn on image builds.
-            # start_new_session keeps work alive across a dashboard restart.
-            subprocess.Popen(
-                [sys.executable, "-m", "devstack.docker_stacks",
-                 "--job", name, action, job_id],
-                cwd=project_root(name),
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, start_new_session=True,
-                close_fds=True,
-            )
+            with runtime.admit(name):
+                (folder / "latest.cancel").unlink(missing_ok=True)
+                (folder / "latest.log").write_text("", encoding="utf-8")
+                _write_job(folder, info)
+                # Queueing does not authorize execution: worker rechecks at launch.
+                subprocess.Popen(
+                    [sys.executable, "-m", "devstack.docker_stacks",
+                     "--job", name, action, job_id],
+                    cwd=project_root(name),
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, start_new_session=True,
+                    close_fds=True,
+                )
+        except runtime.RuntimeControlError as exc:
+            raise DockerError(str(exc)) from exc
         except OSError as exc:
             _write_job(folder, {**info, "state": "failed", "finished": time.time()})
             raise DockerError("Could not launch the Docker operation") from exc
@@ -314,35 +316,93 @@ def queue_action(name: str, action: str) -> None:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
+def _stop_process(proc: subprocess.Popen) -> None:
+    try:
+        proc.terminate()
+        proc.wait(timeout=4)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=4)
+
+
+def cancel_all(name: str, *, timeout: float = 14) -> None:
+    """Cancel and join the managed Compose job before project shutdown."""
+    folder = _jobs_dir(name)
+    current = _read_job(folder)
+    if not current or current.get("state") not in ("queued", "running"):
+        return
+    (folder / "latest.cancel").touch(mode=0o600, exist_ok=True)
+    # A worker that was queued but never launched can be invalidated.
+    # run_job must recheck both identifier and queued/running admission.
+    from . import runtime
+    if (current.get("state") == "queued" or
+            (current.get("boot_id") and runtime.boot_id() and
+             current["boot_id"] != runtime.boot_id())):
+        _write_job(folder, {**current, "state": "cancelled",
+                            "finished": time.time(), "exit_code": None})
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = _read_job(folder)
+        if state and state.get("state") not in ("queued", "running"):
+            return
+        time.sleep(.2)
+    raise DockerError("Compose background work did not stop; runtime is not inactive")
+
+
 def run_job(name: str, action: str, job_id: str) -> int:
     if action not in ACTIONS or not re.fullmatch(r"[0-9a-f]{16}", job_id):
         return 2
     folder = _jobs_dir(name)
     job = _read_job(folder)
-    if not job or job.get("id") != job_id:
+    if not job or job.get("id") != job_id or job.get("action") != action or job.get("state") != "queued":
         return 2
-    # Workers only execute a literal fixed action. No user-supplied command.
-    job["state"] = "running"
-    _write_job(folder, job)
+    from . import runtime
     result_code = 1
+    state = "failed"
+    marker = folder / "latest.cancel"
+    proc = None
     try:
         with (folder / "latest.log").open("ab") as log:
-            proc = subprocess.run(
-                compose_command(name) + list(ACTIONS[action]),
-                cwd=project_root(name), stdin=subprocess.DEVNULL,
-                stdout=log, stderr=subprocess.STDOUT,
-                timeout=MAX_JOB_SECONDS, check=False,
-            )
-            result_code = proc.returncode
-    except (OSError, subprocess.TimeoutExpired, DockerError) as exc:
-        # Keep output error generic: Docker logs sometimes contain secrets.
+            with runtime.admit(name):
+                latest = _read_job(folder)
+                if (marker.exists() or latest is None or
+                        latest.get("id") != job_id or latest.get("state") != "queued"):
+                    state = "cancelled"
+                else:
+                    job["state"] = "running"
+                    _write_job(folder, job)
+                    proc = subprocess.Popen(
+                        compose_command(name) + list(ACTIONS[action]),
+                        cwd=project_root(name), stdin=subprocess.DEVNULL,
+                        stdout=log, stderr=subprocess.STDOUT,
+                        start_new_session=True, close_fds=True,
+                    )
+            if proc is not None:
+                deadline = time.monotonic() + MAX_JOB_SECONDS
+                while proc.poll() is None:
+                    if marker.exists() or not runtime.is_active(name):
+                        state = "cancelled"
+                        _stop_process(proc)
+                        break
+                    if time.monotonic() >= deadline:
+                        state = "failed"
+                        _stop_process(proc)
+                        break
+                    time.sleep(.2)
+                else:
+                    result_code = proc.returncode
+                    state = "success" if result_code == 0 else "failed"
+    except runtime.RuntimeControlError:
+        state = "cancelled"
+    except (OSError, subprocess.TimeoutExpired, DockerError):
         with (folder / "latest.log").open("ab") as log:
-            log.write(b"\nDocker operation failed or timed out.\n")
-    job["state"] = "success" if result_code == 0 else "failed"
+            log.write(b"\\nDocker operation failed or could not terminate cleanly.\\n")
+    job["state"] = state
     job["finished"] = time.time()
-    job["exit_code"] = result_code
+    job["exit_code"] = result_code if state in ("success", "failed") else None
     _write_job(folder, job)
     return result_code
+
 
 
 def smoke_fixture_dir() -> Path:

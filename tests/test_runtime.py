@@ -22,7 +22,8 @@ class RuntimeTests(unittest.TestCase):
                         return_value=Project("demo", ()))
         command = patch("devstack.runtime._validated_compose",
                         return_value=["docker", "compose", "-p", "demo"])
-        for item in (folder, project, command):
+        stopper = patch("devstack.runtime._stop_jobs")
+        for item in (folder, project, command, stopper):
             item.start()
             self.addCleanup(item.stop)
 

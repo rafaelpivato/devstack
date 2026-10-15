@@ -341,21 +341,27 @@ def start_command(project: str, service: str, mode: str,
             raise CommandError("Another command is running in this project")
         identifier = secrets.token_hex(10)
         meta, log, _ = _paths(project, identifier)
+        from . import runtime
         record = {"id": identifier, "service": task.service, "mode": task.mode,
-                  "argv": list(task.argv), "state": "queued", "started": time.time()}
+                  "argv": list(task.argv), "state": "queued",
+                  "boot_id": runtime.boot_id(), "started": time.time()}
         if task.image:
             record["image"] = task.image
             record["network"] = task.network
-        _atomic_write(meta, json.dumps(record))
-        log.touch(mode=0o600)
+        from . import runtime
         try:
-            subprocess.Popen(
-                [sys.executable, "-m", "devstack.command_runner",
-                 "--worker", project, identifier],
-                cwd=project_root(project), stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                close_fds=True, start_new_session=True,
-            )
+            with runtime.admit(project):
+                _atomic_write(meta, json.dumps(record))
+                log.touch(mode=0o600)
+                subprocess.Popen(
+                    [sys.executable, "-m", "devstack.command_runner",
+                     "--worker", project, identifier],
+                    cwd=project_root(project), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    close_fds=True, start_new_session=True,
+                )
+        except runtime.RuntimeControlError as exc:
+            raise CommandError(str(exc)) from exc
         except OSError as exc:
             _atomic_write(meta, json.dumps({**record, "state": "failed",
                                             "finished": time.time()}))
@@ -378,6 +384,45 @@ def cancel_command(project: str, identifier: str) -> None:
         raise CommandError("This command is no longer active")
     _, _, marker = _paths(project, identifier)
     marker.touch(mode=0o600, exist_ok=True)
+
+
+def cancel_all(project: str, *, timeout: float = 14) -> None:
+    """Stop all queued/running command workers before Compose teardown.
+
+    Markers terminate the corresponding Docker CLI and temporary containers.
+    For `exec`, Compose down subsequently stops the owning service container.
+    """
+    from . import runtime
+    folder = _history_dir(project)
+    active = []
+    for path in folder.glob("*.json"):
+        if path.is_symlink() or not IDENTIFIER.fullmatch(path.stem):
+            raise CommandError("Unexpected command history entry")
+        record = _record(path)
+        if record.get("id") != path.stem:
+            raise CommandError("Invalid command job identity")
+        if record.get("state") in ("queued", "running"):
+            active.append(record["id"])
+    for identifier in active:
+        meta, _, marker = _paths(project, identifier)
+        marker.touch(mode=0o600, exist_ok=True)
+        # Queued workers haven't acquired execution admission. Invalidate
+        # metadata so a worker started after this point cannot execute.
+        entry = get_job(project, identifier)
+        if (entry.get("state") == "queued" or
+                (entry.get("boot_id") and runtime.boot_id() and
+                 entry["boot_id"] != runtime.boot_id())):
+            _atomic_write(meta, json.dumps({
+                **entry, "state": "cancelled", "finished": time.time(),
+                "exit_code": None,
+            }))
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not any(_record(_paths(project, identifier)[0]).get("state") in ("queued", "running")
+                   for identifier in active):
+            return
+        time.sleep(.2)
+    raise CommandError("Command workers did not stop; runtime is not inactive")
 
 
 def _project_network(project: str) -> str:
@@ -432,6 +477,7 @@ def work(project: str, identifier: str) -> int:
     image = entry.get("image") or ""
     network = entry.get("network", "none")
     task = _task("worker", service, mode, list(argv), image=image, network=network)
+    from . import runtime
     container_name = ("devstack-task-" + identifier) if (mode == "run" or image) else None
     result = 1
     status = "failed"
@@ -446,6 +492,7 @@ def work(project: str, identifier: str) -> int:
                     target_network = _project_network(project) if task.network == "project" else "none"
                     args = [
                         "docker", "run", "--rm", "--name", container_name,
+                        "--label", "devstack.project=" + compose_name(project),
                         "--network", target_network,
                         "--security-opt", "no-new-privileges",
                         "--cap-drop", "ALL", task.image, *argv,
@@ -455,15 +502,24 @@ def work(project: str, identifier: str) -> int:
                             ["run", "--rm", "--no-deps", "-T",
                              "--name", container_name, service, *argv])
                     args = compose_command(project) + tail
-                proc = subprocess.Popen(
-                    args,
-                    cwd=project_root(project), stdin=subprocess.DEVNULL,
-                    stdout=stream, stderr=subprocess.STDOUT,
-                    start_new_session=True, close_fds=True,
-                )
+                with runtime.admit(project):
+                    latest = _record(meta)
+                    if (marker.exists() or latest.get("id") != identifier or
+                            latest.get("state") != "running"):
+                        status = "cancelled"
+                        proc = None
+                    else:
+                        proc = subprocess.Popen(
+                            args,
+                            cwd=project_root(project), stdin=subprocess.DEVNULL,
+                            stdout=stream, stderr=subprocess.STDOUT,
+                            start_new_session=True, close_fds=True,
+                        )
+                if proc is None:
+                    raise runtime.RuntimeControlError("Command cancelled before launch")
                 until = time.monotonic() + TIMEOUT
                 while proc.poll() is None:
-                    if marker.exists():
+                    if marker.exists() or not runtime.is_active(project):
                         status = "cancelled"
                         _terminate(proc, run_container=container_name)
                         break
@@ -475,6 +531,8 @@ def work(project: str, identifier: str) -> int:
                 else:
                     result = proc.returncode
                     status = "success" if result == 0 else "failed"
+    except runtime.RuntimeControlError:
+        status = "cancelled"
     except (OSError, DockerError, CommandError, subprocess.TimeoutExpired):
         with log.open("ab") as stream:
             stream.write(b"\nCommand could not start or terminate cleanly.\n")
