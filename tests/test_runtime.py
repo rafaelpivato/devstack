@@ -96,6 +96,35 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.status()["phase"], "error")
 
     @patch("devstack.runtime.subprocess.Popen")
+    def test_shared_webhook_admissions_block_deactivation(self, popen):
+        import threading
+        import time
+        runtime._write({"phase": "active", "project": "demo"})
+        done = threading.Event()
+        errors = []
+        def deactivate():
+            try:
+                runtime.request_transition("deactivate")
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                done.set()
+        with runtime.admit("demo", shared=True, blocking=True):
+            with runtime.admit("demo", shared=True, blocking=True):
+                worker = threading.Thread(target=deactivate)
+                worker.start()
+                self.assertFalse(done.wait(timeout=.2),
+                                 "Deactivation crossed an in-flight webhook")
+                self.assertEqual(runtime.status()["phase"], "active")
+        worker.join(timeout=3)
+        self.assertTrue(done.is_set())
+        self.assertEqual(errors, [])
+        self.assertEqual(runtime.status()["phase"], "deactivating")
+        with self.assertRaises(runtime.RuntimeControlError):
+            with runtime.admit("demo", shared=True, blocking=True):
+                pass
+
+    @patch("devstack.runtime.subprocess.Popen")
     def test_mutex_blocks_concurrent_activation(self, popen):
         with runtime._locked():
             with self.assertRaisesRegex(runtime.RuntimeControlError, "in progress"):
