@@ -438,3 +438,70 @@ class StandaloneImageWebTests(unittest.TestCase):
             "demo", "db", "", "run", "pg_isready -h postgres",
             image="postgres:16", network="project"
         )
+
+
+class ProjectConfigurationWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    def project(self):
+        from devstack.core import Project, Repo
+        from pathlib import Path
+        return Project("demo", (Repo("backend", Path("/workspace/demo/backend")),), ())
+
+    @patch("devstack.web.load_projects")
+    @patch("devstack.web.source_directory")
+    @patch("devstack.web.sync_review")
+    def test_review_is_non_mutating(self, review, source, projects):
+        from pathlib import Path
+        from devstack.project_sync import Change
+        projects.return_value = {"demo": self.project()}
+        source.return_value = Path("/workspace/demo/backend/.devstack")
+        review.return_value = ([Change(
+            "tasks.toml:lint", "Task", "lint", "add", "(not present)",
+            '{"command":["python","-m","ruff"]}', False, True
+        )], "a" * 64)
+        result = self.client.get("/projects/demo/configuration")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn(b"Update source from Git", result.data)
+        self.assertIn(b"tasks.toml:lint", result.data)
+        self.assertIn(b'checked', result.data)
+        review.assert_called_once_with("demo")
+
+    @patch("devstack.web.load_projects")
+    @patch("devstack.web.source_directory")
+    @patch("devstack.web.repo_update", return_value="main")
+    def test_update_source_only_touches_linked_repo(self, update, source, projects):
+        from pathlib import Path
+        projects.return_value = {"demo": self.project()}
+        source.return_value = Path("/workspace/demo/backend/examples/smoke/.devstack")
+        url = "/projects/demo/configuration/update-source"
+        self.assertEqual(self.client.post(url).status_code, 403)
+        update.assert_not_called()
+        self.assertEqual(
+            self.client.post(url, data={"_csrf": self.csrf}).status_code, 302
+        )
+        update.assert_called_once_with(self.project().repos[0])
+
+    @patch("devstack.web.load_projects")
+    @patch("devstack.web.sync_apply", return_value=2)
+    def test_apply_only_explicitly_selected_changes_with_token(self, apply, projects):
+        projects.return_value = {"demo": self.project()}
+        url = "/projects/demo/configuration/apply"
+        payload = {"fingerprint": "a" * 64, "change": [
+            "tasks.toml:lint", "project.toml:API"
+        ]}
+        self.assertEqual(self.client.post(url, data=payload).status_code, 403)
+        apply.assert_not_called()
+        payload["_csrf"] = self.csrf
+        self.assertEqual(self.client.post(url, data=payload).status_code, 302)
+        apply.assert_called_once_with("demo",
+            ["tasks.toml:lint", "project.toml:API"], "a" * 64)
+
+    @patch("devstack.web.load_projects", return_value={})
+    def test_missing_project_returns_not_found(self, projects):
+        self.assertEqual(self.client.get("/projects/missing/configuration").status_code, 404)
