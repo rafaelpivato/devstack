@@ -133,6 +133,65 @@ jobs:
                   ], check=True, capture_output=True, text=True)
                   assert volumes.stdout.strip(), "Deactivate unexpectedly removed named volumes"
           PY
+      - name: Verify running image worker is stopped by deactivation
+        run: |
+          set -euo pipefail
+          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          import json, subprocess, tempfile, threading, time
+          from pathlib import Path
+          from unittest.mock import patch
+          from devstack import command_runner, docker_stacks, runtime
+          from devstack.workspace import Project
+
+          name = "smoke"
+          compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
+          cmd = ["docker", "compose", "-p", "devstack-smoke", "-f", str(compose)]
+          with tempfile.TemporaryDirectory() as directory:
+              folder = Path(directory)
+              with (
+                  patch("devstack.runtime._folder", return_value=folder),
+                  patch("devstack.runtime.load_project", return_value=Project(name, ())),
+                  patch.object(docker_stacks, "compose_path", return_value=compose),
+                  patch.object(docker_stacks, "compose_command", return_value=cmd),
+                  patch.object(docker_stacks, "compose_name", return_value="devstack-smoke"),
+                  patch.object(command_runner, "compose_name", return_value="devstack-smoke"),
+                  patch.object(docker_stacks, "project_root", return_value=Path.cwd()),
+              ):
+                  runtime._write({"phase": "active", "project": name})
+                  identifier = "b" * 20
+                  meta, log, marker = command_runner._paths(name, identifier)
+                  command_runner._atomic_write(meta, json.dumps({
+                      "id": identifier, "state": "queued", "started": time.time(),
+                      "service": "", "mode": "run",
+                      "image": "python:3.12-alpine", "network": "none",
+                      "argv": ["python", "-c", "import time;time.sleep(120)"],
+                  }))
+                  log.touch()
+                  worker = threading.Thread(target=command_runner.work,
+                                            args=(name, identifier), daemon=True)
+                  worker.start()
+                  deadline = time.monotonic() + 30
+                  while time.monotonic() < deadline:
+                      containers = subprocess.run(
+                          ["docker", "ps", "-q", "--filter",
+                           "label=devstack.project=devstack-smoke"],
+                          check=True, capture_output=True, text=True,
+                      ).stdout.strip()
+                      if containers:
+                          break
+                      time.sleep(.2)
+                  else:
+                      raise AssertionError("Task container did not start: " +
+                                           command_runner.job_output(name, identifier))
+                  runtime._write({"phase": "deactivating", "project": name,
+                                  "token": "c" * 24})
+                  assert runtime.perform("deactivate", name, "c" * 24) == 0, runtime.status()
+                  worker.join(timeout=15)
+                  assert not worker.is_alive(), "Task worker survived deactivation"
+                  assert runtime.status()["phase"] == "inactive"
+                  assert command_runner.get_job(name, identifier)["state"] == "cancelled"
+                  assert not runtime._owned_ids(name), "Task container survived deactivation"
+          PY
       - name: Inspect service logs
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke logs --no-color --tail 50
