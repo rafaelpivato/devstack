@@ -300,7 +300,7 @@ class GithubProjectImportWebTests(unittest.TestCase):
     @patch("devstack.web.import_github_project")
     def test_dashboard_shows_import_url_form(self, import_project):
         response = self.client.get("/")
-        self.assertIn(b"Import GitHub project", response.data)
+        self.assertIn(b"Add project from GitHub", response.data)
         self.assertIn(b"/projects/import", response.data)
         import_project.assert_not_called()
 
