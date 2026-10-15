@@ -5,7 +5,7 @@
 a{color:#9dccff}p{color:#afc1d1}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1b2530;padding:14px;max-height:65vh;overflow:auto;font:13px/1.45 monospace;border:1px solid #344251;border-radius:10px}
 button{background:#78404a;color:white;border:0;border-radius:8px;padding:10px 14px;font:inherit}
 .message{background:#354354;padding:10px;border-radius:8px}
-</style></head><body>
+</style></head><body data-job-url="{{url_for('command_status',name=project,identifier=job.id)}}">
 <p><a href="{{url_for('commands_page',name=project)}}">← Commands</a></p>
 <h1>{{job.image or job.service}} · {{'image' if job.image else job.mode}}</h1>
 <p><code>{{job.argv | join(' ')}}</code></p>
@@ -19,22 +19,4 @@ button{background:#78404a;color:white;border:0;border-radius:8px;padding:10px 14
 </form>
 <p><small>Cancellation of an existing-container exec may leave its underlying process running. Temporary run containers are removed on cancellation.</small></p>
 <pre id="output" aria-live="polite">Loading output…</pre>
-<script>
-(function(){
-const status=document.getElementById('status'),output=document.getElementById('output');
-const cancel=document.getElementById('cancel-form');
-async function poll(){
-  try{
-    const response=await fetch('{{url_for("command_status",name=project,identifier=job.id)}}',
-       {cache:'no-store',credentials:'same-origin'});
-    if(!response.ok)throw Error('Unavailable');
-    const data=await response.json();
-    status.textContent=data.job.state+
-       (data.job.exit_code===null||data.job.exit_code===undefined?'':' · Exit '+data.job.exit_code);
-    if(output.textContent!==data.output)output.textContent=data.output||'(no output yet)';
-    cancel.hidden=!['queued','running'].includes(data.job.state);
-  }catch(e){status.textContent='Connection interrupted; retrying…';}
-}
-poll();setInterval(poll,1500);
-})();
-</script></body></html>
+<script type="module" src="{{url_for('static',filename='js/command-output.js')}}"></script></body></html>
