@@ -89,7 +89,12 @@ def create_app(config: dict | None = None) -> Flask:
                 app_error = None
             except (ApplicationError, DockerError) as exc:
                 apps, app_error = [], str(exc)
-            rows.append((p, services, repos, apps, app_error))
+            try:
+                source_directory(p.name)
+                linked_source = True
+            except (SyncError, DockerError, OSError):
+                linked_source = False
+            rows.append((p, services, repos, apps, app_error, linked_source))
         return render_template("dashboard.html", rows=rows, csrf=token(),
                                smoke_installed="smoke" in configured)
 
