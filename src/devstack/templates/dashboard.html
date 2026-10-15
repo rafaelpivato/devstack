@@ -46,6 +46,20 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 </form>
 </section>
 <section class="card">
+<h2>Import GitHub project</h2>
+<p>Use a repository URL or a GitHub <code>/tree/branch/path</code> URL.
+Devstack finds <code>.devstack/project.toml</code> and copies the configuration outside the Git checkout.</p>
+<form method="post" action="{{url_for('project_import')}}" class="stacked">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label for="import-project-url">Repository or folder URL</label>
+<input id="import-project-url" name="url" class="wide" type="url"
+ placeholder="https://github.com/rafaelpivato/devstack/tree/main/examples/smoke" required>
+<label for="import-project-name">Project name (optional)</label>
+<input id="import-project-name" name="name" class="wide" placeholder="smoke-git">
+<button type="submit">Import project</button>
+</form>
+</section>
+<section class="card">
 <h2>Docker development</h2>
 <p>Managed Compose files live outside Git repositories in each project's <code>.devstack/</code> directory.</p>
 {% if smoke_installed %}
