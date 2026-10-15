@@ -20,6 +20,7 @@ from .applications import (
     load_applications, compose_states, application_status,
     sync_smoke_applications,
 )
+from .template_import import ImportError as TemplateImportError, import_github_project
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
 
@@ -259,6 +260,19 @@ def create_app(config: dict | None = None) -> Flask:
         except GitHubSSHError as exc:
             flash(str(exc), "error")
         return redirect(url_for("github_settings"))
+
+    @app.post("/projects/import")
+    def project_import():
+        try:
+            name, branch = import_github_project(
+                request.form.get("url", ""), request.form.get("name", ""),
+            )
+            flash(f"Imported {name} from GitHub" +
+                  (f" ({branch})" if branch else "") +
+                  ". Review Docker Compose before starting containers.", "ok")
+        except (TemplateImportError, ProjectSetupError, ValueError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("index"))
 
     @app.post("/projects/new")
     def project_create():

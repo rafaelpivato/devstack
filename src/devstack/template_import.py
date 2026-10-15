@@ -8,6 +8,7 @@ the original template directory is retained as the Compose path base.
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import re
 import shutil
@@ -95,11 +96,13 @@ def resolve_tree(checkout: Path, tree: str | None) -> tuple[str, Path]:
     if not matches:
         raise ImportError("GitHub branch not found in repository; verify the tree URL")
     branch = max(matches, key=len)
-    # Switch only to a branch read from Git's actual remote refs.
-    _command([
-        "git", "-C", str(checkout), "switch", "--track",
-        "-c", branch, "origin/" + branch,
-    ])
+    # Clone has already checked out the default branch.
+    active = _command(["git", "-C", str(checkout), "branch", "--show-current"])
+    if active != branch:
+        _command([
+            "git", "-C", str(checkout), "switch", "--track",
+            "-c", branch, "origin/" + branch,
+        ])
     suffix = tree[len(branch):].lstrip("/")
     if not suffix:
         return branch, checkout
@@ -202,10 +205,10 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
         relative = template.relative_to(checkout)
         # No new files are introduced into the cloned Git working tree.
         # Relative contexts must continue resolving against source .devstack.
-        from .docker_stacks import imported_compose_arguments
+        from .docker_stacks import compose_name, imported_compose_arguments
         if compose is not None:
             args = imported_compose_arguments(
-                "devstack-" + name, compose_file, source_dir
+                compose_name(name), compose_file, source_dir
             ) + ["config", "--quiet"]
             try:
                 result = subprocess.run(args, cwd=checkout, text=True,
@@ -236,8 +239,8 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
                     (managed / "compose.yaml").chmod(0o600)
                     import_meta = (
                         "[origin]\n"
-                        f"repository = {__import__('json').dumps(repo)}\n"
-                        f"subdirectory = {__import__('json').dumps(relative.as_posix() if relative != Path('.') else '')}\n"
+                        f"repository = {json.dumps(repo)}\n"
+                        f"subdirectory = {json.dumps(relative.as_posix() if relative != Path('.') else '')}\n"
                     )
                     (managed / "import.toml").write_text(import_meta, encoding="utf-8")
                     (managed / "import.toml").chmod(0o600)

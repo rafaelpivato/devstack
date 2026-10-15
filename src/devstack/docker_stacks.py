@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+import tomllib
 from pathlib import Path
 import re
 import secrets
@@ -86,9 +87,49 @@ def compose_name(name: str) -> str:
     return f"devstack-{slug}-{digest}"
 
 
-def compose_command(name: str) -> list[str]:
-    return ["docker", "compose", "-p", compose_name(name),
-            "-f", str(compose_path(name))]
+def imported_compose_arguments(project_name: str, file: Path, base: Path) -> list[str]:
+    """Keep relative build contexts and mounts anchored at the Git template."""
+    return ["docker", "compose", "-p", project_name,
+            "--project-directory", str(base), "-f", str(file)]
+
+
+def _imported_base(name: str) -> Path | None:
+    """Resolve the original .devstack directory from local import metadata."""
+    meta = managed_dir(name) / "import.toml"
+    if meta.is_symlink():
+        raise DockerError("Import metadata must not be a symlink")
+    if not meta.exists():
+        return None
+    if meta.stat().st_size > 4096:
+        raise DockerError("Import metadata is too large")
+    try:
+        data = tomllib.loads(meta.read_text(encoding="utf-8"))
+        if set(data) != {"origin"} or set(data["origin"]) != {"repository", "subdirectory"}:
+            raise ValueError("Invalid import metadata")
+        repo = data["origin"]["repository"]
+        subdir = data["origin"]["subdirectory"]
+        if not isinstance(repo, str) or not NAME.fullmatch(repo) or ".." in repo:
+            raise ValueError("Invalid imported repository")
+        if not isinstance(subdir, str):
+            raise ValueError("Invalid imported directory")
+        parts = subdir.split("/") if subdir else []
+        if any(part in ("", ".", "..") for part in parts):
+            raise ValueError("Invalid imported directory")
+        root = project_root(name)
+        source = root.joinpath(repo, *parts, ".devstack")
+        if not source.is_dir() or not source.resolve().is_relative_to(root.resolve()):
+            raise ValueError("Original imported template is unavailable")
+        return source
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise DockerError("Invalid or missing imported source template") from exc
+
+
+def compose_command(name: str, file: Path | None = None) -> list[str]:
+    file = file or compose_path(name)
+    source = _imported_base(name)
+    if source is None:
+        return ["docker", "compose", "-p", compose_name(name), "-f", str(file)]
+    return imported_compose_arguments(compose_name(name), file, source)
 
 
 def docker_available() -> bool:
@@ -141,8 +182,7 @@ def save_compose(name: str, content: str) -> None:
             # Neither check nor save executes container commands.
             try:
                 proc = subprocess.run(
-                    ["docker", "compose", "-p", compose_name(name),
-                     "-f", str(staging), "config", "--quiet"],
+                    compose_command(name, staging) + ["config", "--quiet"],
                     cwd=project_root(name),
                     capture_output=True, text=True, timeout=20, check=False,
                 )
