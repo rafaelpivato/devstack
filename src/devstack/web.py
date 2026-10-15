@@ -119,7 +119,8 @@ def create_app(config: dict | None = None) -> Flask:
         try:
             state = runtime.status()
             # Operation tokens are private coordination state, not API data.
-            return {key: value for key, value in state.items() if key != "token"}
+            return {key: value for key, value in state.items()
+                    if key not in ("token", "boot_id")}
         except runtime.RuntimeControlError as exc:
             return {"phase": "error", "message": str(exc)}, 503
 

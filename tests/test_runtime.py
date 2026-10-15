@@ -206,7 +206,7 @@ class RuntimeHTTPTests(unittest.TestCase):
         with self.client.session_transaction() as s:
             self.csrf = s["_csrf"]
 
-    @patch("devstack.web.runtime.status", return_value={"phase": "activating", "project": "demo", "token": "secret"})
+    @patch("devstack.web.runtime.status", return_value={"phase": "activating", "project": "demo", "token": "secret", "boot_id": "private-host-id"})
     def test_api_does_not_expose_transition_token(self, status):
         response = self.client.get("/api/v1/runtime")
         self.assertEqual(response.json, {"phase": "activating", "project": "demo"})
