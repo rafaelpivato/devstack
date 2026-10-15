@@ -131,5 +131,19 @@ class StandaloneImageTests(unittest.TestCase):
         services.assert_not_called()
 
 
+    @patch("devstack.command_runner._project_network",
+           side_effect=CommandError("Compose default network unavailable"))
+    @patch("devstack.command_runner.subprocess.Popen")
+    def test_missing_project_network_records_failure_not_stuck(self, popen, network):
+        token = start_command("demo", "", "run", "redis-cli ping",
+                              image="redis:7-alpine", network="project")
+        self.assertEqual(work("demo", token), 1)
+        self.assertEqual(get_job("demo", token)["state"], "failed")
+        self.assertEqual(get_job("demo", token)["exit_code"], 1)
+        network.assert_called_once_with("demo")
+        # The only Popen call is queueing the worker; no Docker run started.
+        self.assertEqual(popen.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
