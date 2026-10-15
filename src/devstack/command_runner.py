@@ -393,8 +393,16 @@ def cancel_all(project: str, *, timeout: float = 14) -> None:
     active = [record["id"] for record in recent_jobs(project)
               if record.get("state") in ("queued", "running")]
     for identifier in active:
-        _, _, marker = _paths(project, identifier)
+        meta, _, marker = _paths(project, identifier)
         marker.touch(mode=0o600, exist_ok=True)
+        # Queued workers haven't acquired execution admission. Invalidate
+        # metadata so a worker started after this point cannot execute.
+        entry = get_job(project, identifier)
+        if entry.get("state") == "queued":
+            _atomic_write(meta, json.dumps({
+                **entry, "state": "cancelled", "finished": time.time(),
+                "exit_code": None,
+            }))
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not any(get_job(project, identifier).get("state") in ("queued", "running")

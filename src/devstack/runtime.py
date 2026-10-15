@@ -132,8 +132,19 @@ def _stop_jobs(name: str) -> None:
     """
     from .command_runner import cancel_all as cancel_commands
     from .docker_stacks import cancel_all as cancel_compose
-    cancel_commands(name)
-    cancel_compose(name)
+    try:
+        cancel_commands(name)
+        cancel_compose(name)
+    except (OSError, ValueError) as exc:
+        raise RuntimeControlError("Cannot inspect active project jobs") from exc
+    except Exception as exc:
+        # Both job modules expose safe-to-display domain errors. Do not mark
+        # INACTIVE if either reports a running process we could not stop.
+        from .command_runner import CommandError
+        from .docker_stacks import DockerError
+        if isinstance(exc, (CommandError, DockerError)):
+            raise RuntimeControlError("Project workers could not be stopped") from exc
+        raise
 
 
 def _project_name() -> str:

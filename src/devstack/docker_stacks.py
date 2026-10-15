@@ -331,6 +331,11 @@ def cancel_all(name: str, *, timeout: float = 14) -> None:
     if not current or current.get("state") not in ("queued", "running"):
         return
     (folder / "latest.cancel").touch(mode=0o600, exist_ok=True)
+    # A worker that was queued but never launched can be invalidated.
+    # run_job must recheck both identifier and queued/running admission.
+    if current.get("state") == "queued":
+        _write_job(folder, {**current, "state": "cancelled",
+                            "finished": time.time(), "exit_code": None})
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         state = _read_job(folder)
@@ -345,7 +350,7 @@ def run_job(name: str, action: str, job_id: str) -> int:
         return 2
     folder = _jobs_dir(name)
     job = _read_job(folder)
-    if not job or job.get("id") != job_id or job.get("action") != action:
+    if not job or job.get("id") != job_id or job.get("action") != action or job.get("state") != "queued":
         return 2
     from . import runtime
     result_code = 1
