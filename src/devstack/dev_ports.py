@@ -20,8 +20,6 @@ def tailscale_ipv4() -> str | None:
             return None
         value = result.stdout.strip()
         address = ipaddress.ip_address(value)
-        if address.version != 4 or not address.is_global and not address.is_private:
-            return None
         # Tailscale currently allocates the shared 100.64.0.0/10 CGNAT block.
         # Never construct URLs from arbitrary host environment variables.
         if address not in ipaddress.ip_network("100.64.0.0/10"):
