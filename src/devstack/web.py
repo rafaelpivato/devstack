@@ -18,6 +18,7 @@ from .docker_stacks import (
 from .applications import (
     ApplicationError, add_application, remove_application, update_application,
     load_applications, compose_states, application_status,
+    sync_smoke_applications,
 )
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
@@ -65,7 +66,8 @@ def create_app(config: dict | None = None) -> Flask:
     @app.get("/")
     def index():
         rows = []
-        for p in projects().values():
+        configured = projects()
+        for p in configured.values():
             services = [(s.name, service_status(s)) for s in p.services]
             repos = []
             for r in p.repos:
@@ -81,7 +83,8 @@ def create_app(config: dict | None = None) -> Flask:
             except (ApplicationError, DockerError) as exc:
                 apps, app_error = [], str(exc)
             rows.append((p, services, repos, apps, app_error))
-        return render_template("dashboard.html", rows=rows, csrf=token())
+        return render_template("dashboard.html", rows=rows, csrf=token(),
+                               smoke_installed="smoke" in configured)
 
     @app.get("/api/devstack/update-status")
     def devstack_update_status():
@@ -215,6 +218,20 @@ def create_app(config: dict | None = None) -> Flask:
         except (DockerError, ValueError) as exc:
             flash(str(exc), "error")
         return redirect(url_for("index"))
+
+    @app.post("/projects/smoke/sync-applications")
+    def smoke_sync_applications():
+        get_project("smoke")
+        try:
+            added = sync_smoke_applications()
+            flash(
+                f"Smoke applications refreshed: {added} default application(s) added. "
+                "Existing settings and containers were preserved.",
+                "ok",
+            )
+        except (ApplicationError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("index") + "#project-smoke")
 
     @app.get("/settings/github")
     def github_settings():

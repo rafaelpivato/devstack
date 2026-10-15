@@ -260,3 +260,17 @@ class ApplicationWebTests(unittest.TestCase):
                                   data={"_csrf": self.csrf, "application_name": "API",
                                         "service": "api", "port": ""})
         self.assertEqual(result.status_code, 404)
+
+
+    @patch("devstack.web.load_projects", return_value={
+        "smoke": __import__("devstack.core", fromlist=["Project"]).Project("smoke", (), ())
+    })
+    @patch("devstack.web.sync_smoke_applications", return_value=1)
+    def test_sync_smoke_apps_is_csrf_protected(self, sync, projects):
+        response = self.client.post("/projects/smoke/sync-applications")
+        self.assertEqual(response.status_code, 403)
+        sync.assert_not_called()
+        response = self.client.post("/projects/smoke/sync-applications",
+                                    data={"_csrf": self.csrf})
+        self.assertEqual(response.status_code, 302)
+        sync.assert_called_once_with()

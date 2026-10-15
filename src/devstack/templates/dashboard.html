@@ -48,10 +48,14 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 <section class="card">
 <h2>Docker development</h2>
 <p>Managed Compose files live outside Git repositories in each project's <code>.devstack/</code> directory.</p>
+{% if smoke_installed %}
+<p class="section-detail">Smoke fixture already installed. Refresh its default app registration on the smoke project card below.</p>
+{% else %}
 <form method="post" action="{{url_for('smoke_import')}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button type="submit" class="secondary">Install smoke example</button>
 </form>
+{% endif %}
 </section>
 <section class="card" id="devstack-updates">
 <div class="heading"><h2>Devstack updates</h2><small id="devstack-update-phase" aria-live="polite">Checking…</small></div>
@@ -102,6 +106,13 @@ Scheduled checks continue in the background.</small></p>
 <label>Container port (optional, for future previews) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
 <button type="submit">Add application</button>
 </form>
+{% if project.name == 'smoke' %}
+<form method="post" action="{{url_for('smoke_sync_applications')}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit" class="secondary">Refresh smoke applications</button>
+</form>
+<p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
+{% endif %}
 <p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a></p>
 {% if services %}
 <h3>Legacy services</h3>

@@ -305,14 +305,20 @@ def run_job(name: str, action: str, job_id: str) -> int:
     return result_code
 
 
-def import_smoke() -> str:
-    """Copy bundled fixture into a disposable local project, not into Git."""
-    from .project_setup import create_project
+def smoke_fixture_dir() -> Path:
+    """Locate the bundled fixture in the installed release or source checkout."""
     source = Path("/opt/devstack/current/source/examples/smoke")
     if not source.is_dir():
         source = Path(__file__).resolve().parents[2] / "examples/smoke"
     if not source.is_dir():
         raise DockerError("Bundled smoke fixture not found")
+    return source
+
+
+def import_smoke() -> str:
+    """Copy bundled fixture into a disposable local project, not into Git."""
+    from .project_setup import create_project
+    source = smoke_fixture_dir()
     workspace = Path.home() / "workspaces"
     workspace.mkdir(exist_ok=True, mode=0o700)
     destination = workspace / "smoke"

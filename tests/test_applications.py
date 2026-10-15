@@ -144,3 +144,52 @@ class ApplicationStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SmokeApplicationSyncTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        workspace = Path(self.temp.name) / "workspaces" / "smoke"
+        workspace.mkdir(parents=True)
+        manifest = Path(self.temp.name) / "example" / ".devstack"
+        manifest.mkdir(parents=True)
+        (manifest / "project.toml").write_text(
+            '[[applications]]\nname = "Web"\nservice = "web"\nport = 8000\n',
+            encoding="utf-8",
+        )
+        root_patch = patch("devstack.docker_stacks.Path.home",
+                           return_value=Path(self.temp.name))
+        root_patch.start()
+        self.addCleanup(root_patch.stop)
+        projects_patch = patch("devstack.docker_stacks.load_projects",
+                               return_value={"smoke": Project("smoke", (), ())})
+        projects_patch.start()
+        self.addCleanup(projects_patch.stop)
+        fixture_patch = patch("devstack.applications.smoke_fixture_dir",
+                              return_value=manifest.parent)
+        fixture_patch.start()
+        self.addCleanup(fixture_patch.stop)
+
+    def test_existing_smoke_imports_defaults_once(self):
+        from devstack.applications import sync_smoke_applications
+        root = Path(self.temp.name) / "workspaces" / "smoke"
+        (root / ".devstack").mkdir()
+        compose = root / ".devstack" / "compose.yaml"
+        compose.write_text("services: {}\n")
+        add_application("smoke", "Custom", "worker", "")
+        self.assertEqual(sync_smoke_applications(), 1)
+        self.assertEqual(load_applications("smoke"), (
+            Application("Custom", "worker", None),
+            Application("Web", "web", 8000),
+        ))
+        self.assertEqual(sync_smoke_applications(), 0)
+        self.assertEqual(compose.read_text(), "services: {}\n")
+
+    def test_preserve_customized_web_service(self):
+        from devstack.applications import sync_smoke_applications
+        add_application("smoke", "My front end", "web", 9999)
+        self.assertEqual(sync_smoke_applications(), 0)
+        self.assertEqual(load_applications("smoke"), (
+            Application("My front end", "web", 9999),
+        ))

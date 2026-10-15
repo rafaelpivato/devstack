@@ -1,0 +1,7 @@
+# Bundled default app shortlist for the Docker smoke fixture.
+# Supporting Redis and PostgreSQL containers are intentionally excluded.
+
+[[applications]]
+name = "Web"
+service = "web"
+port = 8000
