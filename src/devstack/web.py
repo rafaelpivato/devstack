@@ -26,6 +26,7 @@ from .command_runner import (
     start_command, start_task, save_task, delete_task, cancel_command,
 )
 from .dev_ports import application_urls
+from . import runtime
 from .webhooks import WebhookError, add_webhook, remove_webhook, load_webhooks
 from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
 from .template_import import ImportError as TemplateImportError, import_github_project
@@ -101,6 +102,28 @@ def create_app(config: dict | None = None) -> Flask:
         return {"project": {"name": project.name,
                             "repositories": [repo.name for repo in project.repos]}}
 
+    @app.get("/api/v1/runtime")
+    def runtime_api():
+        try:
+            state = runtime.status()
+            # Operation tokens are private coordination state, not API data.
+            return {key: value for key, value in state.items() if key != "token"}
+        except runtime.RuntimeControlError as exc:
+            return {"phase": "error", "message": str(exc)}, 503
+
+    @app.post("/project/runtime/<action>")
+    def runtime_transition(action):
+        if action not in ("activate", "deactivate"):
+            abort(404)
+        if not projects():
+            abort(404)
+        try:
+            runtime.request_transition(action)
+            flash(f"Runtime {action} queued. Refresh for current state.", "ok")
+        except runtime.RuntimeControlError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("index"))
+
     @app.get("/")
     def index():
         rows = []
@@ -127,7 +150,12 @@ def create_app(config: dict | None = None) -> Flask:
                 linked_source = False
             urls = application_urls(p.name, tuple(a for a, _ in apps))
             rows.append((p, services, repos, apps, app_error, linked_source, urls))
+        try:
+            lifecycle = runtime.status()
+        except runtime.RuntimeControlError as exc:
+            lifecycle = {"phase": "error", "message": str(exc)}
         return render_template("dashboard.html", rows=rows, csrf=token(),
+                               runtime_state=lifecycle,
                                smoke_installed="smoke" in configured)
 
     @app.get("/api/devstack/update-status")
@@ -355,6 +383,9 @@ def create_app(config: dict | None = None) -> Flask:
     @app.post("/project/docker/action/<action>")
     def docker_action(name, action):
         get_project(name)
+        if action in ("up", "stop", "down"):
+            flash("Use project Activate / Deactivate for runtime lifecycle.", "error")
+            return redirect(url_for("docker_project", name=name))
         try:
             queue_action(name, action)
             flash(f"Docker {action} queued. Follow progress below.", "ok")
@@ -525,7 +556,7 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.post("/project/action/<action>")
     def operate(name, action):
-        if action not in ("start", "stop", "update"):
+        if action != "update":
             abort(404)
         project = get_project(name)
         try:

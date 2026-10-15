@@ -39,9 +39,9 @@ Only loopback ports should be published. Saving validates the definition but doe
 </section>
 <section class="card">
 <h2>Container lifecycle</h2>
-<p><small>Operations run in the background and do not block your iPhone browser. Down does not delete persistent volumes.</small></p>
+<p><small>Build and restart are maintenance operations. Use Activate / Deactivate on the dashboard to start and stop the runtime. Deactivation preserves named volumes.</small></p>
 <div class="actions">
-{% for action,label in [('build','Build'),('up','Start / rebuild'),('restart','Restart'),('stop','Stop'),('down','Down')] %}
+{% for action,label in [('build','Build'),('restart','Restart')] %}
 <form method="post" action="{{url_for('docker_action',name=project.name,action=action)}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button type="submit" class="{% if action in ['stop','down'] %}danger{% else %}secondary{% endif %}" {% if not docker_ready %}disabled{% endif %}>{{label}}</button>

@@ -93,6 +93,22 @@ Scheduled checks continue in the background.</small></p>
 {% for project, services, repos, apps, app_error, linked_source, dev_urls in rows %}
 <section class="card" id="project-{{project.name}}">
 <div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ apps|length }} applications</small></div>
+<div class="card" id="runtime">
+<h3>Development runtime</h3>
+<p>State: <strong id="runtime-phase">{{ runtime_state.phase }}</strong>
+{% if runtime_state.message %}<span class="status">{{ runtime_state.message }}</span>{% endif %}</p>
+<p class="section-detail">Activation starts the entire Compose stack. Deactivation stops containers while retaining project files and volumes. Restarting DevStack reconciles to inactive.</p>
+{% if runtime_state.phase == "inactive" %}
+<form method="post" action="{{url_for('runtime_transition',action='activate')}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit">Activate project</button></form>
+{% elif runtime_state.phase in ["active","error"] %}
+<form method="post" action="{{url_for('runtime_transition',action='deactivate')}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit" class="stop">Deactivate / recover</button></form>
+{% endif %}
+<p><small>Commands and standalone image jobs receive full runtime fencing in PR 03.</small></p>
+</div>
 <h3>Applications</h3>
 <p class="section-detail">Only applications you choose appear here. Docker infrastructure and utilities remain in Compose management. Registration does not expose network ports.</p>
 {% if app_error %}<p class="message error">Could not read applications: {{app_error}}</p>{% endif %}
@@ -137,7 +153,7 @@ Scheduled checks continue in the background.</small></p>
 <h3>Legacy services</h3>
 <p class="section-detail">Configured in the legacy workspace configuration; independent of managed Docker stacks.</p>
 <div class="row">
-{% for action,label,style in [('start','Start legacy services',''),('stop','Stop legacy services','stop')] %}
+{% for action,label,style in [] %}
 <form method="post" action="{{url_for('operate',name=project.name,action=action)}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button class="{{style}}" type="submit">{{label}}</button></form>

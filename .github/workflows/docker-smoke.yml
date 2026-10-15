@@ -94,6 +94,45 @@ jobs:
               assert client.post("/hooks/smoke/not-allowed", data=body).status_code == 404
               assert client.get("/hooks/smoke/test").status_code == 405
           PY
+      - name: Verify actual activation and deactivation lifecycle
+        run: |
+          set -euo pipefail
+          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          import secrets
+          import tempfile
+          from pathlib import Path
+          from unittest.mock import patch
+          from devstack import runtime
+          from devstack import docker_stacks
+          from devstack.workspace import Project
+
+          compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
+          cmd = ["docker", "compose", "-p", "devstack-smoke", "-f", str(compose)]
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              with (
+                  patch("devstack.runtime._folder", return_value=root),
+                  patch("devstack.runtime.load_project", return_value=Project("smoke", ())),
+                  patch.object(docker_stacks, "compose_path", return_value=compose),
+                  patch.object(docker_stacks, "compose_command", return_value=cmd),
+                  patch.object(docker_stacks, "compose_name", return_value="devstack-smoke"),
+                  patch.object(docker_stacks, "project_root", return_value=Path.cwd()),
+              ):
+                  activate = secrets.token_hex(12)
+                  runtime._write({"phase": "activating", "project": "smoke", "token": activate})
+                  assert runtime.perform("activate", "smoke", activate) == 0, runtime.status()
+                  assert runtime.status()["phase"] == "active"
+                  deactivate = secrets.token_hex(12)
+                  runtime._write({"phase": "deactivating", "project": "smoke", "token": deactivate})
+                  assert runtime.perform("deactivate", "smoke", deactivate) == 0, runtime.status()
+                  assert runtime.status()["phase"] == "inactive"
+                  assert not runtime._owned_ids("smoke"), "Inactive project retains containers"
+                  volumes = __import__("subprocess").run([
+                      "docker", "volume", "ls", "--quiet",
+                      "--filter", "label=com.docker.compose.project=devstack-smoke",
+                  ], check=True, capture_output=True, text=True)
+                  assert volumes.stdout.strip(), "Deactivate unexpectedly removed named volumes"
+          PY
       - name: Inspect service logs
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke logs --no-color --tail 50
