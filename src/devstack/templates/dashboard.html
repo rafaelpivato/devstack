@@ -149,7 +149,7 @@ Scheduled checks continue in the background.</small></p>
 <p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
 {% endif %}
 <p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a> · <a href="{{url_for('webhooks_page',name=project.name)}}">Public webhook routes →</a>{% if linked_source %} · <a href="{{url_for('project_configuration',name=project.name)}}">Sync project configuration →</a>{% endif %}</p>
-{% if services %}
+{% if false and services %}
 <h3>Legacy services</h3>
 <p class="section-detail">Configured in the legacy workspace configuration; independent of managed Docker stacks.</p>
 <div class="row">

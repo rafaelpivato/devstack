@@ -100,6 +100,42 @@ def _locked(*, blocking: bool = False):
         os.close(fd)
 
 
+@contextmanager
+def admit(name: str):
+    """Serialize the admission/launch boundary with runtime transitions.
+
+    A worker must take this lock *immediately before* starting Docker work;
+    queued work alone conveys no authorization. Nonblocking acquisition
+    prevents deadlocks while shutdown is waiting for existing workers.
+    """
+    with _locked():
+        current = status()
+        if current.get("phase") != "active" or current.get("project") != name:
+            raise RuntimeControlError("Project execution is allowed only while active")
+        yield
+
+
+def is_active(name: str) -> bool:
+    """Advisory poll for running workers, which must stop on deactivation."""
+    try:
+        current = status()
+        return current.get("phase") == "active" and current.get("project") == name
+    except (RuntimeControlError, OSError, ValueError):
+        return False
+
+
+def _stop_jobs(name: str) -> None:
+    """Ask all managed background jobs to stop and verify they have settled.
+
+    This runs while the controller holds the exclusive runtime lock. Workers
+    poll the unguarded persisted phase; no worker may be newly admitted.
+    """
+    from .command_runner import cancel_all as cancel_commands
+    from .docker_stacks import cancel_all as cancel_compose
+    cancel_commands(name)
+    cancel_compose(name)
+
+
 def _project_name() -> str:
     project = load_project()
     if project is None:
@@ -120,13 +156,17 @@ def _docker(args: list[str], *, timeout: int = 180) -> subprocess.CompletedProce
 
 def _owned_ids(name: str) -> list[str]:
     from .docker_stacks import compose_name
-    result = _docker(["docker", "ps", "-a", "--filter",
-                      f"label=com.docker.compose.project={compose_name(name)}",
-                      "--format", "{{.ID}}"], timeout=30)
-    ids = result.stdout.splitlines()
-    if any(not CONTAINER_ID.fullmatch(value.strip()) for value in ids):
-        raise RuntimeControlError("Unrecognized Docker container identifier")
-    return [item.strip() for item in ids]
+    ids: set[str] = set()
+    for label in (f"com.docker.compose.project={compose_name(name)}",
+                  f"devstack.project={compose_name(name)}"):
+        result = _docker(["docker", "ps", "-a", "--filter",
+                          "label=" + label, "--format", "{{.ID}}"], timeout=30)
+        for value in result.stdout.splitlines():
+            identifier = value.strip()
+            if not CONTAINER_ID.fullmatch(identifier):
+                raise RuntimeControlError("Unrecognized Docker container identifier")
+            ids.add(identifier)
+    return sorted(ids)
 
 
 def _clean(name: str) -> None:
@@ -228,11 +268,13 @@ def perform(action: str, name: str, token: str) -> int:
         try:
             if action == "activate":
                 command = _validated_compose(name)
+                _stop_jobs(name)
                 _clean(name)
                 _docker(command + ["up", "--detach", "--build", "--wait",
                                    "--wait-timeout", "180"], timeout=MAX_RUN_SECONDS)
                 phase = "active"
             else:
+                _stop_jobs(name)
                 _clean(name)
                 phase = "inactive"
             _write({"phase": phase, "project": name, "updated_at": time.time()})
@@ -266,6 +308,7 @@ def reconcile() -> bool:
             names.add(current["project"])
         try:
             for name in sorted(names):
+                _stop_jobs(name)
                 _clean(name)
             _write({"phase": "inactive", "project": configured.name if configured else None,
                     "updated_at": time.time()})
