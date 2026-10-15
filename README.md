@@ -591,3 +591,37 @@ to remove temporary standalone containers, just as for temporary Compose
 runs. No Compose service is added, and the image is never shown on the
 application dashboard. A future milestone may add opt-in read-only project
 mounts and explicit secret injection, but neither is enabled here.
+
+## Add and synchronize projects from GitHub
+
+**Add project from GitHub** accepts a GitHub repository or directory URL and
+loads a `.devstack/project.toml`, optional `.devstack/tasks.toml`, and
+optional `.devstack/compose.yaml` from the selected directory. Applications,
+tasks and Compose are copied into the private managed project directory;
+the Git checkout remains untouched. The original source directory is tracked
+in `.devstack/import.toml`.
+
+On a linked project's **Sync project configuration** page:
+
+1. Choose **Update source from Git** to fast-forward the *linked repository's*
+   current branch. Devstack refuses dirty worktrees and non-fast-forward changes.
+   This action does **not** edit local managed settings.
+2. Review additions and updates from the Git template. New tasks and
+   applications are preselected; existing entries—including updates upstream—
+   require an explicit opt-in. Locally customized items are flagged, never
+   silently overwritten. Items deleted from Git are retained locally.
+3. Check the changes you want, then **Apply selected changes**. Compose
+   changes require explicit selection and are validated before saving. Running
+   containers are not restarted or rebuilt automatically.
+
+Newly added GitHub projects capture a baseline of the source files in
+`.devstack/.sync-base/` (private, mode 0600) to identify local customizations.
+Projects added with older releases can still synchronize; because their
+baseline wasn't recorded, differing existing entries are conservatively
+treated as local customizations. The update preview includes a fingerprint
+of source, local and baseline content; applying from an old preview fails
+safely if any of those change.
+
+This is a **configuration sync**, not a second Git clone or a general
+filesystem sync. Local edits in cloned repositories, secrets, other project
+repos and running Docker services are not modified by configuration sync.
