@@ -338,7 +338,7 @@ class CommandRunnerWebTests(unittest.TestCase):
         response = self.client.post(url, data=form)
         self.assertEqual(response.status_code, 302)
         self.assertIn("/commands/" + ("a" * 20), response.location)
-        start.assert_called_once_with("demo", "web", "exec", "python --version")
+        start.assert_called_once_with("demo", "web", "exec", "python --version", image="", network="none")
 
     @patch("devstack.web.load_projects", return_value={
         "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
@@ -352,7 +352,7 @@ class CommandRunnerWebTests(unittest.TestCase):
             self.client.post("/projects/demo/commands/tasks/save", data=data).status_code,
             302,
         )
-        save.assert_called_once_with("demo", "tests", "web", "run", "python -m unittest")
+        save.assert_called_once_with("demo", "tests", "web", "run", "python -m unittest", image="", network="none")
         start.assert_not_called()
         self.assertEqual(
             self.client.post("/projects/demo/commands/tasks/run",
