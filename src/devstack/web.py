@@ -77,7 +77,7 @@ def create_app(config: dict | None = None) -> Flask:
         """Never turn untrusted Host headers into arbitrary preview links."""
         hostname = request.host.split(":")[0].lower()
         if (application.port is None or
-                not re.fullmatch(r"(?:[a-z0-9-]+\\.)+[a-z0-9-]+\\.ts\\.net", hostname)):
+                not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z0-9-]+\.ts\.net", hostname)):
             return None
         return (f"https://{hostname}:8443/p/"
                 f"{quote(project, safe='')}/{quote(application.name, safe='')}/")
