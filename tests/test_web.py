@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from devstack.command_runner import CommandError
 from devstack.web import create_app
+from devstack.core import Project
 from devstack.update_control import UpdateControlError
 
 
@@ -26,7 +27,7 @@ class WebTests(unittest.TestCase):
         self.assertIn(b"No project configured", response.data)
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     def test_post_without_csrf_is_rejected(self, _):
         response = self.client.post("/project/action/start")
@@ -77,7 +78,7 @@ class SetupRoutesTests(unittest.TestCase):
         create.assert_called_once_with("demo")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.add_github_repository")
     def test_add_repo(self, add, _):
@@ -144,7 +145,7 @@ class DockerWebTests(unittest.TestCase):
             self.csrf = session["_csrf"]
 
     @patch("devstack.web.load_projects",
-           return_value={"demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())})
+           return_value={"demo": Project("demo", (), ())})
     @patch("devstack.web.read_compose", return_value="services:\n  web: {}")
     @patch("devstack.web.docker_available", return_value=True)
     @patch("devstack.web.current_job", return_value=None)
@@ -155,7 +156,7 @@ class DockerWebTests(unittest.TestCase):
         self.assertIn(b"Validate and save", result.data)
 
     @patch("devstack.web.load_projects",
-           return_value={"demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())})
+           return_value={"demo": Project("demo", (), ())})
     @patch("devstack.web.save_compose")
     def test_compose_save_requires_csrf(self, save, projects):
         self.assertEqual(
@@ -171,7 +172,7 @@ class DockerWebTests(unittest.TestCase):
         save.assert_called_once_with("demo","services: {}")
 
     @patch("devstack.web.load_projects",
-           return_value={"demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())})
+           return_value={"demo": Project("demo", (), ())})
     @patch("devstack.web.queue_action")
     def test_compose_action_allowed(self, run, projects):
         result=self.client.post("/project/docker/action/build",
@@ -201,7 +202,7 @@ class ApplicationWebTests(unittest.TestCase):
             self.csrf = session["_csrf"]
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.load_applications", return_value=(
         __import__("devstack.applications", fromlist=["Application"]).Application(
@@ -221,7 +222,7 @@ class ApplicationWebTests(unittest.TestCase):
         states.assert_called_once_with("demo")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.add_application")
     def test_create_requires_csrf_and_never_calls_compose(self, add, projects):
@@ -240,7 +241,7 @@ class ApplicationWebTests(unittest.TestCase):
         add.assert_called_once_with("demo", "Frontend", "web", "5173")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.update_application")
     def test_edit_does_not_modify_containers(self, change, projects):
@@ -252,7 +253,7 @@ class ApplicationWebTests(unittest.TestCase):
         change.assert_called_once_with("demo", "API", "Backend", "backend", "")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.remove_application")
     def test_remove_does_not_modify_containers(self, remove, projects):
@@ -270,7 +271,7 @@ class ApplicationWebTests(unittest.TestCase):
 
 
     @patch("devstack.web.load_projects", return_value={
-        "smoke": __import__("devstack.core", fromlist=["Project"]).Project("smoke", (), ())
+        "smoke": Project("smoke", (), ())
     })
     @patch("devstack.web.sync_smoke_applications", return_value=1)
     def test_sync_smoke_apps_is_csrf_protected(self, sync, projects):
@@ -320,7 +321,7 @@ class CommandRunnerWebTests(unittest.TestCase):
             self.csrf = session["_csrf"]
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.command_services", return_value=("web", "redis"))
     @patch("devstack.web.load_tasks", return_value=())
@@ -333,7 +334,7 @@ class CommandRunnerWebTests(unittest.TestCase):
         self.assertIn(b"Saved tasks", result.data)
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.start_command", return_value="a" * 20)
     def test_run_requires_csrf(self, start, projects):
@@ -348,7 +349,7 @@ class CommandRunnerWebTests(unittest.TestCase):
         start.assert_called_once_with("demo", "web", "exec", "python --version", image="", network="none")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.save_task")
     @patch("devstack.web.start_task", return_value="b" * 20)
@@ -368,7 +369,7 @@ class CommandRunnerWebTests(unittest.TestCase):
         start.assert_called_once_with("demo", "tests")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.command_job_info", return_value={
         "id": "c" * 20, "state": "running", "service": "web", "mode": "exec",
@@ -377,7 +378,7 @@ class CommandRunnerWebTests(unittest.TestCase):
     @patch("devstack.web.command_job_output", return_value="Python 3.12")
     @patch("devstack.web.cancel_command")
     def test_status_and_cancel(self, cancel, output, info, projects):
-        url = "/api/project/commands/" + ("c" * 20)
+        url = "/api/v1/project/commands/" + ("c" * 20)
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["output"], "Python 3.12")
@@ -401,7 +402,7 @@ class StandaloneImageWebTests(unittest.TestCase):
             self.csrf = session["_csrf"]
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.command_services", side_effect=CommandError("No Compose file"))
     @patch("devstack.web.load_tasks", return_value=())
@@ -414,7 +415,7 @@ class StandaloneImageWebTests(unittest.TestCase):
         self.assertIn(b'name="network"', response.data)
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.start_command", return_value="a" * 20)
     def test_standalone_image_run_is_forced_to_run_mode(self, command, projects):
@@ -431,7 +432,7 @@ class StandaloneImageWebTests(unittest.TestCase):
         )
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.save_task")
     def test_image_task_save_forces_run_mode(self, save, projects):
@@ -523,7 +524,7 @@ class PublicWebhookAdminWebTests(unittest.TestCase):
             self.csrf = session["_csrf"]
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.load_webhooks", return_value=())
     @patch("devstack.web.load_applications", return_value=(
@@ -539,7 +540,7 @@ class PublicWebhookAdminWebTests(unittest.TestCase):
         self.assertIn(b"Adding a route does", response.data)
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.add_webhook")
     def test_write_requires_csrf(self, add, projects):
@@ -553,7 +554,7 @@ class PublicWebhookAdminWebTests(unittest.TestCase):
         add.assert_called_once_with("demo", "stripe", "API", "/webhooks/stripe")
 
     @patch("devstack.web.load_projects", return_value={
-        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+        "demo": Project("demo", (), ())
     })
     @patch("devstack.web.remove_webhook")
     def test_remove_requires_csrf(self, remove, projects):

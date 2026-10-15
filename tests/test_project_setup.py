@@ -16,6 +16,9 @@ class ProjectSetupTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = Path(self.temp.name) / "workspace.toml"
+        home = patch("devstack.project_setup.Path.home", return_value=Path(self.temp.name))
+        home.start()
+        self.addCleanup(home.stop)
         patcher = patch("devstack.project_setup.config_path", return_value=self.config)
         patcher.start()
         self.addCleanup(patcher.stop)

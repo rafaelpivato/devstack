@@ -172,7 +172,7 @@ class ImportProjectTests(unittest.TestCase):
         self.assertEqual(import_github_project(
             "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke",
             "new-smoke"), ("new-smoke", "main"))
-        with self.assertRaisesRegex(TemplateImportError, "already exists"):
+        with self.assertRaisesRegex(TemplateImportError, "Only one project"):
             import_github_project(
                 "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke",
                 "new-smoke")
