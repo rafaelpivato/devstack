@@ -37,11 +37,6 @@ def service_action(service: Service, action: str) -> None:
     # Legacy services have no reliable Docker ownership or cancellation model.
     # They cannot satisfy single-runtime isolation and are unsupported in v0.5.
     raise OperationError("Legacy service execution is disabled; use the managed Compose stack")
-    if service.kind == "compose":
-        run(_compose(service) + (["up", "-d"] if action == "start" else ["down"]),
-            cwd=service.cwd, timeout=180)
-    else:
-        run(["systemctl", "--user", action, service.unit], timeout=60)
 
 
 def project_action(project: Project, action: str) -> None:

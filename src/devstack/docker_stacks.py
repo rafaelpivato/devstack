@@ -360,7 +360,9 @@ def run_job(name: str, action: str, job_id: str) -> int:
     try:
         with (folder / "latest.log").open("ab") as log:
             with runtime.admit(name):
-                if marker.exists():
+                latest = _read_job(folder)
+                if (marker.exists() or latest is None or
+                        latest.get("id") != job_id or latest.get("state") != "queued"):
                     state = "cancelled"
                 else:
                     job["state"] = "running"

@@ -490,7 +490,9 @@ def work(project: str, identifier: str) -> int:
                     args = compose_command(project) + tail
                 from . import runtime
                 with runtime.admit(project):
-                    if marker.exists():
+                    latest = _record(meta)
+                    if (marker.exists() or latest.get("id") != identifier or
+                            latest.get("state") != "running"):
                         status = "cancelled"
                         proc = None
                     else:
