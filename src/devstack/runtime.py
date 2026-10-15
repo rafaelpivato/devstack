@@ -83,13 +83,14 @@ def _write(record: dict) -> None:
 
 
 @contextmanager
-def _locked(*, blocking: bool = False):
+def _locked(*, blocking: bool = False, shared: bool = False):
     path = _folder() / ".runtime.lock"
     flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, 0o600)
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+                        | (0 if blocking else fcntl.LOCK_NB))
         except BlockingIOError as exc:
             raise RuntimeControlError("A runtime operation is already in progress") from exc
         try:
@@ -101,14 +102,14 @@ def _locked(*, blocking: bool = False):
 
 
 @contextmanager
-def admit(name: str):
+def admit(name: str, *, shared: bool = False, blocking: bool = False):
     """Serialize the admission/launch boundary with runtime transitions.
 
     A worker must take this lock *immediately before* starting Docker work;
     queued work alone conveys no authorization. Nonblocking acquisition
     prevents deadlocks while shutdown is waiting for existing workers.
     """
-    with _locked():
+    with _locked(shared=shared, blocking=blocking):
         current = status()
         if current.get("phase") != "active" or current.get("project") != name:
             raise RuntimeControlError("Project execution is allowed only while active")
@@ -242,7 +243,9 @@ def request_transition(action: str) -> dict:
     """Persist intent before forking a worker; only one transition may queue."""
     if action not in TRANSITIONS:
         raise RuntimeControlError("Unsupported runtime transition")
-    with _locked():
+    # A transition waits for already-admitted public webhooks to finish.
+    # No request can cross the ACTIVE -> DEACTIVATING boundary mid-forward.
+    with _locked(blocking=True):
         name = _project_name()
         current = status()
         phase = current["phase"]

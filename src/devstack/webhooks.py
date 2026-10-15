@@ -21,6 +21,7 @@ from flask import Flask, Response, abort, request
 
 from .applications import ApplicationError, load_applications
 from .core import load_projects
+from . import runtime
 from .docker_stacks import DockerError, compose_command, compose_name, compose_path, managed_dir, project_root
 
 MAX_BODY = 2 * 1024 * 1024
@@ -242,48 +243,64 @@ def create_webhook_app(config: dict | None = None) -> Flask:
     if config:
         app.config.update(config)
 
-    @app.post("/hooks/<project>/<name>")
-    def deliver(project: str, name: str):
-        if project not in load_projects() or not ROUTE_RE.fullmatch(name):
+    @app.post("/hooks/<name>")
+    def deliver(name: str):
+        # Routes are globally unique: there is only one configured project.
+        # Unknown endpoints must stay 404 regardless of runtime state.
+        if not ROUTE_RE.fullmatch(name):
             abort(404)
+        projects = load_projects()
+        if len(projects) != 1:
+            abort(404)
+        project = next(iter(projects))
         try:
             route = next((x for x in load_webhooks(project) if x.name == name), None)
             if route is None:
                 abort(404)
-            target_app = next((x for x in load_applications(project)
-                               if x.name == route.application and x.port), None)
-            if target_app is None:
-                abort(404)
-            target = _target(project, target_app)
-            # Do not follow redirects, inherit credentials, accept arbitrary
-            # upstream destinations, or perform URL rewriting.
-            body = request.get_data(cache=False)
-            if len(body) > MAX_BODY:
-                abort(413)
-            headers = {
-                k: v for k, v in request.headers
-                if k.lower() not in REMOVE_HEADERS and not k.lower().startswith("proxy-")
-            }
-            headers["X-Forwarded-Proto"] = "https"
-            req = urllib_request.Request(target + route.path, data=body,
-                                         method="POST", headers=headers)
+            # Concurrent webhooks can read the shared lifecycle lock. An
+            # exclusive deactivation waits for all forwarding to end, while a
+            # later request cannot be admitted once DEACTIVATING is persisted.
             try:
-                try:
-                    response = _HTTP.open(req, timeout=10)
-                except error.HTTPError as exc:
-                    response = exc
-                with response:
-                    content = response.read(MAX_RESPONSE + 1)
-                    if len(content) > MAX_RESPONSE:
-                        raise WebhookError("Upstream response too large")
-                    content_type = response.headers.get("Content-Type", "text/plain")
-                    return Response(content, status=response.status,
-                                    headers={"Content-Type": content_type,
-                                             "Cache-Control": "no-store"})
-            except (OSError, error.URLError, TimeoutError) as exc:
-                raise WebhookError("Application did not answer the webhook") from exc
-        except (WebhookError, ApplicationError, DockerError) as exc:
-            # No internal details or credential material go to the public caller.
+                with runtime.admit(project, shared=True, blocking=True):
+                    target_app = next((x for x in load_applications(project)
+                                       if x.name == route.application and x.port), None)
+                    if target_app is None:
+                        abort(404)
+                    target = _target(project, target_app)
+                    # No redirects, inherited credentials, arbitrary destinations
+                    # or user-provided URL rewriting.
+                    body = request.get_data(cache=False)
+                    if len(body) > MAX_BODY:
+                        abort(413)
+                    headers = {
+                        k: v for k, v in request.headers
+                        if k.lower() not in REMOVE_HEADERS
+                        and not k.lower().startswith("proxy-")
+                    }
+                    headers["X-Forwarded-Proto"] = "https"
+                    req = urllib_request.Request(target + route.path, data=body,
+                                                 method="POST", headers=headers)
+                    try:
+                        try:
+                            response = _HTTP.open(req, timeout=10)
+                        except error.HTTPError as exc:
+                            response = exc
+                        with response:
+                            content = response.read(MAX_RESPONSE + 1)
+                            if len(content) > MAX_RESPONSE:
+                                raise WebhookError("Upstream response too large")
+                            content_type = response.headers.get("Content-Type", "text/plain")
+                            return Response(content, status=response.status,
+                                            headers={"Content-Type": content_type,
+                                                     "Cache-Control": "no-store"})
+                    except (OSError, error.URLError, TimeoutError) as exc:
+                        raise WebhookError("Application did not answer the webhook") from exc
+            except runtime.RuntimeControlError:
+                # Retryable downtime for an explicitly registered endpoint.
+                # No webhook may reactivate a stopped development runtime.
+                return {"error": "Project runtime inactive"}, 503, {"Retry-After": "30"}
+        except (WebhookError, ApplicationError, DockerError):
+            # Public callers never receive internal network/config details.
             return {"error": "Webhook destination unavailable"}, 502
 
     @app.get("/healthz")

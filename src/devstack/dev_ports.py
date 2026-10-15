@@ -1,15 +1,26 @@
-"""Direct development URLs over Tailscale; no HTTP proxy or port publishing.
+"""Discover private development ports from Docker Compose published mappings.
 
-A link appears only when Docker already binds a registered app's container
-port to this machine's exact Tailscale IPv4. Other Compose bindings are ignored.
+No static DevStack development ports, proxy, or firewall rewriting. Only
+running Compose services published on the host's *exact* Tailscale IPv4 may
+appear in private previews. A wildcard binding is never advertised.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 import ipaddress
 import json
 import subprocess
 
 from .docker_stacks import DockerError, compose_command, compose_path, project_root
+from . import runtime
+
+
+@dataclass(frozen=True)
+class PublishedPort:
+    service: str
+    container_port: int
+    host_port: int
+    url: str
 
 
 def tailscale_ipv4() -> str | None:
@@ -20,8 +31,7 @@ def tailscale_ipv4() -> str | None:
             return None
         value = result.stdout.strip()
         address = ipaddress.ip_address(value)
-        # Tailscale currently allocates the shared 100.64.0.0/10 CGNAT block.
-        # Never construct URLs from arbitrary host environment variables.
+        # CGNAT tailnet address, not an arbitrary local/public interface.
         if address not in ipaddress.ip_network("100.64.0.0/10"):
             return None
         return value
@@ -48,33 +58,52 @@ def _rows(project: str) -> list[dict]:
         return []
 
 
-def application_urls(project: str, apps: tuple) -> dict[str, str]:
-    """Only explicitly published *tailnet-bound* host TCP ports get links."""
+def published_ports(project: str) -> tuple[PublishedPort, ...]:
+    """Enumerate only the currently running project's private Compose ports."""
+    if not runtime.is_active(project):
+        return ()
     host = tailscale_ipv4()
-    if host is None or not apps:
-        return {}
-    result = {}
+    if host is None:
+        return ()
+    found: set[PublishedPort] = set()
     for row in _rows(project):
         if str(row.get("State", "")).lower() != "running":
             continue
         service = row.get("Service")
+        if not isinstance(service, str) or not service:
+            continue
         publishers = row.get("Publishers")
         if not isinstance(publishers, list):
             continue
-        for app in apps:
-            if app.service != service or app.port is None:
+        for item in publishers:
+            if not isinstance(item, dict):
                 continue
-            for item in publishers:
-                if not isinstance(item, dict):
+            if (item.get("URL") != host or
+                    str(item.get("Protocol", "")).lower() != "tcp"):
+                continue
+            try:
+                target = int(item["TargetPort"])
+                published = int(item["PublishedPort"])
+                if not (1 <= target <= 65535 and 1 <= published <= 65535):
                     continue
-                if (item.get("URL") != host
-                        or item.get("Protocol", "").lower() != "tcp"):
-                    continue
-                try:
-                    target = int(item.get("TargetPort"))
-                    published = int(item.get("PublishedPort"))
-                except (TypeError, ValueError):
-                    continue
-                if target == app.port and 1 <= published <= 65535:
-                    result[app.name] = f"http://{host}:{published}/"
+            except (KeyError, ValueError, TypeError):
+                continue
+            found.add(PublishedPort(service, target, published,
+                                    f"http://{host}:{published}/"))
+    return tuple(sorted(found, key=lambda p: (p.service, p.host_port, p.container_port)))
+
+
+def application_urls(project: str, apps: tuple) -> dict[str, str]:
+    """Map registered display labels to Compose-selected host URLs."""
+    if not apps:
+        return {}
+    mappings = published_ports(project)
+    result = {}
+    for app in apps:
+        # Optional app.port narrows the matching target port; when absent,
+        # Compose's port mapping remains the authority.
+        candidates = [entry for entry in mappings if entry.service == app.service
+                      and (app.port is None or app.port == entry.container_port)]
+        if candidates:
+            result[app.name] = candidates[0].url
     return result
