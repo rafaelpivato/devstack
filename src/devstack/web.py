@@ -25,6 +25,7 @@ from .command_runner import (
     get_job as command_job_info, job_output as command_job_output,
     start_command, start_task, save_task, delete_task, cancel_command,
 )
+from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
 from .template_import import ImportError as TemplateImportError, import_github_project
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
@@ -366,13 +367,55 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("github_settings"))
 
+    @app.get("/projects/<name>/configuration")
+    def project_configuration(name):
+        project = get_project(name)
+        try:
+            source = source_directory(name)
+            changes, fingerprint = sync_review(name)
+            source_label = str(source.relative_to(project.repos[0].path.parent)) if project.repos else str(source)
+            error = None
+        except (SyncError, DockerError, OSError, ValueError) as exc:
+            source_label, changes, fingerprint, error = None, [], None, str(exc)
+        return render_template("project_configuration.html",
+                               project=project, source_label=source_label,
+                               changes=changes, fingerprint=fingerprint,
+                               error=error, csrf=token())
+
+    @app.post("/projects/<name>/configuration/update-source")
+    def project_source_update(name):
+        project = get_project(name)
+        try:
+            source = source_directory(name)
+            match = next((repo for repo in project.repos
+                          if source.is_relative_to(repo.path)), None)
+            if match is None:
+                raise SyncError("The source repository is not registered")
+            branch = repo_update(match)
+            flash(f"Source updated on {branch}. Review configuration changes before applying.", "ok")
+        except (SyncError, DockerError, OperationError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("project_configuration", name=name))
+
+    @app.post("/projects/<name>/configuration/apply")
+    def project_configuration_apply(name):
+        get_project(name)
+        try:
+            count = sync_apply(name, request.form.getlist("change"),
+                               request.form.get("fingerprint", ""))
+            flash(f"Applied {count} selected configuration change(s). "
+                  "Running containers were not restarted.", "ok")
+        except (SyncError, DockerError, OSError, ValueError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("project_configuration", name=name))
+
     @app.post("/projects/import")
     def project_import():
         try:
             name, branch = import_github_project(
                 request.form.get("url", ""), request.form.get("name", ""),
             )
-            flash(f"Imported {name} from GitHub" +
+            flash(f"Added {name} from GitHub" +
                   (f" ({branch})" if branch else "") +
                   ". Review Docker Compose before starting containers.", "ok")
         except (TemplateImportError, ProjectSetupError, ValueError) as exc:
