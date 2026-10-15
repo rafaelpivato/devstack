@@ -284,7 +284,21 @@ def main() -> int:
     args = parser.parse_args()
     if args.reconcile:
         # Keep dashboard available to show recoverable cleanup errors.
-        return 0 if reconcile() else 0
+        try:
+            if not reconcile():
+                print("Runtime reconciliation incomplete; operator recovery required",
+                      file=sys.stderr, flush=True)
+        except (RuntimeControlError, OSError, ValueError) as exc:
+            # State corruption is fail-closed; no activation happens on boot.
+            try:
+                _write({"phase": "error", "project": None,
+                        "message": "Runtime reconciliation unavailable",
+                        "updated_at": time.time()})
+            except (RuntimeControlError, OSError):
+                pass
+            print(f"Runtime reconciliation unavailable: {exc}",
+                  file=sys.stderr, flush=True)
+        return 0
     if args.worker:
         return perform(*args.worker)
     parser.error("Specify --reconcile or --worker")
