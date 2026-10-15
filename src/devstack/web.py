@@ -309,7 +309,7 @@ def create_app(config: dict | None = None) -> Flask:
         return render_template("command_output.html", project=name, job=job,
                                csrf=token())
 
-    @app.get("/api/project/commands/<identifier>")
+    @app.get("/api/v1/project/commands/<identifier>")
     def command_status(name, identifier):
         get_project(name)
         try:
@@ -362,7 +362,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("docker_project", name=name))
 
-    @app.get("/api/project/docker/status")
+    @app.get("/api/v1/project/docker/status")
     def docker_status(name):
         get_project(name)
         job = current_job(name)

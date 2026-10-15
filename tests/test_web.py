@@ -25,7 +25,10 @@ class WebTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertIn(b"No project configured", response.data)
 
-    def test_post_without_csrf_is_rejected(self):
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    def test_post_without_csrf_is_rejected(self, _):
         response = self.client.post("/project/action/start")
         self.assertEqual(response.status_code, 403)
 
@@ -73,8 +76,11 @@ class SetupRoutesTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         create.assert_called_once_with("demo")
 
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
     @patch("devstack.web.add_github_repository")
-    def test_add_repo(self, add):
+    def test_add_repo(self, add, _):
         response = self.client.post("/project/repos/new", data={
             "_csrf": self.csrf, "url": "git@github.com:org/api.git",
             "name": "api", "branch": "develop",
