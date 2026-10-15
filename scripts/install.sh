@@ -101,7 +101,7 @@ systemctl daemon-reload
 systemctl enable devstack.service
 # Private preview proxy listens only on localhost until explicitly configured
 # with Tailscale Serve. PartOf ensures restarts track release activation.
-systemctl enable --now devstack-preview.service
+systemctl enable devstack-preview.service
 systemctl enable --now devstack-update.timer
 if ! systemctl start devstack-update.service; then
   echo "No working release installed yet (or update failed). See updater journal." >&2
@@ -115,6 +115,9 @@ fi
 # RuntimeDirectory and its new watcher without waiting for another release.
 if systemctl is-active --quiet devstack.service; then
   systemctl restart devstack.service
+  if ! systemctl start devstack-preview.service; then
+    echo "Private preview listener not yet available; check devstack-preview.service." >&2
+  fi
 fi
 systemctl enable --now devstack-update-request.path
 
