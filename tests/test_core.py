@@ -11,22 +11,21 @@ from devstack.core import (
 
 class ConfigTests(unittest.TestCase):
     def test_load_example(self):
-        projects = load_projects(Path("examples/projects.toml"))
-        self.assertIn("trusted-outreach", projects)
-        self.assertEqual(len(projects["trusted-outreach"].repos), 2)
-        self.assertEqual(projects["trusted-outreach"].services[0].kind, "compose")
+        projects = load_projects(Path("examples/workspace.toml"))
+        self.assertEqual(list(projects), ["demo"])
+        self.assertEqual(len(projects["demo"].repos), 2)
 
     def test_reject_unknown_service_kind(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "projects.toml"
-            path.write_text('[[projects]]\nname="a"\n[[projects.services]]\nname="b"\nkind="shell"\n')
+            path = Path(directory) / "workspace.toml"
+            path.write_text('[project]\nname="a"\n[[project.services]]\nname="b"\nkind="shell"\n')
             with self.assertRaises(ValueError):
                 load_projects(path)
 
     def test_reject_compose_escape(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "projects.toml"
-            path.write_text('[[projects]]\nname="a"\n[[projects.services]]\nname="b"\nkind="compose"\ncwd="."\ncompose_file="../elsewhere.yml"\n')
+            path = Path(directory) / "workspace.toml"
+            path.write_text('[project]\nname="a"\n[[project.services]]\nname="b"\nkind="compose"\ncwd="."\ncompose_file="../elsewhere.yml"\n')
             with self.assertRaises(ValueError):
                 load_projects(path)
 

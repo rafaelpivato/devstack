@@ -34,9 +34,10 @@ button:disabled{opacity:.55;cursor:not-allowed} h1{margin-bottom:0}h3{margin-bot
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% for kind,message in messages %}<p role="status" class="message {{kind}}">{{message}}</p>{% endfor %}
 {% endwith %}
+{% if not rows %}
 <section class="card">
 <h2>Create project</h2>
-<p>Projects can contain multiple independent GitHub repositories and services.
+<p>The one DevStack project can contain multiple independent GitHub repositories and services.
 Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a> before cloning private repos.</p>
 <form method="post" action="{{url_for('project_create')}}" class="stacked">
 <input type="hidden" name="_csrf" value="{{csrf}}">
@@ -71,6 +72,7 @@ Devstack finds <code>.devstack/project.toml</code> and copies the configuration 
 </form>
 {% endif %}
 </section>
+{% endif %}
 <section class="card" id="devstack-updates">
 <div class="heading"><h2>Devstack updates</h2><small id="devstack-update-phase" aria-live="polite">Checking…</small></div>
 <div class="update-meta">
@@ -86,7 +88,7 @@ Devstack finds <code>.devstack/project.toml</code> and copies the configuration 
 Scheduled checks continue in the background.</small></p>
 </section>
 {% if not rows %}
-<section class="card"><h2>No projects configured</h2><p>Create your first project above.</p></section>
+<section class="card"><h2>No project configured</h2><p>Create your workspace above.</p></section>
 {% endif %}
 {% for project, services, repos, apps, app_error, linked_source, dev_urls in rows %}
 <section class="card" id="project-{{project.name}}">
@@ -133,7 +135,7 @@ Scheduled checks continue in the background.</small></p>
 <p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a> · <a href="{{url_for('webhooks_page',name=project.name)}}">Public webhook routes →</a>{% if linked_source %} · <a href="{{url_for('project_configuration',name=project.name)}}">Sync project configuration →</a>{% endif %}</p>
 {% if services %}
 <h3>Legacy services</h3>
-<p class="section-detail">Configured in the older projects.toml format; independent of managed Docker stacks.</p>
+<p class="section-detail">Configured in the legacy workspace configuration; independent of managed Docker stacks.</p>
 <div class="row">
 {% for action,label,style in [('start','Start legacy services',''),('stop','Stop legacy services','stop')] %}
 <form method="post" action="{{url_for('operate',name=project.name,action=action)}}">
