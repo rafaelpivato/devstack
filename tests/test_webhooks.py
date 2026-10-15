@@ -55,6 +55,9 @@ class WebhookTests(unittest.TestCase):
             patch("devstack.webhooks.load_projects", return_value={
                 "demo": Project("demo", (), ())
             }),
+            patch("devstack.docker_stacks.load_projects", return_value={
+                "demo": Project("demo", (), ())
+            }),
             patch("devstack.webhooks.load_applications", return_value=(
                 Application("API", "backend", 8000),
             )),
