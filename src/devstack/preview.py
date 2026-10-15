@@ -119,13 +119,17 @@ def _fetch(destination: str, base_path: str, remainder: str):
     if len(body) > MAX_REQUEST:
         abort(413)
     path = parse.quote(remainder, safe="/:@!$&'()*+,;=-._~")
-    query = request.query_string.decode("ascii", "strict")
+    try:
+        query = request.query_string.decode("ascii", "strict")
+    except UnicodeDecodeError:
+        abort(400)
+    if len(query) > 4096:
+        abort(414)
     url = destination + "/" + path + ("?" + query if query else "")
     headers = {key: value for key, value in request.headers
                if key.lower() not in EXCLUDED and not key.lower().startswith("proxy-")}
     # Keep dev service cookies and admin credentials entirely separated even
     # though both Tailscale ports use the same hostname (cookies are not port scoped).
-    headers["Host"] = parse.urlsplit(destination).netloc
     headers["X-Forwarded-Prefix"] = base_path
     headers["X-Forwarded-Proto"] = "https"
     upstream = urllib_request.Request(url, data=body if body else None,
@@ -179,6 +183,12 @@ def create_preview_app(config: dict | None = None) -> Flask:
             return _fetch(destination, "/p/" + project + "/" + application, remainder)
         except PreviewError as exc:
             return {"error": str(exc)}, 502
+
+    @app.get("/")
+    def index():
+        # The preview origin must never render or forward the admin dashboard.
+        return {"scope": "private application previews",
+                "message": "Choose a registered application from the Devstack dashboard."}
 
     @app.get("/healthz")
     def health():
