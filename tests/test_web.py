@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from devstack.command_runner import CommandError
 from devstack.web import create_app
 from devstack.update_control import UpdateControlError
 
@@ -383,3 +384,57 @@ class CommandRunnerWebTests(unittest.TestCase):
                              data={"_csrf": self.csrf}).status_code, 302
         )
         cancel.assert_called_once_with("demo", "c" * 20)
+
+
+class StandaloneImageWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.command_services", side_effect=CommandError("No Compose file"))
+    @patch("devstack.web.load_tasks", return_value=())
+    @patch("devstack.web.recent_jobs", return_value=[])
+    def test_standalone_form_available_without_compose(self, history, tasks, services, projects):
+        response = self.client.get("/projects/demo/commands")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Standalone Docker image", response.data)
+        self.assertIn(b'name="target"', response.data)
+        self.assertIn(b'name="network"', response.data)
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.start_command", return_value="a" * 20)
+    def test_standalone_image_run_is_forced_to_run_mode(self, command, projects):
+        values = {"target": "image", "image": "alpine:3.20", "network": "none",
+                  "command": "echo hello"}
+        self.assertEqual(self.client.post("/projects/demo/commands/run",
+                                          data=values).status_code, 403)
+        command.assert_not_called()
+        values["_csrf"] = self.csrf
+        result = self.client.post("/projects/demo/commands/run", data=values)
+        self.assertEqual(result.status_code, 302)
+        command.assert_called_once_with(
+            "demo", "", "run", "echo hello", image="alpine:3.20", network="none"
+        )
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.save_task")
+    def test_image_task_save_forces_run_mode(self, save, projects):
+        values = {"_csrf": self.csrf, "target": "image", "task": "db",
+                  "image": "postgres:16", "network": "project",
+                  "command": "pg_isready -h postgres"}
+        response = self.client.post("/projects/demo/commands/tasks/save", data=values)
+        self.assertEqual(response.status_code, 302)
+        save.assert_called_once_with(
+            "demo", "db", "", "run", "pg_isready -h postgres",
+            image="postgres:16", network="project"
+        )
