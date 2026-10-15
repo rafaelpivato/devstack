@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import re
 import secrets
-from urllib.parse import quote
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 
@@ -27,6 +25,8 @@ from .command_runner import (
     get_job as command_job_info, job_output as command_job_output,
     start_command, start_task, save_task, delete_task, cancel_command,
 )
+from .dev_ports import application_urls
+from .webhooks import WebhookError, add_webhook, remove_webhook, load_webhooks
 from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
 from .template_import import ImportError as TemplateImportError, import_github_project
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
@@ -72,16 +72,6 @@ def create_app(config: dict | None = None) -> Flask:
         ):
             abort(403)
 
-    @app.template_global("preview_link")
-    def preview_link(project, application):
-        """Never turn untrusted Host headers into arbitrary preview links."""
-        hostname = request.host.split(":")[0].lower()
-        if (application.port is None or
-                not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z0-9-]+\.ts\.net", hostname)):
-            return None
-        return (f"https://{hostname}:8443/p/"
-                f"{quote(project, safe='')}/{quote(application.name, safe='')}/")
-
     @app.get("/")
     def index():
         rows = []
@@ -106,7 +96,8 @@ def create_app(config: dict | None = None) -> Flask:
                 linked_source = True
             except (SyncError, DockerError, OSError):
                 linked_source = False
-            rows.append((p, services, repos, apps, app_error, linked_source))
+            urls = application_urls(p.name, tuple(a for a, _ in apps))
+            rows.append((p, services, repos, apps, app_error, linked_source, urls))
         return render_template("dashboard.html", rows=rows, csrf=token(),
                                smoke_installed="smoke" in configured)
 
@@ -135,6 +126,40 @@ def create_app(config: dict | None = None) -> Flask:
         except UpdateControlError as exc:
             return {"ok": False, "message": str(exc)}, 503
         return {"ok": True, "message": message}, 202
+
+    @app.get("/projects/<name>/webhooks")
+    def webhooks_page(name):
+        project = get_project(name)
+        try:
+            routes = load_webhooks(name)
+            applications = tuple(a for a in load_applications(name) if a.port)
+            error = None
+        except (WebhookError, ApplicationError, DockerError, OSError) as exc:
+            routes, applications, error = (), (), str(exc)
+        return render_template("webhooks.html", project=project, routes=routes,
+                               applications=applications, error=error, csrf=token())
+
+    @app.post("/projects/<name>/webhooks/new")
+    def webhooks_add(name):
+        get_project(name)
+        try:
+            add_webhook(name, request.form.get("webhook_name", ""),
+                        request.form.get("application", ""),
+                        request.form.get("path", ""))
+            flash("Webhook route added. Public ingress requires separate Funnel opt-in.", "ok")
+        except (WebhookError, ApplicationError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("webhooks_page", name=name))
+
+    @app.post("/projects/<name>/webhooks/<route_name>/remove")
+    def webhooks_remove(name, route_name):
+        get_project(name)
+        try:
+            remove_webhook(name, route_name)
+            flash("Webhook route removed.", "ok")
+        except (WebhookError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("webhooks_page", name=name))
 
     @app.post("/projects/<name>/applications/new")
     def application_create(name):
