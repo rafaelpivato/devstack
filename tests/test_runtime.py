@@ -111,7 +111,7 @@ class RuntimeTests(unittest.TestCase):
                 done.set()
         with runtime.admit("demo", shared=True, blocking=True):
             with runtime.admit("demo", shared=True, blocking=True):
-                worker = threading.Thread(target=deactivate)
+                worker = threading.Thread(target=deactivate, daemon=True)
                 worker.start()
                 self.assertFalse(done.wait(timeout=.2),
                                  "Deactivation crossed an in-flight webhook")
