@@ -1,0 +1,19 @@
+[Unit]
+Description=Devstack private application preview gateway
+After=network.target devstack.service docker.service
+PartOf=devstack.service
+
+[Service]
+Type=simple
+User=@DEVSTACK_USER@
+Environment=DEVSTACK_CONFIG=@DEVSTACK_HOME@/.config/devstack/projects.toml
+WorkingDirectory=@DEVSTACK_HOME@
+ExecStart=/opt/devstack/current/venv/bin/gunicorn --bind 127.0.0.1:8766 --workers 1 --threads 8 --timeout 35 'devstack.preview:create_preview_app()'
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

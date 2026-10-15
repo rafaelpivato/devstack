@@ -67,7 +67,40 @@ def is_empty_serve(status: dict[str, Any]) -> bool:
             and not any(status.values()))
 
 
+PREVIEW_TARGET = "http://127.0.0.1:8766"
+
+
+def preview_serve_active(status: dict[str, Any]) -> bool:
+    """Verify precise tailnet-only Serve state, including isolated previews."""
+    if set(status) - {"TCP", "Web", "AllowFunnel"}:
+        return False
+    if status.get("TCP") != {
+        "443": {"HTTPS": True}, "8443": {"HTTPS": True}
+    } or any((status.get("AllowFunnel") or {}).values()):
+        return False
+    web = status.get("Web")
+    if not isinstance(web, dict) or len(web) != 2:
+        return False
+    mapping = {}
+    for key, value in web.items():
+        if not isinstance(key, str) or not isinstance(value, dict):
+            return False
+        try:
+            port = int(key.rsplit(":", 1)[1])
+        except (ValueError, IndexError):
+            return False
+        if port in mapping:
+            return False
+        mapping[port] = value.get("Handlers")
+    return mapping == {
+        443: {"/": {"Proxy": LOCAL_TARGET}},
+        8443: {"/": {"Proxy": PREVIEW_TARGET}},
+    }
+
+
 def is_our_private_serve(status: dict[str, Any]) -> bool:
+    if preview_serve_active(status):
+        return True
     if set(status) - {"TCP", "Web", "AllowFunnel"}:
         return False
     if status.get("TCP") != {"443": {"HTTPS": True}}:
