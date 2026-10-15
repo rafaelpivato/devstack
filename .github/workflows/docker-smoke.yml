@@ -43,6 +43,17 @@ jobs:
             exec -T web python -m unittest discover -v
           docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke \
             run --rm --no-deps -T web python -m unittest discover -v
+      - name: Test isolated images and optional Compose network
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --security-opt no-new-privileges \
+            --cap-drop ALL python:3.12-alpine python --version
+          network="$(docker network ls --quiet \
+            --filter label=com.docker.compose.project=devstack-smoke \
+            --filter label=com.docker.compose.network=default)"
+          test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
+          docker run --rm --network "$network" --security-opt no-new-privileges \
+            --cap-drop ALL redis:7-alpine redis-cli -h redis ping
       - name: Inspect service logs
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke logs --no-color --tail 50
