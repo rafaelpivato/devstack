@@ -625,3 +625,65 @@ safely if any of those change.
 This is a **configuration sync**, not a second Git clone or a general
 filesystem sync. Local edits in cloned repositories, secrets, other project
 repos and running Docker services are not modified by configuration sync.
+
+## v0.4.0 — tailnet-only application previews (first networking milestone)
+
+Devstack's administrative dashboard stays at `https://<your-node>.ts.net/`
+(HTTPS **443**). Application previews use **another browser origin**,
+`https://<your-node>.ts.net:8443/p/<project>/<application>/`, provided by
+a separately managed preview gateway at `127.0.0.1:8766`. The new service
+can proxy only explicitly registered Compose applications with a declared
+container port. PostgreSQL/Redis and auxiliary services cannot be previewed
+unless you explicitly register them as applications.
+
+The preview gateway validates that the requested service has exactly one
+running Compose container with matching Docker labels, and that it belongs
+to the project's *default Compose network*. It never accepts a client-supplied
+destination URL. It does not use published Compose host ports: the service
+can stay unexposed on the host. Incoming dashboard cookies, authorization
+and forwarding headers are stripped; upstream session cookies are not sent
+to the browser. The gateway limits request and response bodies. Preview
+apps run as untrusted code in a separate HTTPS **port/origin**, not under the
+administrative interface.
+
+### One-off host installation and opt-in
+
+This milestone adds a **root-owned systemd unit and Tailscale setup helper**.
+These are outside Devstack's application release updates and therefore need
+an explicit **one-time reviewed installer refresh** after merging and
+publishing the stable v0.4.0 release:
+
+```bash
+# Review scripts/install.sh from the merged commit first.
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh | sudo bash
+# After the Tailscale dashboard is already enabled:
+sudo python3 /usr/local/lib/devstack/enable-previews.py
+```
+
+The installer provisions `devstack-preview.service` to listen exclusively
+on `127.0.0.1:8766`. The second command confirms an existing, exact private
+dashboard Tailscale Serve mapping and adds **Serve HTTPS 8443 only**, without
+altering 443 or enabling Funnel. It refuses unexpected mappings, public
+routes, or a changed Tailscale identity. This setup is optional; without it,
+the administrator dashboard continues to work but preview links will not.
+
+Use the **Private preview** link for a running application with a configured
+container port, such as `Web` in the smoke stack (port 8000). A project
+imported through GitHub uses its managed copy of the application registry;
+sync project configuration to pick up upstream port definitions.
+
+### Current preview limits
+
+This first increment supports ordinary **HTTP** requests, including
+the bundled smoke example's `/health` endpoint. The preview routes
+are path-prefixed; applications that emit root-relative asset paths (such as
+`/static/bundle.js`) may require a configured base path. Full SPA rewriting,
+WebSockets/HMR and streaming/SSE are **not** supported here. Large requests
+over 5 MiB and responses over 32 MiB fail closed. No public webhook URLs,
+Funnel or ngrok integration are provided in this increment. Those require
+separate approval and stronger exposure-specific controls.
+
+**Tailnet access is not app-level authentication.** Anyone with permission
+to reach this node on HTTPS 8443 under Tailscale ACLs can reach the
+registered preview applications. Restrict your tailnet permissions. No
+cloud firewall rules or instance-level public listeners are modified.
