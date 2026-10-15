@@ -105,7 +105,9 @@ def create_app(config: dict | None = None) -> Flask:
     @app.get("/api/v1/runtime")
     def runtime_api():
         try:
-            return runtime.status()
+            state = runtime.status()
+            # Operation tokens are private coordination state, not API data.
+            return {key: value for key, value in state.items() if key != "token"}
         except runtime.RuntimeControlError as exc:
             return {"phase": "error", "message": str(exc)}, 503
 
