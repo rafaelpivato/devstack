@@ -2,34 +2,8 @@
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Devstack</title>
-<style>
-:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}
-body{max-width:860px;margin:auto;padding:20px 14px;background:#10151c;color:#eaf0f5}
-header,.heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
-small,aside{color:#9caaba} .card{background:#1b2530;border:1px solid #344251;border-radius:14px;margin:16px 0;padding:16px}
-.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0}
-button,input{font:inherit;border-radius:8px;padding:9px 12px}
-button{border:0;background:#3d75bf;color:white;cursor:pointer}
-button.secondary{background:#354354}button.stop{background:#78404a}
-input{max-width:150px;border:1px solid #455564;background:#10151c;color:white}
-input.wide{max-width:520px;width:100%} form.stacked{display:flex;flex-direction:column;align-items:stretch;gap:8px}
-form.stacked input{box-sizing:border-box} label{color:#dbe5ef}
-
-form{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
-a{color:#9dccff}p{line-height:1.5} .message{padding:12px;border-radius:8px;background:#354354}
-.message.error{background:#63333d}.repo{padding:8px 0;border-top:1px solid #354354}
-.status{font-size:.85rem;color:#b9cadb}
-.app-status{display:inline-flex;gap:5px;align-items:center;border-radius:999px;padding:3px 10px;background:#354354;font-size:.82rem}
-.app-status.running{color:#99e5af}.app-status.unhealthy{color:#ffb7a6}
-.app-row{border-top:1px solid #354354;padding:9px 0}
-.app-row details{margin-top:7px}.app-row summary{color:#9dccff;cursor:pointer}
-.app-row form{margin-top:8px}.app-row input{max-width:110px}
-.app-row input.app-name{max-width:170px}
-.section-detail{font-size:.85rem;color:#9caaba}
-.update-meta{display:flex;flex-wrap:wrap;gap:6px 16px}
-.update-meta span{overflow-wrap:anywhere}.update-status{font-size:.9rem;min-height:1.4em}.update-status.error{color:#ffadb7}
-button:disabled{opacity:.55;cursor:not-allowed} h1{margin-bottom:0}h3{margin-bottom:6px}
-</style></head><body>
+<meta name="devstack-csrf" content="{{csrf}}">
+<link rel="stylesheet" href="{{url_for('static',filename='css/dashboard.css')}}"></head><body>
 <header><div><h1>Devstack</h1><small>Remote development control</small></div><div><small>Tailnet/private only</small><p><a href="{{url_for('github_settings')}}">GitHub SSH settings</a></p></div></header>
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% for kind,message in messages %}<p role="status" class="message {{kind}}">{{message}}</p>{% endfor %}
@@ -92,23 +66,36 @@ Scheduled checks continue in the background.</small></p>
 {% endif %}
 {% for project, services, repos, apps, app_error, linked_source, dev_urls in rows %}
 <section class="card" id="project-{{project.name}}">
-<div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ apps|length }} applications</small></div>
+<div class="heading"><h2>{{ project.name }}</h2><small id="project-summary">{{ repos|length }} repositories · {{ apps|length }} applications</small></div>
 <div class="card" id="runtime">
 <h3>Development runtime</h3>
-<p>State: <strong id="runtime-phase">{{ runtime_state.phase }}</strong>
-{% if runtime_state.message %}<span class="status">{{ runtime_state.message }}</span>{% endif %}</p>
-<p class="section-detail">Activation starts the entire Compose stack. Deactivation stops containers while retaining project files and volumes. Restarting DevStack reconciles to inactive.</p>
-{% if runtime_state.phase == "inactive" %}
-<form method="post" action="{{url_for('runtime_transition',action='activate')}}">
+<div class="row"><span class="phase-indicator" id="runtime-phase" data-phase="{{runtime_state.phase}}">{{runtime_state.phase}}</span>
+<small id="dashboard-connection" aria-live="polite">Connecting…</small></div>
+<p id="runtime-message" class="section-detail" aria-live="polite">{{runtime_state.message or ''}}</p>
+<p class="section-detail">Activate to start the entire Compose stack. Deactivate to stop all managed execution while preserving project files and named volumes. Restarts fail closed.</p>
+<div class="row">
+<form method="post" action="{{url_for('runtime_transition',action='activate')}}" data-runtime-action="activate" {% if runtime_state.phase != 'inactive' %}hidden{% endif %}>
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button type="submit">Activate project</button></form>
-{% elif runtime_state.phase in ["active","error"] %}
-<form method="post" action="{{url_for('runtime_transition',action='deactivate')}}">
+<form method="post" action="{{url_for('runtime_transition',action='deactivate')}}" data-runtime-action="deactivate" {% if runtime_state.phase not in ['active','error'] %}hidden{% endif %}>
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button type="submit" class="stop">Deactivate / recover</button></form>
-{% endif %}
-<p><small>Managed execution and public webhook forwarding stop when the project is inactive.</small></p>
 </div>
+<p><small>Managed commands and webhook forwarding stop when inactive.</small></p>
+</div>
+<section class="dashboard-overview" aria-label="Live project overview">
+<div class="heading"><h3>Project overview</h3><small>Live · Compose and runtime state</small></div>
+<div class="overview-grid">
+<div class="overview-section"><h4>Containers</h4><div id="dashboard-containers" aria-live="polite"><p class="status">Loading…</p></div></div>
+<div class="overview-section"><h4>Services</h4><div id="dashboard-services"><p class="status">Loading…</p></div></div>
+<div class="overview-section"><h4>Private ports</h4><div id="dashboard-ports"><p class="status">Loading…</p></div></div>
+<div class="overview-section"><h4>Applications</h4><div id="dashboard-applications"><p class="status">Loading…</p></div></div>
+<div class="overview-section"><h4>Saved tasks</h4><div id="dashboard-tasks"><p class="status">Loading…</p></div></div>
+<div class="overview-section"><h4>Recent jobs</h4><div id="dashboard-jobs"><p class="status">Loading…</p></div><p id="dashboard-compose-job" class="status"></p></div>
+<div class="overview-section"><h4>Public webhooks</h4><div id="dashboard-webhooks"><p class="status">Loading…</p></div></div>
+</div>
+<p id="dashboard-errors" class="status" role="status" aria-live="polite"></p>
+</section>
 <h3>Applications</h3>
 <p class="section-detail">Only applications you choose appear here. Docker Compose controls development port publishing; registration does not expose additional ports.</p>
 {% if app_error %}<p class="message error">Could not read applications: {{app_error}}</p>{% endif %}
@@ -177,77 +164,6 @@ Scheduled checks continue in the background.</small></p>
 </form>
 </section>
 {% endfor %}
-<script>
-(function() {
- const installed = document.getElementById('devstack-installed');
- const latest = document.getElementById('devstack-latest');
- const phase = document.getElementById('devstack-update-phase');
- const status = document.getElementById('devstack-update-message');
- const button = document.getElementById('devstack-update-button');
- const form = document.getElementById('devstack-update-form');
- let submitting = false;
- async function refresh() {
-   try {
-     const response = await fetch('{{url_for("devstack_update_status")}}',
-       {cache: 'no-store', credentials: 'same-origin'});
-     if (!response.ok) throw new Error('Cannot reach update status');
-     const data = await response.json();
-     installed.textContent = data.installed || 'Unknown';
-     latest.textContent = data.latest || 'Unavailable';
-     phase.textContent = data.phase || 'Unknown';
-     const busy = ['queued','updating'].includes(data.phase);
-     button.disabled = submitting || busy || !data.manual_available;
-     if (data.setup_error) {
-       status.textContent = data.setup_error;
-       status.className = 'update-status error';
-     } else if (data.phase === 'failed') {
-       status.textContent = 'Last updater run failed. The previous healthy release should have been restored. See updater logs for details.';
-       status.className = 'update-status error';
-     } else if (data.phase === 'updating') {
-       status.textContent = 'Updating Devstack. The dashboard may disconnect briefly while restarting…';
-       status.className = 'update-status';
-     } else if (data.phase === 'queued') {
-       status.textContent = 'Update queued; waiting for the update service…';
-       status.className = 'update-status';
-     } else {
-       status.textContent = (data.latest && data.latest !== data.installed)
-         ? 'A newer stable release may be available.'
-         : 'Ready to check for stable releases.';
-       status.className = 'update-status';
-     }
-     if (data.release_error && !data.latest && !data.setup_error) {
-       status.textContent += ' GitHub release check unavailable.';
-     }
-   } catch(e) {
-     phase.textContent = 'Reconnecting…';
-     button.disabled = true;
-     status.textContent = 'Devstack is restarting or temporarily unreachable. Retrying…';
-   }
- }
- form.addEventListener('submit', async function(event) {
-   event.preventDefault();
-   if (submitting) return;
-   submitting = true;
-   button.disabled = true;
-   status.textContent = 'Sending update request…';
-   try {
-     const response = await fetch(form.action, {
-       method: 'POST', credentials: 'same-origin',
-       body: new FormData(form),
-     });
-     const data = await response.json();
-     status.textContent = data.message || 'Update request completed';
-     status.className = data.ok ? 'update-status' : 'update-status error';
-   } catch(e) {
-     status.textContent = 'Could not submit update request; check connection.';
-     status.className = 'update-status error';
-   } finally {
-     submitting = false;
-     setTimeout(refresh, 750);
-   }
- });
- refresh();
- setInterval(refresh, 5000);
-})();
-</script>
+<script type="module" src="{{url_for('static',filename='js/dashboard.js')}}"></script>
+<script type="module" src="{{url_for('static',filename='js/updates.js')}}"></script>
 </body></html>

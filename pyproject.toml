@@ -16,4 +16,4 @@ devstack = "devstack.web:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-devstack = ["templates/*.html"]
+devstack = ["templates/*.html", "static/css/*.css", "static/js/*.js"]

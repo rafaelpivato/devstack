@@ -11,7 +11,7 @@ from .workspace import Project
 from .core import OperationError, repo_branch, repo_dirty
 from .applications import ApplicationError, load_applications, compose_states, application_status
 from .command_runner import CommandError, load_tasks, recent_jobs
-from .docker_stacks import DockerError, current_job
+from .docker_stacks import DockerError, current_job, compose_containers
 from .dev_ports import published_ports
 from .webhooks import WebhookError, load_webhooks
 from . import runtime
@@ -45,6 +45,8 @@ def overview(project: Project | None) -> dict:
         "project": None,
         "repositories": [],
         "applications": [],
+        "services": [],
+        "containers": [],
         "ports": [],
         "tasks": [],
         "recent_jobs": [],
@@ -74,8 +76,14 @@ def overview(project: Project | None) -> dict:
 
     applications = _attempt("applications", lambda: load_applications(name), errors, ())
     states = {}
-    if applications and result["runtime"].get("phase") == "active":
-        states = _attempt("containers", lambda: compose_states(name), errors, {})
+    if result["runtime"].get("phase") == "active":
+        states = _attempt("services", lambda: compose_states(name), errors, {})
+        containers = _attempt("containers", lambda: compose_containers(name), errors, ())
+        result["containers"] = list(containers)
+        result["services"] = [
+            {"name": key, "state": value}
+            for key, value in sorted((states or {}).items())
+        ]
     result["applications"] = [
         {"name": app.name, "service": app.service, "container_port": app.port,
          "state": application_status(states, app) if states else "inactive"}

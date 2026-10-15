@@ -35,8 +35,6 @@ function line(title, subtitle, url) {
   if (url) wrapper.appendChild(link("Open ↗", url));
   return wrapper;
 }
-const active = () => byId("runtime-phase")?.textContent?.trim() === "active";
-let lastPhase = null;
 function render(payload) {
   const phase = payload.runtime?.phase || "error";
   const status = byId("runtime-phase");
@@ -61,6 +59,13 @@ function render(payload) {
   if (counters) counters.textContent =
     `${payload.repositories.length} repos · ${payload.applications.length} apps · ${payload.tasks.length} tasks`;
 
+  replaceRows(byId("dashboard-containers"), payload.containers,
+    (container) => line(container.name || container.service,
+      `${container.service} · ${container.state}${container.health ? " · " + container.health : ""}`, null),
+    phase === "active" ? "No containers running." : "Containers stopped.");
+  replaceRows(byId("dashboard-services"), payload.services,
+    (service) => line(service.name, service.state, null),
+    phase === "active" ? "No Compose services available." : "Services inactive.");
   replaceRows(byId("dashboard-applications"), payload.applications,
     (app) => line(app.name, `${app.service} · ${app.state}`, null),
     "No applications configured.");
@@ -85,8 +90,6 @@ function render(payload) {
     const sections = Object.keys(payload.errors || {});
     error.textContent = sections.length ? `Unavailable sections: ${sections.join(", ")}` : "";
   }
-  // A completed activation/deactivation changes links and form state without reloading.
-  lastPhase = phase;
 }
 
 async function refresh() {
