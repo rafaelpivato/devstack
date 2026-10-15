@@ -61,6 +61,14 @@ def status() -> dict:
                 or record.get("phase") not in PHASES
                 or (record.get("project") is not None and not isinstance(record.get("project"), str))):
             raise ValueError("Invalid runtime state")
+        # A separate webhook WSGI service can start independently of the
+        # dashboard. Never trust ACTIVE persisted by a *previous Linux boot*
+        # before systemd has reconciled and verified Docker cleanup.
+        current_boot = boot_id()
+        if (record["phase"] != "inactive" and
+                (not current_boot or record.get("boot_id") != current_boot)):
+            return {"phase": "error", "project": record.get("project"),
+                    "message": "Runtime state belongs to an earlier or unverified host boot"}
         return record
     except (OSError, UnicodeError, ValueError) as exc:
         raise RuntimeControlError("Runtime state is invalid; refusing activation") from exc
@@ -68,6 +76,7 @@ def status() -> dict:
 
 def _write(record: dict) -> None:
     path = _state_path()
+    record = {**record, "boot_id": boot_id()}
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
                                      prefix=".runtime-", delete=False) as file:
         temp = Path(file.name)

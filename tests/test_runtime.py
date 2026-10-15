@@ -148,6 +148,18 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(errors, [])
         popen.assert_called_once()
 
+    def test_persisted_active_state_from_old_boot_fails_closed(self):
+        (self.root / "runtime.json").write_text(
+            json.dumps({"phase": "active", "project": "demo",
+                        "boot_id": "previous-host-boot"})
+        )
+        with patch("devstack.runtime.boot_id", return_value="current-host-boot"):
+            self.assertEqual(runtime.status()["phase"], "error")
+            self.assertFalse(runtime.is_active("demo"))
+            with self.assertRaises(runtime.RuntimeControlError):
+                with runtime.admit("demo", shared=True, blocking=True):
+                    self.fail("Forwarding admitted a stale runtime")
+
     def test_state_corruption_rejected(self):
         (self.root / "runtime.json").write_text('{"phase":"active","project":[]}')
         with self.assertRaisesRegex(runtime.RuntimeControlError, "invalid"):
