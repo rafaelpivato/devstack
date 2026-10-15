@@ -20,9 +20,13 @@ import tempfile
 import time
 import tomllib
 
-from .docker_stacks import DockerError, compose_command, compose_path, managed_dir, project_root
+from .docker_stacks import (
+    DockerError, compose_command, compose_name, compose_path,
+    managed_dir, project_root,
+)
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
+IMAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:@-]{0,254}\Z")
 IDENTIFIER = re.compile(r"[a-f0-9]{20}\Z")
 TIMEOUT = 600
 MAX_TASKS = 40
@@ -41,6 +45,8 @@ class Task:
     service: str
     mode: str
     argv: tuple[str, ...]
+    image: str | None = None
+    network: str = "none"
 
 
 def _name(value: str, *, label: str = "Name") -> str:
@@ -53,6 +59,31 @@ def _mode(value: str) -> str:
     if value not in {"exec", "run"}:
         raise CommandError("Mode must be exec or run")
     return value
+
+
+def _image(value: str) -> str:
+    if (not isinstance(value, str) or not IMAGE.fullmatch(value)
+            or ".." in value or "//" in value or value.endswith(("/", ":"))):
+        raise CommandError("Enter a valid Docker image reference (e.g. python:3.12)")
+    return value
+
+
+def _network(value: str) -> str:
+    if value not in ("none", "project"):
+        raise CommandError("Network must be isolated or project")
+    return value
+
+
+def _task(name: str, service: str, mode: str, command, *,
+          image: str = "", network: str = "none") -> Task:
+    argv = _argv(command)
+    if image:
+        if service or mode != "run":
+            raise CommandError("Standalone images require run mode and no Compose service")
+        return Task(_name(name), "", "run", argv, _image(image), _network(network))
+    if network != "none":
+        raise CommandError("Project network option applies only to standalone images")
+    return Task(_name(name), _name(service, label="Service"), _mode(mode), argv)
 
 
 def _argv(value: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:
@@ -92,12 +123,20 @@ def _parse_tasks(content: str) -> tuple[Task, ...]:
     results = []
     seen = set()
     for entry in parsed.get("tasks", []):
-        if not isinstance(entry, dict) or set(entry) != {"name", "service", "mode", "command"}:
-            raise CommandError("Tasks require name, service, mode and command")
+        if not isinstance(entry, dict) or "name" not in entry or "command" not in entry:
+            raise CommandError("Tasks require name and command")
         if not isinstance(entry["command"], list):
             raise CommandError("Saved commands must be argument arrays")
-        task = Task(_name(entry["name"]), _name(entry["service"], label="Service"),
-                    _mode(entry["mode"]), _argv(entry["command"]))
+        if "image" in entry:
+            if (set(entry) - {"name", "image", "network", "command"}
+                    or "service" in entry or "mode" in entry):
+                raise CommandError("Image tasks accept name, image, network and command")
+            task = _task(entry["name"], "", "run", entry["command"],
+                         image=entry["image"], network=entry.get("network", "none"))
+        else:
+            if set(entry) != {"name", "service", "mode", "command"}:
+                raise CommandError("Service tasks require name, service, mode and command")
+            task = _task(entry["name"], entry["service"], entry["mode"], entry["command"])
         if task.name in seen:
             raise CommandError("Duplicate task")
         seen.add(task.name)
@@ -117,12 +156,17 @@ def load_tasks(project: str) -> tuple[Task, ...]:
 
 
 def _render_tasks(tasks: tuple[Task, ...]) -> str:
-    lines = ["# Commands run inside a Compose service; no implicit shell."]
+    lines = ["# Commands run in containers; no implicit shell."]
     for task in tasks:
-        lines += ["", "[[tasks]]", "name = " + json.dumps(task.name),
-                  "service = " + json.dumps(task.service),
-                  "mode = " + json.dumps(task.mode),
-                  "command = " + json.dumps(list(task.argv))]
+        lines += ["", "[[tasks]]", "name = " + json.dumps(task.name)]
+        if task.image:
+            lines += ["image = " + json.dumps(task.image)]
+            if task.network != "none":
+                lines += ["network = " + json.dumps(task.network)]
+        else:
+            lines += ["service = " + json.dumps(task.service),
+                      "mode = " + json.dumps(task.mode)]
+        lines += ["command = " + json.dumps(list(task.argv))]
     return "\n".join(lines) + "\n"
 
 
@@ -152,8 +196,9 @@ def _directory(project: str) -> Path:
 
 
 def save_task(project: str, name: str, service: str, mode: str,
-              command: str | list[str]) -> None:
-    task = Task(_name(name), _name(service, label="Service"), _mode(mode), _argv(command))
+              command: str | list[str], *, image: str = "",
+              network: str = "none") -> None:
+    task = _task(name, service, mode, command, image=image, network=network)
     folder = _directory(project)
     lock = folder / ".tasks.lock"
     if lock.is_symlink():
@@ -279,10 +324,13 @@ def _prune(project: str) -> None:
 
 
 def start_command(project: str, service: str, mode: str,
-                  command: str | list[str]) -> str:
-    service, mode, argv = _name(service, label="Service"), _mode(mode), _argv(command)
-    if service not in services(project):
+                  command: str | list[str], *, image: str = "",
+                  network: str = "none") -> str:
+    task = _task("manual", service, mode, command, image=image, network=network)
+    if not task.image and task.service not in services(project):
         raise CommandError("Service is not defined by Docker Compose")
+    if task.image and task.network == "project" and not compose_path(project).is_file():
+        raise CommandError("A Compose stack is required for project network access")
     folder = _history_dir(project)
     lock = folder / ".lock"
     if lock.is_symlink():
@@ -293,8 +341,11 @@ def start_command(project: str, service: str, mode: str,
             raise CommandError("Another command is running in this project")
         identifier = secrets.token_hex(10)
         meta, log, _ = _paths(project, identifier)
-        record = {"id": identifier, "service": service, "mode": mode,
-                  "argv": list(argv), "state": "queued", "started": time.time()}
+        record = {"id": identifier, "service": task.service, "mode": task.mode,
+                  "argv": list(task.argv), "state": "queued", "started": time.time()}
+        if task.image:
+            record["image"] = task.image
+            record["network"] = task.network
         _atomic_write(meta, json.dumps(record))
         log.touch(mode=0o600)
         try:
@@ -317,7 +368,8 @@ def start_task(project: str, name: str) -> str:
     task = next((t for t in load_tasks(project) if t.name == name), None)
     if task is None:
         raise CommandError("Saved task not found")
-    return start_command(project, task.service, task.mode, list(task.argv))
+    return start_command(project, task.service, task.mode, list(task.argv),
+                         image=task.image or "", network=task.network)
 
 
 def cancel_command(project: str, identifier: str) -> None:
@@ -326,6 +378,33 @@ def cancel_command(project: str, identifier: str) -> None:
         raise CommandError("This command is no longer active")
     _, _, marker = _paths(project, identifier)
     marker.touch(mode=0o600, exist_ok=True)
+
+
+def _project_network(project: str) -> str:
+    """Find Compose's *default* network by labels; never infer its name."""
+    if not compose_path(project).is_file():
+        raise CommandError("Configure and start the Compose stack before using project networking")
+    labels = [
+        "label=com.docker.compose.project=" + compose_name(project),
+        "label=com.docker.compose.network=default",
+    ]
+    try:
+        proc = subprocess.run(
+            ["docker", "network", "ls", "--quiet",
+             "--filter", labels[0], "--filter", labels[1]],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise CommandError("Cannot inspect Docker networks") from exc
+    if proc.returncode:
+        raise CommandError("Cannot inspect Docker networks")
+    matches = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if len(matches) != 1 or not re.fullmatch(r"[a-f0-9]{12,64}", matches[0]):
+        raise CommandError(
+            "The Compose default network is unavailable or ambiguous. "
+            "Start the project's Compose stack first."
+        )
+    return matches[0]
 
 
 def _terminate(proc: subprocess.Popen, *, run_container: str | None) -> None:
@@ -350,12 +429,10 @@ def work(project: str, identifier: str) -> int:
     if entry.get("id") != identifier or entry.get("state") != "queued":
         return 2
     service, mode, argv = entry["service"], entry["mode"], _argv(entry["argv"])
-    container_name = ("devstack-task-" + identifier) if mode == "run" else None
-    if mode == "exec":
-        tail = ["exec", "-T", service, *argv]
-    else:
-        tail = ["run", "--rm", "--no-deps", "-T",
-                "--name", container_name, service, *argv]
+    image = entry.get("image") or ""
+    network = entry.get("network", "none")
+    task = _task("worker", service, mode, list(argv), image=image, network=network)
+    container_name = ("devstack-task-" + identifier) if (mode == "run" or image) else None
     result = 1
     status = "failed"
     entry["state"] = "running"
@@ -365,8 +442,21 @@ def work(project: str, identifier: str) -> int:
             status = "cancelled"
         else:
             with log.open("ab") as stream:
+                if task.image:
+                    target_network = _project_network(project) if task.network == "project" else "none"
+                    args = [
+                        "docker", "run", "--rm", "--name", container_name,
+                        "--network", target_network,
+                        "--security-opt", "no-new-privileges",
+                        "--cap-drop", "ALL", task.image, *argv,
+                    ]
+                else:
+                    tail = (["exec", "-T", service, *argv] if mode == "exec" else
+                            ["run", "--rm", "--no-deps", "-T",
+                             "--name", container_name, service, *argv])
+                    args = compose_command(project) + tail
                 proc = subprocess.Popen(
-                    compose_command(project) + tail,
+                    args,
                     cwd=project_root(project), stdin=subprocess.DEVNULL,
                     stdout=stream, stderr=subprocess.STDOUT,
                     start_new_session=True, close_fds=True,
