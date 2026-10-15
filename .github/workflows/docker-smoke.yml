@@ -54,6 +54,41 @@ jobs:
           test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
           docker run --rm --network "$network" --security-opt no-new-privileges \
             --cap-drop ALL redis:7-alpine redis-cli -h redis ping
+      - name: Validate preview proxy against real smoke Compose containers
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/devstack-preview-ci
+          /tmp/devstack-preview-ci/bin/pip install -q -e .
+          /tmp/devstack-preview-ci/bin/python - <<'PY'
+          from pathlib import Path
+          from unittest.mock import patch
+          from devstack.preview import create_preview_app
+          from devstack.applications import Application
+          from devstack.core import Project
+
+          root = Path.cwd()
+          compose = root / "examples/smoke/.devstack/compose.yaml"
+          with (
+              patch("devstack.preview.load_projects", return_value={
+                  "smoke": Project("smoke", (), ())
+              }),
+              patch("devstack.preview.load_applications", return_value=(
+                  Application("Web", "web", 8000),
+              )),
+              patch("devstack.preview.compose_path", return_value=compose),
+              patch("devstack.preview.project_root", return_value=root),
+              patch("devstack.preview.compose_name", return_value="devstack-smoke"),
+              patch("devstack.preview.compose_command", return_value=[
+                  "docker", "compose", "-p", "devstack-smoke",
+                  "-f", str(compose),
+              ]),
+          ):
+              client = create_preview_app({"TESTING": True}).test_client()
+              response = client.get("/p/smoke/Web/health")
+              assert response.status_code == 200, response.data
+              assert response.data == b"devstack smoke ok\n", response.data
+              assert "Set-Cookie" not in response.headers
+          PY
       - name: Inspect service logs
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke logs --no-color --tail 50
