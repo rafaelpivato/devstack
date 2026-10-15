@@ -705,3 +705,23 @@ The listener itself is only on loopback; Funnel is **off by default**.
 
 This release has no wildcard forwarding, arbitrary destination URLs,
 general-purpose public proxies or additional tunneling providers.
+
+
+## v0.5 (in development) — private ports and single-project webhooks
+
+This is a **breaking change** from v0.4. See
+[docs/v0.5-roadmap.md](docs/v0.5-roadmap.md).
+
+- Exactly one workspace. Compose is the source of truth for all application
+  host ports. No DevStack-specific development ports or private proxy.
+- Bind published TCP ports to the Linux server's exact `tailscale ip -4`
+  address. Do not bind to `0.0.0.0` or a public address.
+- `GET /api/v1/project/ports` reports only currently running private
+  Compose TCP endpoints, and returns no ports while the runtime is inactive.
+- The webhook Funnel, if explicitly enabled, remains a separate HTTPS port
+  8443 reverse proxy to the loopback-only webhook listener on port 8767.
+  Public routes use `POST /hooks/<name>`, and only previously registered
+  routes are forwarded **while ACTIVE**. Unknown routes return 404; inactive
+  registered routes return 503. A webhook never activates the runtime.
+- Application services must validate their own webhook provider signatures.
+  DevStack never makes the private dashboard or arbitrary Compose ports public.

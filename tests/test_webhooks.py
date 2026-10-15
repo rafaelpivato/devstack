@@ -2,6 +2,7 @@
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from devstack import runtime as runtime_controller
 import threading
 import unittest
 from unittest.mock import patch
@@ -49,6 +50,12 @@ class WebhookTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name)
         (self.home / "workspaces" / "demo" / ".devstack").mkdir(parents=True)
+        lifecycle = self.home / "runtime"
+        lifecycle.mkdir()
+        folder = patch("devstack.runtime._folder", return_value=lifecycle)
+        folder.start()
+        self.addCleanup(folder.stop)
+        runtime_controller._write({"phase": "active", "project": "demo"})
         # Compose helpers use the server user home directory.
         patches = [
             patch("devstack.docker_stacks.Path.home", return_value=self.home),
@@ -92,10 +99,11 @@ class WebhookTests(unittest.TestCase):
         app = create_webhook_app({"TESTING": True})
         c = app.test_client()
         self.assertEqual(c.get("/").status_code, 404)
-        self.assertEqual(c.get("/hooks/demo/stripe").status_code, 405)
-        self.assertEqual(c.post("/hooks/demo/stripe", data=b"").status_code, 404)
+        self.assertEqual(c.get("/hooks/stripe").status_code, 405)
+        self.assertEqual(c.post("/hooks/demo/stripe").status_code, 404)
+        self.assertEqual(c.post("/hooks/stripe", data=b"").status_code, 404)
         add_webhook("demo", "stripe", "API", "/webhooks/stripe")
-        self.assertEqual(c.post("/hooks/demo/other", data=b"").status_code, 404)
+        self.assertEqual(c.post("/hooks/other", data=b"").status_code, 404)
         self.assertEqual(c.post("/p/demo/stripe/", data=b"").status_code, 404)
         self.assertEqual(c.get("/healthz").json["scope"], "webhook-only")
 
@@ -103,7 +111,7 @@ class WebhookTests(unittest.TestCase):
         add_webhook("demo", "stripe", "API", "/webhooks/stripe")
         payload = b'{"id":"evt_123","raw": true}'
         c = create_webhook_app({"TESTING": True}).test_client()
-        result = c.post("/hooks/demo/stripe", data=payload,
+        result = c.post("/hooks/stripe", data=payload,
                         headers={"Stripe-Signature": "t=100,v1=abcd",
                                  "Authorization": "provider-custom",
                                  "Content-Type": "application/json",
@@ -121,10 +129,24 @@ class WebhookTests(unittest.TestCase):
         self.assertNotIn("Cookie", headers)
         self.assertNotIn("X-Forwarded-For", headers)
 
+    def test_registered_route_is_unavailable_while_not_active(self):
+        add_webhook("demo", "stripe", "API", "/webhooks/stripe")
+        client = create_webhook_app({"TESTING": True}).test_client()
+        for phase in ("inactive", "activating", "deactivating", "error"):
+            with self.subTest(phase=phase):
+                runtime_controller._write({"phase": phase, "project": "demo"})
+                with patch("devstack.webhooks._target") as target:
+                    result = client.post("/hooks/stripe", data=b'{"id":"abc"}')
+                    self.assertEqual(result.status_code, 503)
+                    self.assertEqual(result.headers["Retry-After"], "30")
+                    target.assert_not_called()
+                self.assertEqual(client.post("/hooks/other").status_code, 404)
+        self.assertEqual(TargetHandler.captured, [])
+
     def test_payload_size_limit(self):
         add_webhook("demo", "stripe", "API", "/webhooks/stripe")
         c = create_webhook_app({"TESTING": True}).test_client()
-        result = c.post("/hooks/demo/stripe", data=b"x" * (2 * 1024 * 1024 + 1))
+        result = c.post("/hooks/stripe", data=b"x" * (2 * 1024 * 1024 + 1))
         self.assertEqual(result.status_code, 413)
 
 

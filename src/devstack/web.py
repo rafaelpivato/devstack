@@ -25,7 +25,7 @@ from .command_runner import (
     get_job as command_job_info, job_output as command_job_output,
     start_command, start_task, save_task, delete_task, cancel_command,
 )
-from .dev_ports import application_urls
+from .dev_ports import application_urls, published_ports
 from . import runtime
 from .webhooks import WebhookError, add_webhook, remove_webhook, load_webhooks
 from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
@@ -102,12 +102,25 @@ def create_app(config: dict | None = None) -> Flask:
         return {"project": {"name": project.name,
                             "repositories": [repo.name for repo in project.repos]}}
 
+    @app.get("/api/v1/project/ports")
+    def project_ports_api():
+        configured = projects()
+        if len(configured) != 1:
+            return {"ports": []}
+        name = next(iter(configured))
+        return {"ports": [
+            {"service": item.service, "container_port": item.container_port,
+             "host_port": item.host_port, "url": item.url}
+            for item in published_ports(name)
+        ]}
+
     @app.get("/api/v1/runtime")
     def runtime_api():
         try:
             state = runtime.status()
             # Operation tokens are private coordination state, not API data.
-            return {key: value for key, value in state.items() if key != "token"}
+            return {key: value for key, value in state.items()
+                    if key not in ("token", "boot_id")}
         except runtime.RuntimeControlError as exc:
             return {"phase": "error", "message": str(exc)}, 503
 

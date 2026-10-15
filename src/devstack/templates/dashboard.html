@@ -107,10 +107,10 @@ Scheduled checks continue in the background.</small></p>
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <button type="submit" class="stop">Deactivate / recover</button></form>
 {% endif %}
-<p><small>Commands and standalone image jobs receive full runtime fencing in PR 03.</small></p>
+<p><small>Managed execution and public webhook forwarding stop when the project is inactive.</small></p>
 </div>
 <h3>Applications</h3>
-<p class="section-detail">Only applications you choose appear here. Docker infrastructure and utilities remain in Compose management. Registration does not expose network ports.</p>
+<p class="section-detail">Only applications you choose appear here. Docker Compose controls development port publishing; registration does not expose additional ports.</p>
 {% if app_error %}<p class="message error">Could not read applications: {{app_error}}</p>{% endif %}
 {% for app,status in apps %}
 <div class="app-row">
@@ -138,7 +138,7 @@ Scheduled checks continue in the background.</small></p>
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <label>Application label <input name="application_name" class="wide" placeholder="API" maxlength="64" required></label>
 <label>Compose service <input name="service" class="wide" placeholder="api" required></label>
-<label>Container port (used for direct Tailscale URLs) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
+<label>Optional container-port filter (Compose controls published ports) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
 <button type="submit">Add application</button>
 </form>
 {% if project.name == 'smoke' %}

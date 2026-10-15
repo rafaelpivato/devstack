@@ -96,11 +96,69 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.status()["phase"], "error")
 
     @patch("devstack.runtime.subprocess.Popen")
-    def test_mutex_blocks_concurrent_activation(self, popen):
-        with runtime._locked():
-            with self.assertRaisesRegex(runtime.RuntimeControlError, "in progress"):
+    def test_shared_webhook_admissions_block_deactivation(self, popen):
+        import threading
+        import time
+        runtime._write({"phase": "active", "project": "demo"})
+        done = threading.Event()
+        errors = []
+        def deactivate():
+            try:
+                runtime.request_transition("deactivate")
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                done.set()
+        with runtime.admit("demo", shared=True, blocking=True):
+            with runtime.admit("demo", shared=True, blocking=True):
+                worker = threading.Thread(target=deactivate, daemon=True)
+                worker.start()
+                self.assertFalse(done.wait(timeout=.2),
+                                 "Deactivation crossed an in-flight webhook")
+                self.assertEqual(runtime.status()["phase"], "active")
+        worker.join(timeout=3)
+        self.assertTrue(done.is_set())
+        self.assertEqual(errors, [])
+        self.assertEqual(runtime.status()["phase"], "deactivating")
+        with self.assertRaises(runtime.RuntimeControlError):
+            with runtime.admit("demo", shared=True, blocking=True):
+                pass
+
+    @patch("devstack.runtime.subprocess.Popen")
+    def test_mutex_serializes_concurrent_activation(self, popen):
+        import threading
+        finished = threading.Event()
+        errors = []
+
+        def activate():
+            try:
                 runtime.request_transition("activate")
-        popen.assert_not_called()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        with runtime._locked():
+            worker = threading.Thread(target=activate, daemon=True)
+            worker.start()
+            self.assertFalse(finished.wait(timeout=.2))
+            popen.assert_not_called()
+        worker.join(timeout=3)
+        self.assertTrue(finished.is_set())
+        self.assertEqual(errors, [])
+        popen.assert_called_once()
+
+    def test_persisted_active_state_from_old_boot_fails_closed(self):
+        (self.root / "runtime.json").write_text(
+            json.dumps({"phase": "active", "project": "demo",
+                        "boot_id": "previous-host-boot"})
+        )
+        with patch("devstack.runtime.boot_id", return_value="current-host-boot"):
+            self.assertEqual(runtime.status()["phase"], "error")
+            self.assertFalse(runtime.is_active("demo"))
+            with self.assertRaises(runtime.RuntimeControlError):
+                with runtime.admit("demo", shared=True, blocking=True):
+                    self.fail("Forwarding admitted a stale runtime")
 
     def test_state_corruption_rejected(self):
         (self.root / "runtime.json").write_text('{"phase":"active","project":[]}')
@@ -148,7 +206,7 @@ class RuntimeHTTPTests(unittest.TestCase):
         with self.client.session_transaction() as s:
             self.csrf = s["_csrf"]
 
-    @patch("devstack.web.runtime.status", return_value={"phase": "activating", "project": "demo", "token": "secret"})
+    @patch("devstack.web.runtime.status", return_value={"phase": "activating", "project": "demo", "token": "secret", "boot_id": "private-host-id"})
     def test_api_does_not_expose_transition_token(self, status):
         response = self.client.get("/api/v1/runtime")
         self.assertEqual(response.json, {"phase": "activating", "project": "demo"})

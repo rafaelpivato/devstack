@@ -16,7 +16,7 @@ code{overflow-wrap:anywhere}
 </style></head><body>
 <p><a href="{{url_for('index')}}">← Dashboard</a></p>
 <h1>{{project.name}} · Public webhooks</h1>
-<p>Only the named POST routes configured here can be forwarded. The Devstack dashboard and all other application paths remain private. Adding a route does <strong>not</strong> enable public access.</p>
+<p>Only the named POST routes configured here can be forwarded. The Devstack dashboard and all other application paths remain private. Adding a route does <strong>not</strong> enable public access. Delivery requires an <strong>ACTIVE</strong> runtime; inactive requests receive HTTP 503, and unknown routes remain HTTP 404.</p>
 {% with messages = get_flashed_messages(with_categories=true) %}
 {% for kind,message in messages %}<section role="status">{{message}}</section>{% endfor %}
 {% endwith %}
@@ -27,7 +27,7 @@ code{overflow-wrap:anywhere}
 <div class="route">
 <strong>{{hook.name}}</strong>
 <p><small>When Funnel is enabled, publish this HTTPS endpoint on port 8443:</small></p>
-<code>/hooks/{{project.name}}/{{hook.name}}</code>
+<code>/hooks/{{hook.name}}</code>
 <p>Forward POST to <code>{{hook.application}} → {{hook.path}}</code></p>
 <form method="post" action="{{url_for('webhooks_remove',name=project.name,route_name=hook.name)}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">

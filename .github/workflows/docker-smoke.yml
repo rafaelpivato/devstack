@@ -61,13 +61,18 @@ jobs:
           /tmp/devstack-webhook-ci/bin/pip install -q -e .
           /tmp/devstack-webhook-ci/bin/python - <<'PY'
           from pathlib import Path
+          import tempfile
           from unittest.mock import patch
           from devstack.applications import Application
           from devstack.core import Project
+          from devstack import runtime
           from devstack.webhooks import Webhook, create_webhook_app
 
           compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
-          with (
+          with tempfile.TemporaryDirectory() as temporary:
+           root = Path(temporary)
+           with (
+              patch("devstack.runtime._folder", return_value=root),
               patch("devstack.webhooks.load_projects",
                     return_value={"smoke": Project("smoke", (), ())}),
               patch("devstack.webhooks.load_webhooks", return_value=(
@@ -83,16 +88,21 @@ jobs:
                   "docker", "compose", "-p", "devstack-smoke",
                   "-f", str(compose),
               ]),
-          ):
+           ):
               client = create_webhook_app({"TESTING": True}).test_client()
               body = b'{"test":"webhook"}'
-              response = client.post("/hooks/smoke/test", data=body,
+              assert client.post("/hooks/test", data=body).status_code == 503
+              runtime._write({"phase": "active", "project": "smoke"})
+              response = client.post("/hooks/test", data=body,
                   headers={"Content-Type": "application/json",
                            "X-Signature-Test": "signed"})
               assert response.status_code == 200, response.data
               assert response.data == body, response.data
-              assert client.post("/hooks/smoke/not-allowed", data=body).status_code == 404
-              assert client.get("/hooks/smoke/test").status_code == 405
+              assert client.post("/hooks/not-allowed", data=body).status_code == 404
+              assert client.post("/hooks/smoke/test", data=body).status_code == 404
+              assert client.get("/hooks/test").status_code == 405
+              runtime._write({"phase": "deactivating", "project": "smoke"})
+              assert client.post("/hooks/test", data=body).status_code == 503
           PY
       - name: Verify actual activation and deactivation lifecycle
         run: |
