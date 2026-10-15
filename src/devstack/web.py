@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
+from urllib.parse import quote
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 
@@ -69,6 +71,16 @@ def create_app(config: dict | None = None) -> Flask:
             or not secrets.compare_digest(session["_csrf"], request.form["_csrf"])
         ):
             abort(403)
+
+    @app.template_global("preview_link")
+    def preview_link(project, application):
+        """Never turn untrusted Host headers into arbitrary preview links."""
+        hostname = request.host.split(":")[0].lower()
+        if (application.port is None or
+                not re.fullmatch(r"(?:[a-z0-9-]+\\.)+[a-z0-9-]+\\.ts\\.net", hostname)):
+            return None
+        return (f"https://{hostname}:8443/p/"
+                f"{quote(project, safe='')}/{quote(application.name, safe='')}/")
 
     @app.get("/")
     def index():
