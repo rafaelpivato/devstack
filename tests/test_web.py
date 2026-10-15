@@ -505,3 +505,54 @@ class ProjectConfigurationWebTests(unittest.TestCase):
     @patch("devstack.web.load_projects", return_value={})
     def test_missing_project_returns_not_found(self, projects):
         self.assertEqual(self.client.get("/projects/missing/configuration").status_code, 404)
+
+
+
+class PublicWebhookAdminWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "unit-test"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.load_webhooks", return_value=())
+    @patch("devstack.web.load_applications", return_value=(
+        __import__("devstack.applications", fromlist=["Application"]).Application(
+            "API", "backend", 8000
+        ),
+    ))
+    def test_route_management_page(self, apps, routes, projects):
+        response = self.client.get("/projects/demo/webhooks")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Public webhooks", response.data)
+        self.assertIn(b"API", response.data)
+        self.assertIn(b"Adding a route does", response.data)
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.add_webhook")
+    def test_write_requires_csrf(self, add, projects):
+        url = "/projects/demo/webhooks/new"
+        payload = {"webhook_name": "stripe", "application": "API",
+                   "path": "/webhooks/stripe"}
+        self.assertEqual(self.client.post(url, data=payload).status_code, 403)
+        add.assert_not_called()
+        payload["_csrf"] = self.csrf
+        self.assertEqual(self.client.post(url, data=payload).status_code, 302)
+        add.assert_called_once_with("demo", "stripe", "API", "/webhooks/stripe")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.remove_webhook")
+    def test_remove_requires_csrf(self, remove, projects):
+        url = "/projects/demo/webhooks/stripe/remove"
+        self.assertEqual(self.client.post(url).status_code, 403)
+        remove.assert_not_called()
+        self.assertEqual(self.client.post(url, data={"_csrf": self.csrf}).status_code, 302)
+        remove.assert_called_once_with("demo", "stripe")
