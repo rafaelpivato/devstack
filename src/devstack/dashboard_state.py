@@ -11,7 +11,8 @@ from .workspace import Project
 from .core import OperationError, repo_branch, repo_dirty
 from .applications import ApplicationError, load_applications, compose_states, application_status
 from .command_runner import CommandError, load_tasks, recent_jobs
-from .docker_stacks import DockerError, current_job, compose_containers
+from .docker_stacks import DockerError, current_job
+from .container_inventory import compose_containers
 from .dev_ports import published_ports
 from .webhooks import WebhookError, load_webhooks
 from . import runtime
