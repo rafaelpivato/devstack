@@ -168,10 +168,8 @@ def create_app(config: dict | None = None) -> Flask:
             error = str(exc)
         try:
             choices = command_services(name)
-        except (CommandError, DockerError, OSError) as exc:
-            choices = ()
-            if error is None:
-                error = None  # Standalone image commands work without Compose.
+        except (CommandError, DockerError, OSError):
+            choices = ()  # Standalone images do not require a Compose file.
         return render_template("commands.html", project=project,
                                choices=choices, tasks=tasks, history=history,
                                error=error, csrf=token())
@@ -182,7 +180,7 @@ def create_app(config: dict | None = None) -> Flask:
         try:
             identifier = start_command(
                 name, request.form.get("service", ""),
-                request.form.get("mode", "exec"),
+                "run" if request.form.get("target") == "image" else request.form.get("mode", "exec"),
                 request.form.get("command", ""),
                 image=request.form.get("image", "") if request.form.get("target") == "image" else "",
                 network=request.form.get("network", "none") if request.form.get("target") == "image" else "none",
@@ -209,7 +207,7 @@ def create_app(config: dict | None = None) -> Flask:
             save_task(
                 name, request.form.get("task", ""),
                 request.form.get("service", ""),
-                request.form.get("mode", "exec"),
+                "run" if request.form.get("target") == "image" else request.form.get("mode", "exec"),
                 request.form.get("command", ""),
                 image=request.form.get("image", "") if request.form.get("target") == "image" else "",
                 network=request.form.get("network", "none") if request.form.get("target") == "image" else "none",
