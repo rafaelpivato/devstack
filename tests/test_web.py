@@ -302,3 +302,84 @@ class GithubProjectImportWebTests(unittest.TestCase):
         self.assertIn(b"Import GitHub project", response.data)
         self.assertIn(b"/projects/import", response.data)
         import_project.assert_not_called()
+
+
+class CommandRunnerWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.command_services", return_value=("web", "redis"))
+    @patch("devstack.web.load_tasks", return_value=())
+    @patch("devstack.web.recent_jobs", return_value=[])
+    def test_command_page(self, jobs, tasks, names, projects):
+        result = self.client.get("/projects/demo/commands")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn(b"Run command", result.data)
+        self.assertIn(b"redis", result.data)
+        self.assertIn(b"Saved tasks", result.data)
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.start_command", return_value="a" * 20)
+    def test_run_requires_csrf(self, start, projects):
+        url = "/projects/demo/commands/run"
+        form = {"service": "web", "mode": "exec", "command": "python --version"}
+        self.assertEqual(self.client.post(url, data=form).status_code, 403)
+        start.assert_not_called()
+        form["_csrf"] = self.csrf
+        response = self.client.post(url, data=form)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/commands/" + ("a" * 20), response.location)
+        start.assert_called_once_with("demo", "web", "exec", "python --version")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.save_task")
+    @patch("devstack.web.start_task", return_value="b" * 20)
+    def test_saved_task_save_does_not_run(self, start, save, projects):
+        data = {"_csrf": self.csrf, "task": "tests", "service": "web",
+                "mode": "run", "command": "python -m unittest"}
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/tasks/save", data=data).status_code,
+            302,
+        )
+        save.assert_called_once_with("demo", "tests", "web", "run", "python -m unittest")
+        start.assert_not_called()
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/tasks/run",
+                             data={"_csrf": self.csrf, "task": "tests"}).status_code, 302
+        )
+        start.assert_called_once_with("demo", "tests")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.command_job_info", return_value={
+        "id": "c" * 20, "state": "running", "service": "web", "mode": "exec",
+        "argv": ["python", "--version"],
+    })
+    @patch("devstack.web.command_job_output", return_value="Python 3.12")
+    @patch("devstack.web.cancel_command")
+    def test_status_and_cancel(self, cancel, output, info, projects):
+        url = "/api/projects/demo/commands/" + ("c" * 20)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["output"], "Python 3.12")
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/" + ("c" * 20) + "/cancel").status_code, 403
+        )
+        cancel.assert_not_called()
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/" + ("c" * 20) + "/cancel",
+                             data={"_csrf": self.csrf}).status_code, 302
+        )
+        cancel.assert_called_once_with("demo", "c" * 20)

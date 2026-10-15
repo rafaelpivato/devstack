@@ -101,6 +101,10 @@ class ImportProjectTests(unittest.TestCase):
         (sample / ".devstack" / "compose.yaml").write_text(
             "services:\n  web:\n    build:\n      context: ../app\n"
         )
+        (sample / ".devstack" / "tasks.toml").write_text(
+            '[[tasks]]\nname="tests"\nservice="web"\nmode="exec"\n'
+            'command=["python","-m","unittest"]\n'
+        )
         self.addCleanup(patch.stopall)
         patch("devstack.template_import.Path.home", return_value=self.home).start()
         patch("devstack.docker_stacks.Path.home", return_value=self.home).start()
@@ -133,6 +137,9 @@ class ImportProjectTests(unittest.TestCase):
         self.assertEqual([r.name for r in project.repos], ["devstack"])
         self.assertTrue(project.repos[0].path.exists())
         self.assertEqual(load_applications(name), (Application("Web", "web", 8000),))
+        from devstack.command_runner import load_tasks, Task
+        self.assertEqual(load_tasks(name), (
+            Task("tests", "web", "exec", ("python", "-m", "unittest")),))
         root = self.home / "workspaces" / name
         self.assertTrue((root / ".devstack" / "compose.yaml").is_file())
         self.assertEqual((root / ".devstack" / "compose.yaml").read_text(),
