@@ -127,7 +127,7 @@ Scheduled checks continue in the background.</small></p>
 </form>
 <p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
 {% endif %}
-<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a></p>
+<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a></p>
 {% if services %}
 <h3>Legacy services</h3>
 <p class="section-detail">Configured in the older projects.toml format; independent of managed Docker stacks.</p>

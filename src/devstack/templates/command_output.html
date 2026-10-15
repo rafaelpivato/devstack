@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Command output · Devstack</title>
+<style>:root{color-scheme:dark;font-family:system-ui}body{max-width:860px;margin:auto;background:#10151c;color:#eaf0f5;padding:18px 14px}
+a{color:#9dccff}p{color:#afc1d1}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#1b2530;padding:14px;max-height:65vh;overflow:auto;font:13px/1.45 monospace;border:1px solid #344251;border-radius:10px}
+button{background:#78404a;color:white;border:0;border-radius:8px;padding:10px 14px;font:inherit}
+.message{background:#354354;padding:10px;border-radius:8px}
+</style></head><body>
+<p><a href="{{url_for('commands_page',name=project)}}">← Commands</a></p>
+<h1>{{job.service}} · {{job.mode}}</h1>
+<p><code>{{job.argv | join(' ')}}</code></p>
+{% with messages=get_flashed_messages(with_categories=true) %}
+{% for kind,message in messages %}<p class="message" role="status">{{message}}</p>{% endfor %}
+{% endwith %}
+<p id="status" aria-live="polite">{{job.state}}</p>
+<form method="post" action="{{url_for('command_cancel',name=project,identifier=job.id)}}" id="cancel-form">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<button type="submit">Cancel command</button>
+</form>
+<p><small>Cancellation of an existing-container exec may leave its underlying process running. Temporary run containers are removed on cancellation.</small></p>
+<pre id="output" aria-live="polite">Loading output…</pre>
+<script>
+(function(){
+const status=document.getElementById('status'),output=document.getElementById('output');
+const cancel=document.getElementById('cancel-form');
+async function poll(){
+  try{
+    const response=await fetch('{{url_for("command_status",name=project,identifier=job.id)}}',
+       {cache:'no-store',credentials:'same-origin'});
+    if(!response.ok)throw Error('Unavailable');
+    const data=await response.json();
+    status.textContent=data.job.state+
+       (data.job.exit_code===null||data.job.exit_code===undefined?'':' · Exit '+data.job.exit_code);
+    if(output.textContent!==data.output)output.textContent=data.output||'(no output yet)';
+    cancel.hidden=!['queued','running'].includes(data.job.state);
+  }catch(e){status.textContent='Connection interrupted; retrying…';}
+}
+poll();setInterval(poll,1500);
+})();
+</script></body></html>

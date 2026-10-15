@@ -20,6 +20,11 @@ from .applications import (
     load_applications, compose_states, application_status,
     sync_smoke_applications,
 )
+from .command_runner import (
+    CommandError, load_tasks, services as command_services, recent_jobs,
+    get_job as command_job_info, job_output as command_job_output,
+    start_command, start_task, save_task, delete_task, cancel_command,
+)
 from .template_import import ImportError as TemplateImportError, import_github_project
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
@@ -150,6 +155,99 @@ def create_app(config: dict | None = None) -> Flask:
         except (ApplicationError, DockerError) as exc:
             flash(str(exc), "error")
         return redirect(url_for("index") + "#project-" + name)
+
+    @app.get("/projects/<name>/commands")
+    def commands_page(name):
+        project = get_project(name)
+        try:
+            choices = command_services(name)
+            tasks = load_tasks(name)
+            history = recent_jobs(name)
+            error = None
+        except (CommandError, DockerError, OSError, UnicodeError) as exc:
+            choices, tasks, history = (), (), ()
+            error = str(exc)
+        return render_template("commands.html", project=project,
+                               choices=choices, tasks=tasks, history=history,
+                               error=error, csrf=token())
+
+    @app.post("/projects/<name>/commands/run")
+    def command_run(name):
+        get_project(name)
+        try:
+            identifier = start_command(
+                name, request.form.get("service", ""),
+                request.form.get("mode", "exec"),
+                request.form.get("command", ""),
+            )
+            return redirect(url_for("command_details", name=name, identifier=identifier))
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("commands_page", name=name))
+
+    @app.post("/projects/<name>/commands/tasks/run")
+    def command_task_run(name):
+        get_project(name)
+        try:
+            identifier = start_task(name, request.form.get("task", ""))
+            return redirect(url_for("command_details", name=name, identifier=identifier))
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("commands_page", name=name))
+
+    @app.post("/projects/<name>/commands/tasks/save")
+    def command_task_save(name):
+        get_project(name)
+        try:
+            save_task(
+                name, request.form.get("task", ""),
+                request.form.get("service", ""),
+                request.form.get("mode", "exec"),
+                request.form.get("command", ""),
+            )
+            flash("Saved task. Running it requires a separate tap.", "ok")
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("commands_page", name=name))
+
+    @app.post("/projects/<name>/commands/tasks/remove")
+    def command_task_remove(name):
+        get_project(name)
+        try:
+            delete_task(name, request.form.get("task", ""))
+            flash("Task removed. Previous command history was preserved.", "ok")
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("commands_page", name=name))
+
+    @app.get("/projects/<name>/commands/<identifier>")
+    def command_details(name, identifier):
+        get_project(name)
+        try:
+            job = command_job_info(name, identifier)
+        except CommandError:
+            abort(404)
+        return render_template("command_output.html", project=name, job=job,
+                               csrf=token())
+
+    @app.get("/api/projects/<name>/commands/<identifier>")
+    def command_status(name, identifier):
+        get_project(name)
+        try:
+            return {"job": command_job_info(name, identifier),
+                    "output": command_job_output(name, identifier)}
+        except CommandError:
+            abort(404)
+
+    @app.post("/projects/<name>/commands/<identifier>/cancel")
+    def command_cancel(name, identifier):
+        get_project(name)
+        try:
+            cancel_command(name, identifier)
+            flash("Cancellation requested. Existing-container exec may keep running inside Docker.", "ok")
+        except CommandError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("command_details", name=name, identifier=identifier))
 
     @app.get("/projects/<name>/docker")
     def docker_project(name):
