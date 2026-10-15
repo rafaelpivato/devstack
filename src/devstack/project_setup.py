@@ -44,37 +44,38 @@ def github_ssh_url(value: str) -> tuple[str, str]:
 
 
 def _serialized(config: dict) -> str:
-    """Serialize only Devstack's supported schema; preserve repo/service arrays."""
-    if set(config) - {"projects"}:
-        raise ProjectSetupError("Unknown top-level TOML fields; edit manually")
-    lines = ["# Managed by Devstack. No credentials are stored in this file."]
-    for project in config.get("projects", []):
-        if set(project) - {"name", "repos", "services"}:
-            raise ProjectSetupError("Unknown project TOML fields; edit manually")
-        lines.extend(["", "[[projects]]", f"name = {json.dumps(project['name'])}"])
-        for repo in project.get("repos", []):
-            if set(repo) - {"name", "path"}:
-                raise ProjectSetupError("Unknown repository TOML fields")
-            lines.extend(["", "[[projects.repos]]",
-                          f"name = {json.dumps(repo['name'])}",
-                          f"path = {json.dumps(repo['path'])}"])
-        for service in project.get("services", []):
-            allowed = {"name", "kind", "cwd", "compose_file", "unit"}
-            if set(service) - allowed:
-                raise ProjectSetupError("Unknown service TOML fields")
-            lines.extend(["", "[[projects.services]]"])
-            for key in ("name", "kind", "cwd", "compose_file", "unit"):
-                if key in service:
-                    lines.append(f"{key} = {json.dumps(service[key])}")
+    """Serialize the single-workspace schema without touching checkout files."""
+    if set(config) - {"project"}:
+        raise ProjectSetupError("Expected only one project object")
+    project = config.get("project")
+    lines = ["# DevStack v0.5: one workspace, multiple Git repositories."]
+    if project is None:
+        return "\n".join(lines) + "\n"
+    if not isinstance(project, dict) or set(project) - {"name", "repos", "services"}:
+        raise ProjectSetupError("Invalid workspace data")
+    lines.extend(["", "[project]", f"name = {json.dumps(project['name'])}"])
+    for repo in project.get("repos", []):
+        if set(repo) != {"name", "path"}:
+            raise ProjectSetupError("Invalid repository data")
+        lines.extend(["", "[[project.repos]]",
+                      f"name = {json.dumps(repo['name'])}",
+                      f"path = {json.dumps(repo['path'])}"])
+    for service in project.get("services", []):
+        allowed = {"name", "kind", "cwd", "compose_file", "unit"}
+        if set(service) - allowed:
+            raise ProjectSetupError("Unknown legacy service fields")
+        lines.extend(["", "[[project.services]]"])
+        for key in ("name", "kind", "cwd", "compose_file", "unit"):
+            if key in service:
+                lines.append(f"{key} = {json.dumps(service[key])}")
     return "\n".join(lines) + "\n"
-
 
 def _write_config(path: Path, data: dict) -> None:
     rendered = _serialized(data)
     # Make sure the serialization we control parses and passes existing validation.
     tomllib.loads(rendered)
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, prefix=".projects-",
+        mode="w", encoding="utf-8", dir=path.parent, prefix=".workspace-",
         delete=False
     ) as stream:
         staged = Path(stream.name)
@@ -99,8 +100,8 @@ def _edit(callback) -> None:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             data = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-            if not isinstance(data.get("projects", []), list):
-                raise ProjectSetupError("Invalid projects format")
+            if data and (set(data) != {"project"} or not isinstance(data["project"], dict)):
+                raise ProjectSetupError("Invalid workspace format")
             load_projects(path)
             callback(path, data)
         finally:
@@ -111,19 +112,20 @@ def create_project(name: str) -> None:
     name = checked_name(name)
 
     def edit(path: Path, data: dict) -> None:
-        projects = data.setdefault("projects", [])
-        if any(item["name"] == name for item in projects):
-            raise ProjectSetupError("That project already exists")
+        if "project" in data:
+            raise ProjectSetupError("Only one project may be configured")
         workspace = Path.home() / "workspaces" / name
         if workspace.is_symlink():
             raise ProjectSetupError("Project workspace must not be a symlink")
-        workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if workspace.exists():
+            raise ProjectSetupError("Project workspace already exists")
+        workspace.mkdir(parents=True, exist_ok=False, mode=0o700)
         secrets = workspace / ".secrets"
         if secrets.is_symlink():
             raise ProjectSetupError("Project secrets directory must not be a symlink")
         secrets.mkdir(mode=0o700, exist_ok=True)
         secrets.chmod(0o700)
-        projects.append({"name": name, "repos": [], "services": []})
+        data["project"] = {"name": name, "repos": [], "services": []}
         _write_config(path, data)
 
     _edit(edit)
@@ -147,8 +149,9 @@ def add_github_repository(project_name: str, remote: str, repo_name: str = "",
         raise ProjectSetupError(str(exc)) from exc
 
     def edit(path: Path, data: dict) -> None:
-        project = next((p for p in data.get("projects", [])
-                        if p["name"] == project_name), None)
+        project = data.get("project")
+        if project is not None and project["name"] != project_name:
+            project = None
         if project is None:
             raise ProjectSetupError("Create the project first")
         if any(r["name"] == repo_name for r in project.get("repos", [])):

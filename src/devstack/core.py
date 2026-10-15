@@ -1,89 +1,14 @@
-"""Project configuration and explicitly allowlisted Linux operations."""
-
+"""Git and legacy service operations; no HTTP dependencies."""
 from __future__ import annotations
 
-import os
-import re
 import subprocess
-import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 
-NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./-]*$")
+from .workspace import BRANCH, NAME, Repo, Service, Project, config_path, load_project, load_projects
 
 
 class OperationError(RuntimeError):
     """A configured operation failed."""
-
-
-@dataclass(frozen=True)
-class Repo:
-    name: str
-    path: Path
-
-
-@dataclass(frozen=True)
-class Service:
-    name: str
-    kind: str
-    cwd: Path | None = None
-    compose_file: str | None = None
-    unit: str | None = None
-
-
-@dataclass(frozen=True)
-class Project:
-    name: str
-    repos: tuple[Repo, ...]
-    services: tuple[Service, ...]
-
-
-def _name(value: str) -> str:
-    if not NAME.fullmatch(value):
-        raise ValueError(f"Invalid name: {value!r}")
-    return value
-
-
-def _path(value: str, base: Path) -> Path:
-    path = Path(os.path.expanduser(value))
-    return (path if path.is_absolute() else base / path).resolve()
-
-
-def config_path() -> Path:
-    return Path(os.environ.get("DEVSTACK_CONFIG", "~/.config/devstack/projects.toml")).expanduser()
-
-
-def load_projects(path: Path | None = None) -> dict[str, Project]:
-    path = path or config_path()
-    if not path.exists():
-        return {}
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
-    result = {}
-    for entry in data.get("projects", []):
-        name = _name(entry["name"])
-        if name in result:
-            raise ValueError(f"Duplicate project: {name}")
-        repos = tuple(Repo(_name(r["name"]), _path(r["path"], path.parent))
-                      for r in entry.get("repos", []))
-        services = []
-        for s in entry.get("services", []):
-            kind = s["kind"]
-            if kind not in ("compose", "systemd"):
-                raise ValueError(f"Unsupported service kind: {kind}")
-            svc_name = _name(s["name"])
-            cwd = _path(s["cwd"], path.parent) if "cwd" in s else None
-            unit = s.get("unit")
-            if kind == "compose" and cwd is None:
-                raise ValueError(f"Compose service {svc_name} requires cwd")
-            if kind == "systemd" and (not unit or not NAME.fullmatch(unit)):
-                raise ValueError(f"Systemd service {svc_name} requires valid unit")
-            compose_file = s.get("compose_file")
-            if compose_file and (Path(compose_file).is_absolute() or ".." in Path(compose_file).parts):
-                raise ValueError("compose_file must stay within cwd")
-            services.append(Service(svc_name, kind, cwd, compose_file, unit))
-        result[name] = Project(name, repos, tuple(services))
-    return result
 
 
 def run(args: list[str], cwd: Path | None = None, timeout: int = 90) -> str:

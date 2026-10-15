@@ -6,7 +6,7 @@ PartOf=devstack.service
 [Service]
 Type=simple
 User=@DEVSTACK_USER@
-Environment=DEVSTACK_CONFIG=@DEVSTACK_HOME@/.config/devstack/projects.toml
+Environment=DEVSTACK_CONFIG=@DEVSTACK_HOME@/.config/devstack/workspace.toml
 WorkingDirectory=@DEVSTACK_HOME@
 ExecStart=/opt/devstack/current/venv/bin/gunicorn --bind 127.0.0.1:8767 --workers 1 --threads 6 --timeout 30 'devstack.webhooks:create_webhook_app()'
 Restart=on-failure
