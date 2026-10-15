@@ -15,18 +15,22 @@ class ProjectSetupTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.config = Path(self.temp.name) / "projects.toml"
+        self.config = Path(self.temp.name) / "workspace.toml"
+        home = patch("devstack.project_setup.Path.home", return_value=Path(self.temp.name))
+        home.start()
+        self.addCleanup(home.stop)
         patcher = patch("devstack.project_setup.config_path", return_value=self.config)
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def test_create_two_repos_preserves_multiroot_project(self):
         create_project("demo")
-        create_project("other")
+        with self.assertRaisesRegex(ProjectSetupError, "Only one project"):
+            create_project("other")
         with self.assertRaises(ProjectSetupError):
             create_project("demo")
         data = load_projects(self.config)
-        self.assertEqual(list(data), ["demo", "other"])
+        self.assertEqual(list(data), ["demo"])
         self.assertEqual(data["demo"].repos, ())
 
     def test_github_url_normalization_and_rejection(self):

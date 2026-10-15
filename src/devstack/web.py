@@ -72,6 +72,35 @@ def create_app(config: dict | None = None) -> Flask:
         ):
             abort(403)
 
+
+    # Single-project HTTP adapter: project names are not URL parameters.
+    # The underlying services are still named internally until PR 02/03.
+    project_endpoints = ["webhooks_page","webhooks_add","webhooks_remove","application_create","application_edit","application_remove","commands_page","command_run","command_task_run","command_task_save","command_task_remove","command_details","command_status","command_cancel","docker_project","docker_save","docker_action","docker_status","docker_containers","docker_logs","project_configuration","project_source_update","project_configuration_apply","repo_add","operate","switch","logs"]
+
+    @app.url_value_preprocessor
+    def single_project_url(_endpoint, values):
+        if _endpoint not in project_endpoints:
+            return
+        configured = projects()
+        if len(configured) != 1:
+            abort(404)
+        # No route can select a different project's containers.
+        values["name"] = next(iter(configured))
+
+    @app.url_defaults
+    def single_project_links(endpoint, values):
+        if endpoint in project_endpoints:
+            values.pop("name", None)
+
+    @app.get("/api/v1/project")
+    def project_api():
+        configured = projects()
+        project = next(iter(configured.values()), None)
+        if project is None:
+            return {"project": None}
+        return {"project": {"name": project.name,
+                            "repositories": [repo.name for repo in project.repos]}}
+
     @app.get("/")
     def index():
         rows = []
@@ -127,7 +156,7 @@ def create_app(config: dict | None = None) -> Flask:
             return {"ok": False, "message": str(exc)}, 503
         return {"ok": True, "message": message}, 202
 
-    @app.get("/projects/<name>/webhooks")
+    @app.get("/project/webhooks")
     def webhooks_page(name):
         project = get_project(name)
         try:
@@ -139,7 +168,7 @@ def create_app(config: dict | None = None) -> Flask:
         return render_template("webhooks.html", project=project, routes=routes,
                                applications=applications, error=error, csrf=token())
 
-    @app.post("/projects/<name>/webhooks/new")
+    @app.post("/project/webhooks/new")
     def webhooks_add(name):
         get_project(name)
         try:
@@ -151,7 +180,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("webhooks_page", name=name))
 
-    @app.post("/projects/<name>/webhooks/<route_name>/remove")
+    @app.post("/project/webhooks/<route_name>/remove")
     def webhooks_remove(name, route_name):
         get_project(name)
         try:
@@ -161,7 +190,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("webhooks_page", name=name))
 
-    @app.post("/projects/<name>/applications/new")
+    @app.post("/project/applications/new")
     def application_create(name):
         get_project(name)
         try:
@@ -175,7 +204,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index") + "#project-" + name)
 
-    @app.post("/projects/<name>/applications/<app_name>/edit")
+    @app.post("/project/applications/<app_name>/edit")
     def application_edit(name, app_name):
         get_project(name)
         try:
@@ -189,7 +218,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index") + "#project-" + name)
 
-    @app.post("/projects/<name>/applications/<app_name>/remove")
+    @app.post("/project/applications/<app_name>/remove")
     def application_remove(name, app_name):
         get_project(name)
         try:
@@ -199,7 +228,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index") + "#project-" + name)
 
-    @app.get("/projects/<name>/commands")
+    @app.get("/project/commands")
     def commands_page(name):
         project = get_project(name)
         try:
@@ -217,7 +246,7 @@ def create_app(config: dict | None = None) -> Flask:
                                choices=choices, tasks=tasks, history=history,
                                error=error, csrf=token())
 
-    @app.post("/projects/<name>/commands/run")
+    @app.post("/project/commands/run")
     def command_run(name):
         get_project(name)
         try:
@@ -233,7 +262,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
             return redirect(url_for("commands_page", name=name))
 
-    @app.post("/projects/<name>/commands/tasks/run")
+    @app.post("/project/commands/tasks/run")
     def command_task_run(name):
         get_project(name)
         try:
@@ -243,7 +272,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
             return redirect(url_for("commands_page", name=name))
 
-    @app.post("/projects/<name>/commands/tasks/save")
+    @app.post("/project/commands/tasks/save")
     def command_task_save(name):
         get_project(name)
         try:
@@ -260,7 +289,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("commands_page", name=name))
 
-    @app.post("/projects/<name>/commands/tasks/remove")
+    @app.post("/project/commands/tasks/remove")
     def command_task_remove(name):
         get_project(name)
         try:
@@ -270,7 +299,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("commands_page", name=name))
 
-    @app.get("/projects/<name>/commands/<identifier>")
+    @app.get("/project/commands/<identifier>")
     def command_details(name, identifier):
         get_project(name)
         try:
@@ -280,7 +309,7 @@ def create_app(config: dict | None = None) -> Flask:
         return render_template("command_output.html", project=name, job=job,
                                csrf=token())
 
-    @app.get("/api/projects/<name>/commands/<identifier>")
+    @app.get("/api/v1/project/commands/<identifier>")
     def command_status(name, identifier):
         get_project(name)
         try:
@@ -289,7 +318,7 @@ def create_app(config: dict | None = None) -> Flask:
         except CommandError:
             abort(404)
 
-    @app.post("/projects/<name>/commands/<identifier>/cancel")
+    @app.post("/project/commands/<identifier>/cancel")
     def command_cancel(name, identifier):
         get_project(name)
         try:
@@ -299,7 +328,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("command_details", name=name, identifier=identifier))
 
-    @app.get("/projects/<name>/docker")
+    @app.get("/project/docker")
     def docker_project(name):
         project = get_project(name)
         try:
@@ -313,7 +342,7 @@ def create_app(config: dict | None = None) -> Flask:
             docker_ready=docker_available(), job=job, csrf=token(),
         )
 
-    @app.post("/projects/<name>/docker/save")
+    @app.post("/project/docker/save")
     def docker_save(name):
         get_project(name)
         try:
@@ -323,7 +352,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("docker_project", name=name))
 
-    @app.post("/projects/<name>/docker/action/<action>")
+    @app.post("/project/docker/action/<action>")
     def docker_action(name, action):
         get_project(name)
         try:
@@ -333,13 +362,13 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("docker_project", name=name))
 
-    @app.get("/api/projects/<name>/docker/status")
+    @app.get("/api/v1/project/docker/status")
     def docker_status(name):
         get_project(name)
         job = current_job(name)
         return {"job": job, "log": job_log(name)}
 
-    @app.get("/projects/<name>/docker/containers")
+    @app.get("/project/docker/containers")
     def docker_containers(name):
         get_project(name)
         try:
@@ -349,7 +378,7 @@ def create_app(config: dict | None = None) -> Flask:
         return render_template("docker_output.html", project=name, title="Containers",
                                output=output)
 
-    @app.get("/projects/<name>/docker/logs")
+    @app.get("/project/docker/logs")
     def docker_logs(name):
         get_project(name)
         try:
@@ -359,8 +388,10 @@ def create_app(config: dict | None = None) -> Flask:
         return render_template("docker_output.html", project=name, title="Container logs",
                                output=output)
 
-    @app.post("/projects/smoke/import")
+    @app.post("/project/smoke/import")
     def smoke_import():
+        if projects():
+            abort(409)
         try:
             import_smoke()
             flash("Smoke project imported. Open its Docker Compose page to build and run.", "ok")
@@ -368,8 +399,10 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index"))
 
-    @app.post("/projects/smoke/sync-applications")
+    @app.post("/project/smoke/sync-applications")
     def smoke_sync_applications():
+        if "smoke" not in projects():
+            abort(404)
         get_project("smoke")
         try:
             added = sync_smoke_applications()
@@ -409,7 +442,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("github_settings"))
 
-    @app.get("/projects/<name>/configuration")
+    @app.get("/project/configuration")
     def project_configuration(name):
         project = get_project(name)
         try:
@@ -424,7 +457,7 @@ def create_app(config: dict | None = None) -> Flask:
                                changes=changes, fingerprint=fingerprint,
                                error=error, csrf=token())
 
-    @app.post("/projects/<name>/configuration/update-source")
+    @app.post("/project/configuration/update-source")
     def project_source_update(name):
         project = get_project(name)
         try:
@@ -439,7 +472,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("project_configuration", name=name))
 
-    @app.post("/projects/<name>/configuration/apply")
+    @app.post("/project/configuration/apply")
     def project_configuration_apply(name):
         get_project(name)
         try:
@@ -451,8 +484,10 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("project_configuration", name=name))
 
-    @app.post("/projects/import")
+    @app.post("/project/import")
     def project_import():
+        if projects():
+            abort(409)
         try:
             name, branch = import_github_project(
                 request.form.get("url", ""), request.form.get("name", ""),
@@ -464,8 +499,10 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index"))
 
-    @app.post("/projects/new")
+    @app.post("/project/new")
     def project_create():
+        if projects():
+            abort(409)
         try:
             create_project(request.form.get("name", "").strip())
             flash("Project created. Add one or more repositories below.", "ok")
@@ -473,7 +510,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index"))
 
-    @app.post("/projects/<name>/repos/new")
+    @app.post("/project/repos/new")
     def repo_add(name):
         try:
             result = add_github_repository(
@@ -486,7 +523,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index"))
 
-    @app.post("/projects/<name>/<action>")
+    @app.post("/project/action/<action>")
     def operate(name, action):
         if action not in ("start", "stop", "update"):
             abort(404)
@@ -502,7 +539,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(f"{project.name}: {exc}", "error")
         return redirect(url_for("index"))
 
-    @app.post("/projects/<name>/repos/<repo_name>/switch")
+    @app.post("/project/repos/<repo_name>/switch")
     def switch(name, repo_name):
         project = get_project(name)
         repo = next((r for r in project.repos if r.name == repo_name), None)
@@ -515,7 +552,7 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("index"))
 
-    @app.get("/projects/<name>/services/<service_name>/logs")
+    @app.get("/project/services/<service_name>/logs")
     def logs(name, service_name):
         project = get_project(name)
         service = next((s for s in project.services if s.name == service_name), None)

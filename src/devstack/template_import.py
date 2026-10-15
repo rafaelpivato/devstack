@@ -234,8 +234,8 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
                                   (result.stderr or result.stdout).strip()[:500])
 
         def edit(config_path: Path, data: dict):
-            if any(p["name"] == name for p in data.setdefault("projects", [])):
-                raise ImportError("That project already exists; choose another project name")
+            if "project" in data:
+                raise ImportError("Only one project may be configured")
             dest = parent / name
             if dest.exists() or dest.is_symlink():
                 raise ImportError("Project workspace already exists; choose another name")
@@ -265,11 +265,11 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
                     managed,
                     {"project.toml": content, "tasks.toml": tasks, "compose.yaml": compose},
                 )
-                data["projects"].append({
+                data["project"] = {
                     "name": name,
                     "repos": [{"name": repo, "path": str(target)}],
                     "services": [],
-                })
+                }
                 _write_config(config_path, data)
             except Exception:
                 if dest.exists() and not dest.is_symlink():

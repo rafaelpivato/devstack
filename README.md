@@ -1,9 +1,9 @@
 # Devstack
 
 Mobile-first, cloud-agnostic development project controller for a single Ubuntu server.
-One repository, multiple projects, one active development workflow.
+One configured project with multiple repositories (v0.5 development branch).
 
-**Status:** early scaffold — **not ready for public deployment or production use**.
+**Status:** v0.5 single-project breaking refactor in progress; not yet a published release. Previous v0.4 instructions below are historical and may not apply.
 
 ## Goals
 
@@ -23,7 +23,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
 mkdir -p ~/.config/devstack
-cp examples/projects.toml ~/.config/devstack/projects.toml
+cp examples/workspace.toml ~/.config/devstack/workspace.toml
 # Edit the example paths and services for your machine.
 devstack
 ```
@@ -39,11 +39,11 @@ Run tests with `python -m unittest discover -s tests -v`.
 
 ## Configuration
 
-See [examples/projects.toml](examples/projects.toml).
+The v0.5 single workspace schema is documented in [examples/workspace.toml](examples/workspace.toml) and [docs/v0.5-roadmap.md](docs/v0.5-roadmap.md).
 Project services may use `kind = "compose"` with `cwd` and optional
 `compose_file`, or `kind = "systemd"` with a **user-level** systemd `unit`.
 
-Specify a different config with `DEVSTACK_CONFIG=/path/to/projects.toml`.
+Specify a different config with `DEVSTACK_CONFIG=/path/to/workspace.toml`.
 
 ## Safety and limitations
 

@@ -49,13 +49,13 @@ install -d -m 0755 /opt/devstack /usr/local/lib/devstack
 install -d -m 0700 /etc/devstack
 install -d -o root -g root -m 0700 /var/lib/devstack
 install -d -o "$user" -g "$(id -gn "$user")" -m 0700 "$home/.config/devstack"
-if [[ ! -e "$home/.config/devstack/projects.toml" ]]; then
-  install -o "$user" -g "$(id -gn "$user")" -m 0600 /dev/null "$home/.config/devstack/projects.toml"
+if [[ ! -e "$home/.config/devstack/workspace.toml" ]]; then
+  install -o "$user" -g "$(id -gn "$user")" -m 0600 /dev/null "$home/.config/devstack/workspace.toml"
 fi
 
 if [[ ! -f /etc/devstack/app.env ]]; then
   secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-  printf 'DEVSTACK_SECRET_KEY=%s\nDEVSTACK_CONFIG=%s/.config/devstack/projects.toml\nDEVSTACK_SECURE_COOKIES=1\n' \
+  printf 'DEVSTACK_SECRET_KEY=%s\nDEVSTACK_CONFIG=%s/.config/devstack/workspace.toml\nDEVSTACK_SECURE_COOKIES=1\n' \
     "$secret" "$home" > /etc/devstack/app.env
   chmod 0600 /etc/devstack/app.env
 fi

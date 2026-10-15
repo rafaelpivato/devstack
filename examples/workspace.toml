@@ -1,0 +1,11 @@
+# Single-project example (no migration from projects.toml)
+[project]
+name = "demo"
+
+[[project.repos]]
+name = "backend"
+path = "~/workspaces/demo/backend"
+
+[[project.repos]]
+name = "frontend"
+path = "~/workspaces/demo/frontend"
