@@ -1,0 +1,34 @@
+# Predefined tasks for the disposable smoke example.
+# Run these inside the built web Compose service.
+
+[[tasks]]
+name = "tests"
+service = "web"
+mode = "exec"
+command = ["python", "-m", "unittest", "discover", "-v"]
+
+[[tasks]]
+name = "tests-fresh"
+service = "web"
+mode = "run"
+command = ["python", "-m", "unittest", "discover", "-v"]
+
+[[tasks]]
+name = "python-version"
+service = "web"
+mode = "exec"
+command = ["python", "--version"]
+
+
+# Standalone image commands need no Compose service definition.
+[[tasks]]
+name = "image-python-version"
+image = "python:3.12-alpine"
+command = ["python", "--version"]
+
+# Uses Compose service DNS but no project mounts or secrets.
+[[tasks]]
+name = "image-redis-ping"
+image = "redis:7-alpine"
+network = "project"
+command = ["redis-cli", "-h", "redis", "ping"]

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{project.name}} · Commands · Devstack</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}
+body{max-width:850px;margin:auto;padding:18px 14px;background:#10151c;color:#eaf0f5}
+section{padding:16px;margin:16px 0;background:#1b2530;border:1px solid #344251;border-radius:14px}
+button,input,select,textarea{font:inherit;border-radius:8px;padding:10px;box-sizing:border-box}
+button{border:0;background:#3971b6;color:white;cursor:pointer}
+button.secondary{background:#354354}button.danger{background:#78404a}
+input,select,textarea{width:100%;background:#10151c;border:1px solid #455564;color:#eaf0f5}
+form.stacked{display:flex;flex-direction:column;gap:9px}label{display:block}
+a{color:#9dccff}small,p{color:#b6c6d5;line-height:1.5}code{overflow-wrap:anywhere}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.record{border-top:1px solid #344251;padding:9px 0}
+.message{padding:10px;background:#354354;border-radius:9px}.message.error{background:#63333d}
+</style></head><body>
+<p><a href="{{url_for('index')}}">← Dashboard</a> · <a href="{{url_for('docker_project',name=project.name)}}">Docker</a></p>
+<h1>{{project.name}} · Commands</h1>
+<p>Run in a Compose service or a separate Docker image. No host terminal or implicit shell. Standalone images start with no mounts, credentials or network access; project networking is opt-in. Only run code you trust.</p>
+{% with messages=get_flashed_messages(with_categories=true) %}
+{% for kind,message in messages %}<p class="message {{kind}}" role="status">{{message}}</p>{% endfor %}
+{% endwith %}
+{% if error %}<section><p class="message error">{{error}}</p></section>{% endif %}
+<section>
+<h2>Run command</h2>
+<form class="stacked" action="{{url_for('command_run',name=project.name)}}" method="post" data-container-task>
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label>Target
+<select name="target" class="target-picker">
+<option value="service" {% if not choices %}disabled{% endif %}>Compose service</option>
+<option value="image" {% if not choices %}selected{% endif %}>Standalone Docker image</option>
+</select></label>
+<div class="service-options">
+<label>Compose service
+<select name="service">{% for service in choices %}<option value="{{service}}">{{service}}</option>{% endfor %}</select>
+</label>
+<label>Execution mode
+<select name="mode">
+<option value="run">Temporary container (run --rm)</option>
+<option value="exec">Existing container (exec)</option>
+</select></label>
+</div>
+<div class="image-options" hidden>
+<label>Docker image
+<input name="image" placeholder="python:3.12-alpine" maxlength="255" spellcheck="false"></label>
+<label>Network
+<select name="network">
+<option value="none">Isolated (default)</option>
+<option value="project">Project Compose default network</option>
+</select></label>
+</div>
+<label for="command">Command</label>
+<textarea id="command" name="command" rows="3" maxlength="4096" placeholder="python -m unittest discover -v" required spellcheck="false"></textarea>
+<button type="submit">Run command</button>
+</form>
+<p><small>Commands are passed without an implicit shell. Exec requires a running service and may continue executing after cancellation. Temporary containers are removed when finished. Standalone images don't inherit the project's environment, bind mounts, or secrets, and may reach Compose services by DNS only when project networking is selected and the stack is running.</small></p>
+</section>
+<section>
+<h2>Saved tasks</h2>
+{% for task in tasks %}
+<div class="record">
+<div class="row"><div><strong>{{task.name}}</strong><br><small>{{task.image or task.service}} · {{'image' if task.image else task.mode}}{% if task.image %} · {{task.network}} network{% endif %} · <code>{{task.argv | join(' ')}}</code></small></div>
+<div class="row">
+<form method="post" action="{{url_for('command_task_run',name=project.name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<input type="hidden" name="task" value="{{task.name}}">
+<button type="submit">Run</button></form>
+<form method="post" action="{{url_for('command_task_remove',name=project.name)}}">
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<input type="hidden" name="task" value="{{task.name}}">
+<button type="submit" class="danger">Remove</button></form>
+</div></div></div>
+{% else %}<p>No tasks saved yet.</p>{% endfor %}
+<h3>Add or replace saved task</h3>
+<form class="stacked" method="post" action="{{url_for('command_task_save',name=project.name)}}" data-container-task>
+<input type="hidden" name="_csrf" value="{{csrf}}">
+<label>Name <input name="task" placeholder="tests" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]*"></label>
+<label>Target <select name="target" class="target-picker">
+<option value="service" {% if not choices %}disabled{% endif %}>Compose service</option>
+<option value="image" {% if not choices %}selected{% endif %}>Standalone Docker image</option>
+</select></label>
+<div class="service-options">
+<label>Service <select name="service">{% for service in choices %}<option value="{{service}}">{{service}}</option>{% endfor %}</select></label>
+<label>Mode <select name="mode"><option value="run">Temporary container</option><option value="exec">Existing container</option></select></label>
+</div>
+<div class="image-options" hidden>
+<label>Image <input name="image" placeholder="alpine:3.20" maxlength="255" spellcheck="false"></label>
+<label>Network <select name="network"><option value="none">Isolated</option><option value="project">Project Compose default network</option></select></label>
+</div>
+<label>Command <textarea name="command" rows="2" maxlength="4096" required spellcheck="false" placeholder="python -m unittest discover -v"></textarea></label>
+<button type="submit" class="secondary">Save task</button>
+</form>
+<p><small>Tasks live in <code>.devstack/tasks.toml</code> outside your repositories. Using an existing task name updates it. Save does not run it.</small></p>
+</section>
+<section><h2>Recent runs</h2>
+{% for job in history %}
+<div class="record row"><a href="{{url_for('command_details',name=project.name,identifier=job.id)}}"><strong>{{job.image or job.service}}</strong> · {{'image' if job.image else job.mode}} · {{job.argv | join(' ') | truncate(80)}}</a><small>{{job.state}}</small></div>
+{% else %}<p>No recent commands.</p>{% endfor %}
+</section>
+<script>
+for(const form of document.querySelectorAll('[data-container-task]')){
+  const target=form.querySelector('.target-picker');
+  const service=form.querySelector('.service-options');
+  const image=form.querySelector('.image-options');
+  const imageInput=image.querySelector('input[name=image]');
+  const serviceInput=service.querySelector('select[name=service]');
+  const modeInput=service.querySelector('select[name=mode]');
+  function update(){
+    const independent=target.value==='image';
+    service.hidden=independent;
+    image.hidden=!independent;
+    serviceInput.disabled=independent;
+    modeInput.disabled=independent;
+    imageInput.disabled=!independent;
+    imageInput.required=independent;
+  }
+  target.addEventListener('change',update);
+  update();
+}
+</script>
+</body></html>

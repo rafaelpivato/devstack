@@ -20,6 +20,12 @@ from .applications import (
     load_applications, compose_states, application_status,
     sync_smoke_applications,
 )
+from .command_runner import (
+    CommandError, load_tasks, services as command_services, recent_jobs,
+    get_job as command_job_info, job_output as command_job_output,
+    start_command, start_task, save_task, delete_task, cancel_command,
+)
+from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
 from .template_import import ImportError as TemplateImportError, import_github_project
 from .github_ssh import GitHubSSHError, generate_key, public_key, test_connection
 from .project_setup import ProjectSetupError, create_project, add_github_repository
@@ -83,7 +89,12 @@ def create_app(config: dict | None = None) -> Flask:
                 app_error = None
             except (ApplicationError, DockerError) as exc:
                 apps, app_error = [], str(exc)
-            rows.append((p, services, repos, apps, app_error))
+            try:
+                source_directory(p.name)
+                linked_source = True
+            except (SyncError, DockerError, OSError):
+                linked_source = False
+            rows.append((p, services, repos, apps, app_error, linked_source))
         return render_template("dashboard.html", rows=rows, csrf=token(),
                                smoke_installed="smoke" in configured)
 
@@ -150,6 +161,106 @@ def create_app(config: dict | None = None) -> Flask:
         except (ApplicationError, DockerError) as exc:
             flash(str(exc), "error")
         return redirect(url_for("index") + "#project-" + name)
+
+    @app.get("/projects/<name>/commands")
+    def commands_page(name):
+        project = get_project(name)
+        try:
+            tasks = load_tasks(name)
+            history = recent_jobs(name)
+            error = None
+        except (CommandError, DockerError, OSError, UnicodeError) as exc:
+            tasks, history = (), ()
+            error = str(exc)
+        try:
+            choices = command_services(name)
+        except (CommandError, DockerError, OSError):
+            choices = ()  # Standalone images do not require a Compose file.
+        return render_template("commands.html", project=project,
+                               choices=choices, tasks=tasks, history=history,
+                               error=error, csrf=token())
+
+    @app.post("/projects/<name>/commands/run")
+    def command_run(name):
+        get_project(name)
+        try:
+            identifier = start_command(
+                name, request.form.get("service", ""),
+                "run" if request.form.get("target") == "image" else request.form.get("mode", "exec"),
+                request.form.get("command", ""),
+                image=request.form.get("image", "") if request.form.get("target") == "image" else "",
+                network=request.form.get("network", "none") if request.form.get("target") == "image" else "none",
+            )
+            return redirect(url_for("command_details", name=name, identifier=identifier))
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("commands_page", name=name))
+
+    @app.post("/projects/<name>/commands/tasks/run")
+    def command_task_run(name):
+        get_project(name)
+        try:
+            identifier = start_task(name, request.form.get("task", ""))
+            return redirect(url_for("command_details", name=name, identifier=identifier))
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("commands_page", name=name))
+
+    @app.post("/projects/<name>/commands/tasks/save")
+    def command_task_save(name):
+        get_project(name)
+        try:
+            save_task(
+                name, request.form.get("task", ""),
+                request.form.get("service", ""),
+                "run" if request.form.get("target") == "image" else request.form.get("mode", "exec"),
+                request.form.get("command", ""),
+                image=request.form.get("image", "") if request.form.get("target") == "image" else "",
+                network=request.form.get("network", "none") if request.form.get("target") == "image" else "none",
+            )
+            flash("Saved task. Running it requires a separate tap.", "ok")
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("commands_page", name=name))
+
+    @app.post("/projects/<name>/commands/tasks/remove")
+    def command_task_remove(name):
+        get_project(name)
+        try:
+            delete_task(name, request.form.get("task", ""))
+            flash("Task removed. Previous command history was preserved.", "ok")
+        except (CommandError, DockerError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("commands_page", name=name))
+
+    @app.get("/projects/<name>/commands/<identifier>")
+    def command_details(name, identifier):
+        get_project(name)
+        try:
+            job = command_job_info(name, identifier)
+        except CommandError:
+            abort(404)
+        return render_template("command_output.html", project=name, job=job,
+                               csrf=token())
+
+    @app.get("/api/projects/<name>/commands/<identifier>")
+    def command_status(name, identifier):
+        get_project(name)
+        try:
+            return {"job": command_job_info(name, identifier),
+                    "output": command_job_output(name, identifier)}
+        except CommandError:
+            abort(404)
+
+    @app.post("/projects/<name>/commands/<identifier>/cancel")
+    def command_cancel(name, identifier):
+        get_project(name)
+        try:
+            cancel_command(name, identifier)
+            flash("Cancellation requested. Existing-container exec may keep running inside Docker.", "ok")
+        except CommandError as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("command_details", name=name, identifier=identifier))
 
     @app.get("/projects/<name>/docker")
     def docker_project(name):
@@ -261,13 +372,55 @@ def create_app(config: dict | None = None) -> Flask:
             flash(str(exc), "error")
         return redirect(url_for("github_settings"))
 
+    @app.get("/projects/<name>/configuration")
+    def project_configuration(name):
+        project = get_project(name)
+        try:
+            source = source_directory(name)
+            changes, fingerprint = sync_review(name)
+            source_label = str(source.relative_to(project.repos[0].path.parent)) if project.repos else str(source)
+            error = None
+        except (SyncError, DockerError, OSError, ValueError) as exc:
+            source_label, changes, fingerprint, error = None, [], None, str(exc)
+        return render_template("project_configuration.html",
+                               project=project, source_label=source_label,
+                               changes=changes, fingerprint=fingerprint,
+                               error=error, csrf=token())
+
+    @app.post("/projects/<name>/configuration/update-source")
+    def project_source_update(name):
+        project = get_project(name)
+        try:
+            source = source_directory(name)
+            match = next((repo for repo in project.repos
+                          if source.is_relative_to(repo.path)), None)
+            if match is None:
+                raise SyncError("The source repository is not registered")
+            branch = repo_update(match)
+            flash(f"Source updated on {branch}. Review configuration changes before applying.", "ok")
+        except (SyncError, DockerError, OperationError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("project_configuration", name=name))
+
+    @app.post("/projects/<name>/configuration/apply")
+    def project_configuration_apply(name):
+        get_project(name)
+        try:
+            count = sync_apply(name, request.form.getlist("change"),
+                               request.form.get("fingerprint", ""))
+            flash(f"Applied {count} selected configuration change(s). "
+                  "Running containers were not restarted.", "ok")
+        except (SyncError, DockerError, OSError, ValueError) as exc:
+            flash(str(exc), "error")
+        return redirect(url_for("project_configuration", name=name))
+
     @app.post("/projects/import")
     def project_import():
         try:
             name, branch = import_github_project(
                 request.form.get("url", ""), request.form.get("name", ""),
             )
-            flash(f"Imported {name} from GitHub" +
+            flash(f"Added {name} from GitHub" +
                   (f" ({branch})" if branch else "") +
                   ". Review Docker Compose before starting containers.", "ok")
         except (TemplateImportError, ProjectSetupError, ValueError) as exc:

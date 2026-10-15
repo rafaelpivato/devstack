@@ -101,6 +101,10 @@ class ImportProjectTests(unittest.TestCase):
         (sample / ".devstack" / "compose.yaml").write_text(
             "services:\n  web:\n    build:\n      context: ../app\n"
         )
+        (sample / ".devstack" / "tasks.toml").write_text(
+            '[[tasks]]\nname="tests"\nservice="web"\nmode="exec"\n'
+            'command=["python","-m","unittest"]\n'
+        )
         self.addCleanup(patch.stopall)
         patch("devstack.template_import.Path.home", return_value=self.home).start()
         patch("devstack.docker_stacks.Path.home", return_value=self.home).start()
@@ -133,8 +137,17 @@ class ImportProjectTests(unittest.TestCase):
         self.assertEqual([r.name for r in project.repos], ["devstack"])
         self.assertTrue(project.repos[0].path.exists())
         self.assertEqual(load_applications(name), (Application("Web", "web", 8000),))
+        from devstack.command_runner import load_tasks, Task
+        self.assertEqual(load_tasks(name), (
+            Task("tests", "web", "exec", ("python", "-m", "unittest")),))
         root = self.home / "workspaces" / name
         self.assertTrue((root / ".devstack" / "compose.yaml").is_file())
+        self.assertEqual(
+            (root / ".devstack" / ".sync-base" / "project.toml").read_text(),
+            (root / ".devstack" / "project.toml").read_text())
+        self.assertEqual(
+            (root / ".devstack" / ".sync-base" / "tasks.toml").read_text(),
+            (root / ".devstack" / "tasks.toml").read_text())
         self.assertEqual((root / ".devstack" / "compose.yaml").read_text(),
                          (root / "devstack" / "examples" / "smoke" / ".devstack" / "compose.yaml").read_text())
         arguments = compose_command(name)
@@ -176,6 +189,20 @@ class ImportProjectTests(unittest.TestCase):
             import_github_project("https://github.com/rafaelpivato/devstack", "bad")
         self.assertEqual(load_projects(self.config), {})
         self.assertFalse((self.home / "workspaces" / "bad").exists())
+
+    @patch("devstack.template_import.subprocess.run")
+    @patch("devstack.template_import._command")
+    def test_template_without_compose_still_remembers_source(self, command, run):
+        command.side_effect = self.command
+        (self.source / "examples" / "smoke" / ".devstack" / "compose.yaml").unlink()
+        name, _ = import_github_project(
+            "https://github.com/rafaelpivato/devstack", "no-compose",
+        )
+        from devstack.project_sync import source_directory
+        path = self.home / "workspaces" / name / ".devstack"
+        self.assertTrue((path / "import.toml").is_file())
+        self.assertFalse((path / "compose.yaml").exists())
+        self.assertTrue(source_directory(name).is_dir())
 
 
 if __name__ == "__main__":

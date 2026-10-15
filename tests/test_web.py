@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+from devstack.command_runner import CommandError
 from devstack.web import create_app
 from devstack.update_control import UpdateControlError
 
@@ -299,6 +300,208 @@ class GithubProjectImportWebTests(unittest.TestCase):
     @patch("devstack.web.import_github_project")
     def test_dashboard_shows_import_url_form(self, import_project):
         response = self.client.get("/")
-        self.assertIn(b"Import GitHub project", response.data)
+        self.assertIn(b"Add project from GitHub", response.data)
         self.assertIn(b"/projects/import", response.data)
         import_project.assert_not_called()
+
+
+class CommandRunnerWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.command_services", return_value=("web", "redis"))
+    @patch("devstack.web.load_tasks", return_value=())
+    @patch("devstack.web.recent_jobs", return_value=[])
+    def test_command_page(self, jobs, tasks, names, projects):
+        result = self.client.get("/projects/demo/commands")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn(b"Run command", result.data)
+        self.assertIn(b"redis", result.data)
+        self.assertIn(b"Saved tasks", result.data)
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.start_command", return_value="a" * 20)
+    def test_run_requires_csrf(self, start, projects):
+        url = "/projects/demo/commands/run"
+        form = {"service": "web", "mode": "exec", "command": "python --version"}
+        self.assertEqual(self.client.post(url, data=form).status_code, 403)
+        start.assert_not_called()
+        form["_csrf"] = self.csrf
+        response = self.client.post(url, data=form)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/commands/" + ("a" * 20), response.location)
+        start.assert_called_once_with("demo", "web", "exec", "python --version", image="", network="none")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.save_task")
+    @patch("devstack.web.start_task", return_value="b" * 20)
+    def test_saved_task_save_does_not_run(self, start, save, projects):
+        data = {"_csrf": self.csrf, "task": "tests", "service": "web",
+                "mode": "run", "command": "python -m unittest"}
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/tasks/save", data=data).status_code,
+            302,
+        )
+        save.assert_called_once_with("demo", "tests", "web", "run", "python -m unittest", image="", network="none")
+        start.assert_not_called()
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/tasks/run",
+                             data={"_csrf": self.csrf, "task": "tests"}).status_code, 302
+        )
+        start.assert_called_once_with("demo", "tests")
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.command_job_info", return_value={
+        "id": "c" * 20, "state": "running", "service": "web", "mode": "exec",
+        "argv": ["python", "--version"],
+    })
+    @patch("devstack.web.command_job_output", return_value="Python 3.12")
+    @patch("devstack.web.cancel_command")
+    def test_status_and_cancel(self, cancel, output, info, projects):
+        url = "/api/projects/demo/commands/" + ("c" * 20)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["output"], "Python 3.12")
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/" + ("c" * 20) + "/cancel").status_code, 403
+        )
+        cancel.assert_not_called()
+        self.assertEqual(
+            self.client.post("/projects/demo/commands/" + ("c" * 20) + "/cancel",
+                             data={"_csrf": self.csrf}).status_code, 302
+        )
+        cancel.assert_called_once_with("demo", "c" * 20)
+
+
+class StandaloneImageWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.command_services", side_effect=CommandError("No Compose file"))
+    @patch("devstack.web.load_tasks", return_value=())
+    @patch("devstack.web.recent_jobs", return_value=[])
+    def test_standalone_form_available_without_compose(self, history, tasks, services, projects):
+        response = self.client.get("/projects/demo/commands")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Standalone Docker image", response.data)
+        self.assertIn(b'name="target"', response.data)
+        self.assertIn(b'name="network"', response.data)
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.start_command", return_value="a" * 20)
+    def test_standalone_image_run_is_forced_to_run_mode(self, command, projects):
+        values = {"target": "image", "image": "alpine:3.20", "network": "none",
+                  "command": "echo hello"}
+        self.assertEqual(self.client.post("/projects/demo/commands/run",
+                                          data=values).status_code, 403)
+        command.assert_not_called()
+        values["_csrf"] = self.csrf
+        result = self.client.post("/projects/demo/commands/run", data=values)
+        self.assertEqual(result.status_code, 302)
+        command.assert_called_once_with(
+            "demo", "", "run", "echo hello", image="alpine:3.20", network="none"
+        )
+
+    @patch("devstack.web.load_projects", return_value={
+        "demo": __import__("devstack.core", fromlist=["Project"]).Project("demo", (), ())
+    })
+    @patch("devstack.web.save_task")
+    def test_image_task_save_forces_run_mode(self, save, projects):
+        values = {"_csrf": self.csrf, "target": "image", "task": "db",
+                  "image": "postgres:16", "network": "project",
+                  "command": "pg_isready -h postgres"}
+        response = self.client.post("/projects/demo/commands/tasks/save", data=values)
+        self.assertEqual(response.status_code, 302)
+        save.assert_called_once_with(
+            "demo", "db", "", "run", "pg_isready -h postgres",
+            image="postgres:16", network="project"
+        )
+
+
+class ProjectConfigurationWebTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test-secret"})
+        self.client = self.app.test_client()
+        self.client.get("/")
+        with self.client.session_transaction() as session:
+            self.csrf = session["_csrf"]
+
+    def project(self):
+        from devstack.core import Project, Repo
+        from pathlib import Path
+        return Project("demo", (Repo("backend", Path("/workspace/demo/backend")),), ())
+
+    @patch("devstack.web.load_projects")
+    @patch("devstack.web.source_directory")
+    @patch("devstack.web.sync_review")
+    def test_review_is_non_mutating(self, review, source, projects):
+        from pathlib import Path
+        from devstack.project_sync import Change
+        projects.return_value = {"demo": self.project()}
+        source.return_value = Path("/workspace/demo/backend/.devstack")
+        review.return_value = ([Change(
+            "tasks.toml:lint", "Task", "lint", "add", "(not present)",
+            '{"command":["python","-m","ruff"]}', False, True
+        )], "a" * 64)
+        result = self.client.get("/projects/demo/configuration")
+        self.assertEqual(result.status_code, 200)
+        self.assertIn(b"Update source from Git", result.data)
+        self.assertIn(b"tasks.toml:lint", result.data)
+        self.assertIn(b'checked', result.data)
+        review.assert_called_once_with("demo")
+
+    @patch("devstack.web.load_projects")
+    @patch("devstack.web.source_directory")
+    @patch("devstack.web.repo_update", return_value="main")
+    def test_update_source_only_touches_linked_repo(self, update, source, projects):
+        from pathlib import Path
+        projects.return_value = {"demo": self.project()}
+        source.return_value = Path("/workspace/demo/backend/examples/smoke/.devstack")
+        url = "/projects/demo/configuration/update-source"
+        self.assertEqual(self.client.post(url).status_code, 403)
+        update.assert_not_called()
+        self.assertEqual(
+            self.client.post(url, data={"_csrf": self.csrf}).status_code, 302
+        )
+        update.assert_called_once_with(self.project().repos[0])
+
+    @patch("devstack.web.load_projects")
+    @patch("devstack.web.sync_apply", return_value=2)
+    def test_apply_only_explicitly_selected_changes_with_token(self, apply, projects):
+        projects.return_value = {"demo": self.project()}
+        url = "/projects/demo/configuration/apply"
+        payload = {"fingerprint": "a" * 64, "change": [
+            "tasks.toml:lint", "project.toml:API"
+        ]}
+        self.assertEqual(self.client.post(url, data=payload).status_code, 403)
+        apply.assert_not_called()
+        payload["_csrf"] = self.csrf
+        self.assertEqual(self.client.post(url, data=payload).status_code, 302)
+        apply.assert_called_once_with("demo",
+            ["tasks.toml:lint", "project.toml:API"], "a" * 64)
+
+    @patch("devstack.web.load_projects", return_value={})
+    def test_missing_project_returns_not_found(self, projects):
+        self.assertEqual(self.client.get("/projects/missing/configuration").status_code, 404)

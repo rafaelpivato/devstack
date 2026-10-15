@@ -16,6 +16,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:350px;overflow:auto;p
 </style></head><body>
 <p><a href="{{url_for('index')}}">← Dashboard</a></p>
 <h1>{{project.name}} · Docker</h1>
+<p><a href="{{url_for('commands_page',name=project.name)}}">Run container commands →</a></p>
 <p>Configuration: <code>~/workspaces/{{project.name}}/.devstack/compose.yaml</code>.
 Git repositories remain untouched. Secret files can live in sibling <code>.secrets/</code>.</p>
 {% with messages = get_flashed_messages(with_categories=true) %}

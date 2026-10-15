@@ -492,3 +492,136 @@ Existing projects, including the v0.2.0 smoke fixture, are not overwritten
 by importing another copy; provide a distinct project name when necessary.
 The original dedicated **Install smoke example** button is retained for
 backward compatibility. No Ubuntu installer refresh is required for v0.2.2.
+
+## Container command runner (v0.3.0)
+
+Open **Commands and tasks** on a project card or **Run container commands**
+from the Docker page. Select a configured Docker Compose service and use
+either **Existing container (exec)** or **Temporary container (run --rm)**.
+Enter a single command using shell-like argument quoting, such as
+`python -m unittest discover -v`. There is **no implicit shell**:
+pipes, redirects, and expansion are literal arguments unless the developer
+explicitly invokes a shell, for example `sh -c 'echo hello | cat'`.
+
+Commands execute as background jobs and expose their live output, exit code,
+status, limited history, a ten-minute timeout and a cancellation request.
+Only one Devstack command per project runs at once to avoid accidental
+overlapping builds/migrations. Tasks and history live in private files at:
+
+```text
+~/workspaces/<project>/.devstack/
+  tasks.toml
+  commands/<id>.json
+  commands/<id>.log
+```
+
+Saved tasks use standard TOML with argv arrays:
+
+```toml
+[[tasks]]
+name = "tests"
+service = "web"
+mode = "exec"
+command = ["python", "-m", "unittest", "discover", "-v"]
+```
+
+**Save** never executes the task. Use the separate **Run** button.
+Templates imported from GitHub also import an optional
+`.devstack/tasks.toml` into the project's managed folder, retaining the
+usual convention that cloned repositories are not modified.
+The bundled `examples/smoke` includes `tests`, `tests-fresh`, and
+`python-version` tasks, plus HTTP smoke tests inside the web image.
+A *new* import from the reviewed source includes these automatically;
+an existing clone needs to be updated and rebuilt, while existing projects'
+managed task lists are intentionally not overwritten automatically.
+
+**Cancellation:** One-off `run --rm` commands get an explicit temporary
+container name, which Devstack forcibly removes on cancellation/timeout.
+For `exec`, cancellation disconnects the Docker client but may **not**
+stop the command process inside the existing container. Never use
+`exec` with potentially destructive long-running migrations if you need
+guaranteed process termination.
+
+**Security:** This is an owner-only privileged development tool.
+Docker commands run with the configured service's privileges and mounts,
+which may themselves provide root-equivalent host access. Commands,
+arguments, recent output and logs may reveal credentials: avoid passing
+secrets as CLI arguments, and restrict the Tailscale dashboard accordingly.
+Devstack does not offer arbitrary host-shell execution, public terminal
+access, or webhook-triggered commands in this release. No host installer
+refresh is required for v0.3.0. Private previews and proxy/webhooks remain
+v0.4.0 goals.
+
+### Standalone Docker images (v0.3.0)
+
+The command runner also accepts an image reference **without defining a
+Compose service**. Select **Standalone Docker image**, enter an image like
+`python:3.12-alpine` or `registry.example.com/tool:latest`, and run a
+command; these tasks always create a fresh `docker run --rm` container.
+Saved tasks can use the same feature:
+
+```toml
+[[tasks]]
+name = "python-version"
+image = "python:3.12-alpine"
+command = ["python", "--version"]
+
+[[tasks]]
+name = "redis-ping"
+image = "redis:7-alpine"
+network = "project"
+command = ["redis-cli", "-h", "redis", "ping"]
+```
+
+The default is `network = "none"`, with **no volumes, bind mounts,
+environment variables, secrets or published ports** supplied by Devstack.
+Standalone containers have `--security-opt no-new-privileges` and
+`--cap-drop ALL`. Image-defined users, application behavior and Docker
+daemon privileges still require trusted images and code.
+
+Use `network = "project"` only when the project's **default Compose
+network is already running**. Devstack identifies that specific network
+using Docker Compose labels, not a guessed name. Attached utility
+containers can reach services by Compose DNS names, for example
+`redis:6379`, while still receiving no project files or secrets.
+
+Containers are removed after completion; Devstack retains the stdout,
+stderr, status and exit code in command history. Cancel/timeout attempts
+to remove temporary standalone containers, just as for temporary Compose
+runs. No Compose service is added, and the image is never shown on the
+application dashboard. A future milestone may add opt-in read-only project
+mounts and explicit secret injection, but neither is enabled here.
+
+## Add and synchronize projects from GitHub
+
+**Add project from GitHub** accepts a GitHub repository or directory URL and
+loads a `.devstack/project.toml`, optional `.devstack/tasks.toml`, and
+optional `.devstack/compose.yaml` from the selected directory. Applications,
+tasks and Compose are copied into the private managed project directory;
+the Git checkout remains untouched. The original source directory is tracked
+in `.devstack/import.toml`.
+
+On a linked project's **Sync project configuration** page:
+
+1. Choose **Update source from Git** to fast-forward the *linked repository's*
+   current branch. Devstack refuses dirty worktrees and non-fast-forward changes.
+   This action does **not** edit local managed settings.
+2. Review additions and updates from the Git template. New tasks and
+   applications are preselected; existing entries—including updates upstream—
+   require an explicit opt-in. Locally customized items are flagged, never
+   silently overwritten. Items deleted from Git are retained locally.
+3. Check the changes you want, then **Apply selected changes**. Compose
+   changes require explicit selection and are validated before saving. Running
+   containers are not restarted or rebuilt automatically.
+
+Newly added GitHub projects capture a baseline of the source files in
+`.devstack/.sync-base/` (private, mode 0600) to identify local customizations.
+Projects added with older releases can still synchronize; because their
+baseline wasn't recorded, differing existing entries are conservatively
+treated as local customizations. The update preview includes a fingerprint
+of source, local and baseline content; applying from an old preview fails
+safely if any of those change.
+
+This is a **configuration sync**, not a second Git clone or a general
+filesystem sync. Local edits in cloned repositories, secrets, other project
+repos and running Docker services are not modified by configuration sync.
