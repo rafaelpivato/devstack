@@ -7,7 +7,7 @@ button{background:#78404a;color:white;border:0;border-radius:8px;padding:10px 14
 .message{background:#354354;padding:10px;border-radius:8px}
 </style></head><body>
 <p><a href="{{url_for('commands_page',name=project)}}">← Commands</a></p>
-<h1>{{job.service}} · {{job.mode}}</h1>
+<h1>{{job.image or job.service}} · {{'image' if job.image else job.mode}}</h1>
 <p><code>{{job.argv | join(' ')}}</code></p>
 {% with messages=get_flashed_messages(with_categories=true) %}
 {% for kind,message in messages %}<p class="message" role="status">{{message}}</p>{% endfor %}

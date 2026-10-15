@@ -160,13 +160,18 @@ def create_app(config: dict | None = None) -> Flask:
     def commands_page(name):
         project = get_project(name)
         try:
-            choices = command_services(name)
             tasks = load_tasks(name)
             history = recent_jobs(name)
             error = None
         except (CommandError, DockerError, OSError, UnicodeError) as exc:
-            choices, tasks, history = (), (), ()
+            tasks, history = (), ()
             error = str(exc)
+        try:
+            choices = command_services(name)
+        except (CommandError, DockerError, OSError) as exc:
+            choices = ()
+            if error is None:
+                error = None  # Standalone image commands work without Compose.
         return render_template("commands.html", project=project,
                                choices=choices, tasks=tasks, history=history,
                                error=error, csrf=token())
@@ -179,6 +184,8 @@ def create_app(config: dict | None = None) -> Flask:
                 name, request.form.get("service", ""),
                 request.form.get("mode", "exec"),
                 request.form.get("command", ""),
+                image=request.form.get("image", "") if request.form.get("target") == "image" else "",
+                network=request.form.get("network", "none") if request.form.get("target") == "image" else "none",
             )
             return redirect(url_for("command_details", name=name, identifier=identifier))
         except (CommandError, DockerError) as exc:
@@ -204,6 +211,8 @@ def create_app(config: dict | None = None) -> Flask:
                 request.form.get("service", ""),
                 request.form.get("mode", "exec"),
                 request.form.get("command", ""),
+                image=request.form.get("image", "") if request.form.get("target") == "image" else "",
+                network=request.form.get("network", "none") if request.form.get("target") == "image" else "none",
             )
             flash("Saved task. Running it requires a separate tap.", "ok")
         except (CommandError, DockerError) as exc:
