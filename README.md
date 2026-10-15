@@ -492,3 +492,62 @@ Existing projects, including the v0.2.0 smoke fixture, are not overwritten
 by importing another copy; provide a distinct project name when necessary.
 The original dedicated **Install smoke example** button is retained for
 backward compatibility. No Ubuntu installer refresh is required for v0.2.2.
+
+## Container command runner (v0.3.0)
+
+Open **Commands and tasks** on a project card or **Run container commands**
+from the Docker page. Select a configured Docker Compose service and use
+either **Existing container (exec)** or **Temporary container (run --rm)**.
+Enter a single command using shell-like argument quoting, such as
+`python -m unittest discover -v`. There is **no implicit shell**:
+pipes, redirects, and expansion are literal arguments unless the developer
+explicitly invokes a shell, for example `sh -c 'echo hello | cat'`.
+
+Commands execute as background jobs and expose their live output, exit code,
+status, limited history, a ten-minute timeout and a cancellation request.
+Only one Devstack command per project runs at once to avoid accidental
+overlapping builds/migrations. Tasks and history live in private files at:
+
+```text
+~/workspaces/<project>/.devstack/
+  tasks.toml
+  commands/<id>.json
+  commands/<id>.log
+```
+
+Saved tasks use standard TOML with argv arrays:
+
+```toml
+[[tasks]]
+name = "tests"
+service = "web"
+mode = "exec"
+command = ["python", "-m", "unittest", "discover", "-v"]
+```
+
+**Save** never executes the task. Use the separate **Run** button.
+Templates imported from GitHub also import an optional
+`.devstack/tasks.toml` into the project's managed folder, retaining the
+usual convention that cloned repositories are not modified.
+The bundled `examples/smoke` includes `tests`, `tests-fresh`, and
+`python-version` tasks, plus HTTP smoke tests inside the web image.
+A *new* import from the reviewed source includes these automatically;
+an existing clone needs to be updated and rebuilt, while existing projects'
+managed task lists are intentionally not overwritten automatically.
+
+**Cancellation:** One-off `run --rm` commands get an explicit temporary
+container name, which Devstack forcibly removes on cancellation/timeout.
+For `exec`, cancellation disconnects the Docker client but may **not**
+stop the command process inside the existing container. Never use
+`exec` with potentially destructive long-running migrations if you need
+guaranteed process termination.
+
+**Security:** This is an owner-only privileged development tool.
+Docker commands run with the configured service's privileges and mounts,
+which may themselves provide root-equivalent host access. Commands,
+arguments, recent output and logs may reveal credentials: avoid passing
+secrets as CLI arguments, and restrict the Tailscale dashboard accordingly.
+Devstack does not offer arbitrary host-shell execution, public terminal
+access, or webhook-triggered commands in this release. No host installer
+refresh is required for v0.3.0. Private previews and proxy/webhooks remain
+v0.4.0 goals.
