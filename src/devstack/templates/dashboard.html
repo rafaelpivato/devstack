@@ -46,7 +46,7 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 </form>
 </section>
 <section class="card">
-<h2>Import GitHub project</h2>
+<h2>Add project from GitHub</h2>
 <p>Use a repository URL or a GitHub <code>/tree/branch/path</code> URL.
 Devstack finds <code>.devstack/project.toml</code> and copies the configuration outside the Git checkout.</p>
 <form method="post" action="{{url_for('project_import')}}" class="stacked">
@@ -56,7 +56,7 @@ Devstack finds <code>.devstack/project.toml</code> and copies the configuration 
  placeholder="https://github.com/rafaelpivato/devstack/tree/main/examples/smoke" required>
 <label for="import-project-name">Project name (optional)</label>
 <input id="import-project-name" name="name" class="wide" placeholder="smoke-git">
-<button type="submit">Import project</button>
+<button type="submit">Add project</button>
 </form>
 </section>
 <section class="card">
@@ -127,7 +127,7 @@ Scheduled checks continue in the background.</small></p>
 </form>
 <p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
 {% endif %}
-<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a></p>
+<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a> · <a href="{{url_for('project_configuration',name=project.name)}}">Sync project configuration →</a></p>
 {% if services %}
 <h3>Legacy services</h3>
 <p class="section-detail">Configured in the older projects.toml format; independent of managed Docker stacks.</p>
@@ -146,7 +146,7 @@ Scheduled checks continue in the background.</small></p>
 {% if repos %}
 <form method="post" action="{{url_for('operate',name=project.name,action='update')}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
-<button type="submit" class="secondary">Update repositories</button>
+<button type="submit" class="secondary">Update repositories (source)</button>
 </form>
 {% endif %}
 <h3>Repositories</h3>
