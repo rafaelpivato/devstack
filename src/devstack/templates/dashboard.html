@@ -88,7 +88,7 @@ Scheduled checks continue in the background.</small></p>
 {% if not rows %}
 <section class="card"><h2>No projects configured</h2><p>Create your first project above.</p></section>
 {% endif %}
-{% for project, services, repos, apps, app_error, linked_source in rows %}
+{% for project, services, repos, apps, app_error, linked_source, dev_urls in rows %}
 <section class="card" id="project-{{project.name}}">
 <div class="heading"><h2>{{ project.name }}</h2><small>{{ repos|length }} repositories · {{ apps|length }} applications</small></div>
 <h3>Applications</h3>
@@ -98,7 +98,10 @@ Scheduled checks continue in the background.</small></p>
 <div class="app-row">
 <div class="row"><strong>{{app.name}}</strong>
 <span class="app-status {{status}}">{{status}}</span>
-<small>{{app.service}}{% if app.port %} · container port {{app.port}}{% endif %}</small></div>
+<small>{{app.service}}{% if app.port %} · container port {{app.port}}{% endif %}</small>
+{% if dev_urls.get(app.name) %}
+<a href="{{dev_urls[app.name]}}" target="_blank" rel="noopener noreferrer">Open on Tailscale ↗</a>
+{% endif %}</div>
 <details><summary>Edit application</summary>
 <form method="post" action="{{url_for('application_edit', name=project.name, app_name=app.name)}}">
 <input type="hidden" name="_csrf" value="{{csrf}}">
@@ -117,7 +120,7 @@ Scheduled checks continue in the background.</small></p>
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <label>Application label <input name="application_name" class="wide" placeholder="API" maxlength="64" required></label>
 <label>Compose service <input name="service" class="wide" placeholder="api" required></label>
-<label>Container port (optional, for future previews) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
+<label>Container port (used for direct Tailscale URLs) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
 <button type="submit">Add application</button>
 </form>
 {% if project.name == 'smoke' %}
@@ -127,7 +130,7 @@ Scheduled checks continue in the background.</small></p>
 </form>
 <p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
 {% endif %}
-<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a>{% if linked_source %} · <a href="{{url_for('project_configuration',name=project.name)}}">Sync project configuration →</a>{% endif %}</p>
+<p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a> · <a href="{{url_for('webhooks_page',name=project.name)}}">Public webhook routes →</a>{% if linked_source %} · <a href="{{url_for('project_configuration',name=project.name)}}">Sync project configuration →</a>{% endif %}</p>
 {% if services %}
 <h3>Legacy services</h3>
 <p class="section-detail">Configured in the older projects.toml format; independent of managed Docker stacks.</p>

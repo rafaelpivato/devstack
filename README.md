@@ -392,8 +392,8 @@ checks its `/health` endpoint.
 
 ### Deliberately deferred
 
-Container command runner / saved tasks, direct previews, Tailscale Funnel,
-ngrok, and export/import of manifests and secrets come in later milestones.
+Container command runner / saved tasks, direct Tailscale ports, selective Funnel webhooks,
+export/import of manifests and secrets come in later milestones.
 
 ## Explicitly selected dashboard applications (v0.2.1)
 
@@ -625,3 +625,83 @@ safely if any of those change.
 This is a **configuration sync**, not a second Git clone or a general
 filesystem sync. Local edits in cloned repositories, secrets, other project
 repos and running Docker services are not modified by configuration sync.
+
+
+## v0.4.0 — direct Tailscale development ports and selective public webhooks
+
+### Development applications: regular ports over Tailscale
+
+Your phone is already on the Tailscale VPN. **No additional private proxy,
+Tailscale Serve mapping, or extra TLS port is needed** for project frontends
+or APIs. Publish an application container port on the server's **actual
+Tailscale IPv4 address**, for example:
+
+```yaml
+services:
+  web:
+    ports:
+      - "100.101.102.103:18080:8000"
+```
+
+Replace `100.101.102.103` with the Devstack server's real address from
+`tailscale ip -4`; don't copy this example literally. Make sure the app
+inside Docker binds `0.0.0.0:8000`, not only its container loopback.
+On a phone connected to the same Tailscale tailnet, open
+`http://100.101.102.103:18080/` directly in Chrome or Safari. WebSockets
+and live-reload connections use that normal TCP path. Tailnet access policies
+and host firewall rules must allow the selected port.
+
+Devstack displays **Open on Tailscale** on an explicitly registered
+application only if Docker Compose already publishes its specified container
+TCP port on exactly the server's Tailscale IP. It **does not rewrite Compose,
+bind ports, automatically open firewalls, or expose 0.0.0.0 bindings**.
+The bundled Smoke project still defaults to loopback-only `127.0.0.1:18080`;
+edit its Compose port binding to your actual Tailscale IP if you want direct
+phone access. Do not publish the administrative Devstack dashboard or
+development ports on public IP addresses.
+
+### Public webhooks: explicit POST-only forwarding
+
+The private Devstack dashboard remains on Tailscale Serve HTTPS **443**.
+Public webhooks, when you explicitly enable them, use **Funnel HTTPS 8443**
+and a separate loopback-only listener `127.0.0.1:8767`.
+
+Open **Public webhook routes** for a project in the dashboard. Create an
+allowlisted, named route mapping to a **registered application** and an exact
+destination path, for example:
+
+```text
+Public: https://<your-node>.ts.net:8443/hooks/demo/stripe
+POST -> registered API service -> /webhooks/stripe
+```
+
+Only configured route names accept POST. The forwarding service never proxies
+the private dashboard, general frontend pages, arbitrary HTTP methods, or
+request-supplied URLs. It checks Compose container ownership and network
+labels before forwarding. It preserves the raw request body and provider
+signature headers and drops cookies, proxy headers and incoming host headers.
+The destination service **must verify the provider's signature or shared
+secret** before processing the webhook. A guessed public URL is not
+authentication.
+
+Add/remove operations **do not** publish the service. After merging, publishing
+and installing the reviewed v0.4.0 release, the one-time installer refresh
+provides a separate `devstack-webhooks.service` and an explicit Funnel helper:
+
+```bash
+# Only after reviewing the installer and publishing v0.4.0:
+curl -fsSL https://raw.githubusercontent.com/rafaelpivato/devstack/main/scripts/install.sh | sudo bash
+# Explicitly publish ONLY the webhook ingress (never the dashboard):
+sudo python3 /usr/local/lib/devstack/webhook_funnel.py
+# Revoke public exposure at any time:
+sudo python3 /usr/local/lib/devstack/webhook_funnel.py --disable
+```
+
+The helper confirms the pinned Tailscale identity, existing exact private
+Serve configuration, and local webhook-only health endpoint before enabling
+Funnel 8443. Unexpected configurations are rejected rather than overwritten.
+Funnel may additionally require tailnet feature enablement/permissions.
+The listener itself is only on loopback; Funnel is **off by default**.
+
+This release has no wildcard forwarding, arbitrary destination URLs,
+general-purpose public proxies or additional tunneling providers.
