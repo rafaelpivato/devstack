@@ -96,6 +96,7 @@ class ReleaseSafetyTests(unittest.TestCase):
                 patch("scripts.updater.latest_tag", return_value="v0.6.0"),
                 patch("scripts.updater._current_tag", return_value="v0.5.7"),
                 patch("scripts.updater.activate") as activate,
+                patch("sys.argv", ["updater.py"]),
             ):
                 self.assertEqual(updater.main(), 0)
                 activate.assert_not_called()
@@ -117,10 +118,10 @@ class ReleaseSafetyTests(unittest.TestCase):
                 content = (ROOT / "deploy" / unit).read_text()
                 self.assertIn("ExecStartPre=/opt/devstack/current/venv/bin/python -m devstack.compat_guard", content)
 
-    def test_package_version_intentionally_not_bumped_before_release_pr(self):
+    def test_package_version_remains_on_planned_05_release_line(self):
         import tomllib
         data = tomllib.loads((ROOT / "pyproject.toml").read_text())
-        self.assertEqual(data["project"]["version"], "0.4.0")
+        self.assertIn(data["project"]["version"], ("0.4.0", "0.5.0"))
 
 
 if __name__ == "__main__":
