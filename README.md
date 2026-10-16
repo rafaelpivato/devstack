@@ -1,26 +1,29 @@
 # Devstack
 
-> **v0.5 release preparation:** We'll provision a new Ubuntu host for v0.5
-> and retire the v0.4 server. Subsequent releases, including the planned
-> v0.6 UI redesign, are installed automatically without recreating the server.
-> See [installation and automatic updates](docs/v0.5-installation.md).
+> **v0.5.0 release candidate:** Install on a fresh Ubuntu host **after** the
+> [stable GitHub Release](https://github.com/rafaelpivato/devstack/releases)
+> is published. Retire the old v0.4 host separately. Future releases—including
+> the planned v0.6 visual redesign—install automatically without rebuilding
+> your workspace. See [installation and updates](docs/v0.5-installation.md).
 
 
 Mobile-first, cloud-agnostic development project controller for a single Ubuntu server.
-One configured project with multiple repositories (v0.5 development branch).
+One configured project with multiple Git repositories, managed Docker Compose
+runtime, and private Tailscale network access.
 
-**Status:** v0.5 single-project breaking refactor in progress; not yet a published release. Previous v0.4 instructions below are historical and may not apply.
+**Version:** v0.5.0 release candidate. Older v0.4 multi-project sections
+in this document are historical and do not apply.
 
 ## Goals
 
 - Use a phone browser rather than a desktop IDE for routine project operations.
-- Organize repositories by client/project; one checked-out branch per repository.
+- Manage multiple Git repositories within one configured project.
 - Start/stop project services, inspect recent logs, safely fast-forward repositories,
   and switch branches.
-- Support Docker Compose and systemd user services without requiring every project to use Docker.
+- Manage Docker Compose services through a single ACTIVE/INACTIVE runtime.
 - Stay independent of AWS, DigitalOcean, or any other hosting provider.
-- Eventually provide one-line installation, tests-before-release, independent self-updates,
-  health checks and automatic rollback.
+- Provide provider-neutral installation, verified releases, independent
+  automatic updates, health checks and rollback.
 
 ## Developer quick start (Ubuntu or other Python 3.11+ machine)
 
@@ -45,9 +48,10 @@ Run tests with `python -m unittest discover -s tests -v`.
 
 ## Configuration
 
-The v0.5 single workspace schema is documented in [examples/workspace.toml](examples/workspace.toml) and [docs/v0.5-roadmap.md](docs/v0.5-roadmap.md).
-Project services may use `kind = "compose"` with `cwd` and optional
-`compose_file`, or `kind = "systemd"` with a **user-level** systemd `unit`.
+The single workspace configuration is documented in
+[examples/workspace.toml](examples/workspace.toml). Multiple repositories
+share the project's `.devstack/compose.yaml` runtime. Legacy `[[projects]]`
+configuration and user-level systemd service execution are not supported.
 
 Specify a different config with `DEVSTACK_CONFIG=/path/to/workspace.toml`.
 
@@ -59,24 +63,27 @@ Specify a different config with `DEVSTACK_CONFIG=/path/to/workspace.toml`.
   from `origin/<branch>`. Local unpushed commits are not overwritten.
 - Git branch switches reject dirty working trees; new branches should be created on GitHub first.
 - Logs may include secrets. Never expose the dashboard or logs publicly.
-- This scaffold does not install itself, auto-update, roll back, manage TLS, or implement
-  the complete deployment/recovery design. Those belong in dedicated follow-up changes.
-- Do not configure production systemd units or production Compose projects as development services.
+- The reviewed Ubuntu installer supports stable release updates and
+  health-check rollback; install only on a trusted server.
+- Optional Tailscale Serve provides private HTTPS. Public webhook ingress
+  through Funnel is explicitly opt-in.
+- Do not manage production services through DevStack.
 
-## Roadmap
+## Release roadmap
 
-1. Portable installer, dedicated Linux user and persistent systemd service.
-2. Private HTTPS access and secure first-run authentication.
-3. Independently supervised, release-based self-update with health check and rollback.
-4. Project previews and browser-side error reporting.
-5. Optional carefully scoped ChatGPT integration.
+- **v0.5.0:** single-project lifecycle, guarded execution, Compose-owned
+  networking, active-only webhooks, modular API-backed dashboard and portable
+  Ubuntu installer.
+- **v0.6:** visual/frontend redesign reusing the same workspace, runtime,
+  backend services and `/api/v1` contracts.
+
+See the [implementation tracker](docs/v0.5-roadmap.md).
 
 ## Portable Ubuntu install and independent release updates
 
-**Deployment is not enabled until a stable GitHub Release exists.** The installer,
-user-service configuration and independent updater are being developed and
-reviewed in a PR. Only install after that PR is merged and a tested release is
-published. Use a fresh **Ubuntu 24.04 LTS** instance.
+**Wait for the published `v0.5.0` GitHub Release before installing.**
+The publishing workflow verifies both unit tests and real Docker integration
+first. Use a fresh **Ubuntu 24.04 LTS** instance.
 
 To bootstrap on a **trusted private server**, in cloud-init user data or an
 interactive root shell:
@@ -98,7 +105,7 @@ Private authenticated access (for instance via a private tunnel) must be set up
 separately before accessing it from an iPhone.
 
 Releases must be tagged `vMAJOR.MINOR.PATCH` and published as stable GitHub
-Releases. Release publishing has its own CI job that runs the unit tests.
+Releases. Publishing is gated by the full unit tests and Docker smoke suite.
 A periodic timer checks the latest stable release and installs it into
 `/opt/devstack/releases/<tag>`, then atomically swaps the `current` symlink,
 restarts the service and verifies `/healthz`. On failure it restores the
