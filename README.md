@@ -1,5 +1,11 @@
 # Devstack
 
+> **v0.5 clean-install-only development:** The next release will not upgrade
+> existing v0.4 hosts. Its installation steps and rollback safeguards are
+> documented in [v0.5 installation and release safety](docs/v0.5-installation.md).
+> Continue using the v0.4 release instructions below until v0.5.0 is published.
+
+
 Mobile-first, cloud-agnostic development project controller for a single Ubuntu server.
 One configured project with multiple repositories (v0.5 development branch).
 
