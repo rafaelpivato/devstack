@@ -11,6 +11,7 @@ WorkingDirectory=@DEVSTACK_HOME@
 # Stop managed project containers before serving the UI on every startup.
 # The reconciler reports ERROR in runtime.json if Docker is unavailable;
 # the dashboard remains available so the operator can recover.
+ExecStartPre=/opt/devstack/current/venv/bin/python -m devstack.compat_guard
 ExecStartPre=/opt/devstack/current/venv/bin/python -m devstack.runtime --reconcile
 ExecStart=/opt/devstack/current/venv/bin/gunicorn --bind 127.0.0.1:8765 --workers 1 --threads 4 --timeout 30 devstack.web:create_app()
 Restart=on-failure
