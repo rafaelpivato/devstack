@@ -22,7 +22,6 @@ from flask import Flask, Response, abort, request
 from .applications import ApplicationError, load_applications
 from .core import load_projects
 from . import runtime
-from .compat_guard import check_installation
 from .docker_stacks import DockerError, compose_command, compose_name, compose_path, managed_dir, project_root
 
 MAX_BODY = 2 * 1024 * 1024
@@ -239,7 +238,6 @@ _HTTP = urllib_request.build_opener(urllib_request.ProxyHandler({}), _NoRedirect
 
 
 def create_webhook_app(config: dict | None = None) -> Flask:
-    check_installation()
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
     if config:

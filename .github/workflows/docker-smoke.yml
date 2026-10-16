@@ -54,7 +54,7 @@ jobs:
           test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
           docker run --rm --network "$network" --security-opt no-new-privileges \
             --cap-drop ALL redis:7-alpine redis-cli -h redis ping
-      - name: Verify fresh-install packaged WSGI and legacy startup rejection
+      - name: Verify fresh-install packaged WSGI and static assets
         run: |
           set -euo pipefail
           venv="$RUNNER_TEMP/devstack-fresh-v05"
@@ -116,19 +116,8 @@ jobs:
           assert overview["runtime"]["phase"] == "inactive"
           PY
           kill "$worker"; wait "$worker" || true
-          : > "$homedir/.config/devstack/projects.toml"
-          if "$venv/bin/python" -m devstack.compat_guard; then
-              echo "An existing v0.4 host was unexpectedly authorized" >&2
-              exit 1
-          fi
-          if "$venv/bin/python" - <<'PY'
-          from devstack.web import create_app
-          create_app()
-          PY
-          then
-              echo "v0.5 WSGI unexpectedly accepted a v0.4 workspace" >&2
-              exit 1
-          fi
+          # All fresh-install checks use the packaged wheel and an empty home.
+          # There is intentionally no release-series or v0.4 legacy guard.
       - name: Verify explicit webhook forwarding to actual Compose container
         run: |
           set -euo pipefail

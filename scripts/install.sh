@@ -33,47 +33,27 @@ if [[ -z "$home" || ! -d "$home" ]]; then
   echo "User home does not exist: $home" >&2; exit 1
 fi
 
-# Fail before apt, unit replacement, symlink changes or timer activation.
-# A v0.4 host may contain personal data in the old projects.toml.
-legacy_config="$home/.config/devstack/projects.toml"
-if [[ -e "$legacy_config" || -L "$legacy_config" ]]; then
-  echo "Existing v0.4 projects.toml detected; v0.5 is clean-install-only." >&2
-  echo "Provision a new Ubuntu host. No in-place v0.4 upgrade is supported." >&2
-  exit 1
-fi
-if [[ -f /etc/devstack/app.env ]] && grep -Eq '^DEVSTACK_CONFIG=.*projects[.]toml' /etc/devstack/app.env; then
-  echo "Existing v0.4 config path detected; refusing unsafe upgrade." >&2
-  exit 1
-fi
-
-# Use *one* immutable release tag for bootstrap scripts and application.
-# Never combine main-branch systemd units with an older latest release.
-release_tag="${DEVSTACK_RELEASE_TAG:-}"
-if [[ -z "$release_tag" ]]; then
-  release_tag="$(DEVSTACK_REPO="$repo" python3 - <<'PY'
+# Resolve the latest published stable release once for a coherent initial
+# installation. This does NOT pin later upgrades: the updater continues to
+# follow each new published GitHub release automatically (including v0.6).
+release_tag="$(DEVSTACK_REPO="$repo" python3 - <<'PY'
 import json
 import os
+import re
 import urllib.request
 repo = os.environ["DEVSTACK_REPO"]
 req = urllib.request.Request(
     f"https://api.github.com/repos/{repo}/releases/latest",
-    headers={"Accept": "application/vnd.github+json", "User-Agent": "devstack-install/0.5"},
+    headers={"Accept": "application/vnd.github+json", "User-Agent": "devstack-install"},
 )
 with urllib.request.urlopen(req, timeout=15) as response:
-    print(json.load(response)["tag_name"])
+    tag = json.load(response)["tag_name"]
+if not isinstance(tag, str) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+    raise SystemExit("No valid published stable DevStack release")
+print(tag)
 PY
 )"
-fi
-if [[ ! "$release_tag" =~ ^v([0-9]+)[.]([0-9]+)[.]([0-9]+)$ ]]; then
-  echo "Installation requires a stable vMAJOR.MINOR.PATCH release tag." >&2; exit 1
-fi
-if (( 10#${BASH_REMATCH[1]} == 0 && 10#${BASH_REMATCH[2]} < 5 )); then
-  echo "Latest release $release_tag predates v0.5.0. Install after v0.5.0 is released." >&2
-  exit 1
-fi
-echo "Installing reviewed DevStack release $release_tag (Ubuntu only)."
-
-
+echo "Installing latest DevStack release $release_tag."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq python3-venv python3-pip git curl ca-certificates
@@ -142,8 +122,8 @@ systemctl daemon-reload
 systemctl enable devstack.service
 # Webhook-only ingress listens on loopback; no Funnel is enabled automatically.
 systemctl enable devstack-webhooks.service
-# Install exactly the same tag as the downloaded units before enabling any
-# automatic update timer. On failure exit loudly; never claim success.
+# Boot the release matching the downloaded units; later timer runs follow
+# new GitHub releases without a version-series restriction.
 if ! /usr/bin/python3 /usr/local/lib/devstack/updater.py --tag "$release_tag"; then
   echo "Failed to activate $release_tag. Inspect devstack.service journal." >&2
   exit 1
