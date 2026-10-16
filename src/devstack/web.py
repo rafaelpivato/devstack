@@ -28,6 +28,7 @@ from .command_runner import (
 from .dev_ports import application_urls, published_ports
 from . import runtime
 from . import dashboard_state
+from .compat_guard import check_installation
 from .webhooks import WebhookError, add_webhook, remove_webhook, load_webhooks
 from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
 from .template_import import ImportError as TemplateImportError, import_github_project
@@ -41,6 +42,10 @@ from .core import (
 
 
 def create_app(config: dict | None = None) -> Flask:
+    # Critical: an installed v0.4 updater still uses its old systemd unit.
+    # Reject the candidate *inside* the app, not only ExecStartPre, so old
+    # automatic updaters fail health checks and roll back safely.
+    check_installation()
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=os.environ.get("DEVSTACK_SECRET_KEY") or secrets.token_hex(32),

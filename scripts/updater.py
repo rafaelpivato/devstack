@@ -48,6 +48,20 @@ def latest_tag(repo: str) -> str:
     return checked_tag(release["tag_name"])
 
 
+def _series(tag: str) -> tuple[int, int]:
+    """The automatic updater follows only the current minor release line."""
+    value = checked_tag(tag)[1:].split(".")
+    return int(value[0]), int(value[1])
+
+
+def _current_tag(root: Path) -> str | None:
+    old = current_release(root / "current")
+    if old is None:
+        return None
+    tag = old.name
+    return checked_tag(tag)
+
+
 def execute(*args: str, timeout: int = 180) -> None:
     subprocess.run(list(args), check=True, timeout=timeout)
 
@@ -71,6 +85,12 @@ def prepare_release(root: Path, tag: str, repo: str) -> Path:
                 "--branch", tag, f"https://github.com/{repo}.git",
                 str(source), timeout=180)
         execute(sys.executable, "-m", "venv", str(release_dir / "venv"), timeout=90)
+        # A release tag must correspond to the checked-out Python package
+        # version, not just a Git ref with an arbitrary name.
+        import tomllib
+        metadata = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))
+        if "v" + metadata["project"]["version"] != tag:
+            raise RuntimeError("Release tag disagrees with pyproject.toml version")
         execute(str(release_dir / "venv/bin/python"), "-m", "pip", "install",
                 "--disable-pip-version-check", "--no-input", "--no-cache-dir",
                 str(source), timeout=240)
@@ -133,6 +153,11 @@ def activate(
     if failed.exists():
         return f"Skipping previously failed release {tag}; operator action required to retry"
     old = current_release(current)
+    # A v0.5 candidate is never an in-place migration from v0.4. This check
+    # runs only on hosts with the *new* updater. Older updaters are protected
+    # by the v0.5 application's own startup compatibility gate.
+    if old is not None and _series(old.name) < (0, 5) and _series(tag) >= (0, 5):
+        raise RuntimeError("Refusing v0.4 -> v0.5 in-place upgrade; use a new Ubuntu host")
     target = root / "releases" / tag
     if old == target and (target / ".ready").exists():
         return f"Already running {tag}"
@@ -173,6 +198,15 @@ def main() -> int:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             tag = checked_tag(args.tag) if args.tag else latest_tag(repo)
+            current = _current_tag(root)
+            if current and not args.tag and _series(current) != _series(tag):
+                # Prevent later breaking releases (e.g. v0.6) from silently
+                # replacing stable v0.5. Explicit --tag is opt-in.
+                print(f"Skipping incompatible automatic release {tag}; "
+                      f"installed series is v{_series(current)[0]}.{_series(current)[1]}.x. "
+                      "An explicit versioned fresh installation is required.",
+                      flush=True)
+                return 0
             print(activate(tag, repo, root, state), flush=True)
             return 0
         except Exception as exc:
