@@ -6,30 +6,26 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: devstack-release-main
   cancel-in-progress: false
 
 jobs:
-  release:
+  candidate:
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install application
-        run: python -m pip install -e .
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
       - name: Determine version and check whether already released
         id: version
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import os
           import re
           import subprocess
@@ -48,13 +44,43 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f"tag={tag}", file=output)
               print(f"publish={'false' if found else 'true'}", file=output)
-          print(f"{tag}: {'already tagged' if found else 'ready to publish'}")
+          print(f"{tag}: {'already tagged' if found else 'awaiting verification'}")
           PY
-      - name: Publish release
-        if: steps.version.outputs.publish == 'true'
+
+  docker-verification:
+    needs: candidate
+    if: needs.candidate.outputs.publish == 'true'
+    uses: ./.github/workflows/docker-smoke.yml
+    permissions:
+      contents: read
+
+  publish:
+    needs: [candidate, docker-verification]
+    if: needs.candidate.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install application
+        run: python -m pip install -e .
+      - name: Run full unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Publish verified stable release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
+          TAG: ${{ needs.candidate.outputs.tag }}
         run: |
-          gh release create "$TAG" --target "$GITHUB_SHA" \
-            --generate-notes --title "$TAG"
+          set -euo pipefail
+          if [[ -f "docs/releases/$TAG.md" ]]; then
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "$TAG" --notes-file "docs/releases/$TAG.md"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" \
+              --title "$TAG" --generate-notes
+          fi
