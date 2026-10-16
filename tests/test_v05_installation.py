@@ -56,7 +56,7 @@ class AutoUpdateTests(unittest.TestCase):
             ):
                 self.assertEqual(updater.main(), 0)
             latest.assert_called_once_with("rafaelpivato/devstack")
-            self.assertEqual(activate.call_args.args[0][:2],
+            self.assertEqual(activate.call_args.args[:2],
                              ("v0.6.0", "rafaelpivato/devstack"))
 
     def test_failed_upgrade_still_rolls_back(self):
