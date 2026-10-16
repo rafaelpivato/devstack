@@ -1,127 +1,113 @@
-"""Fresh v0.5 installation and no-silent-upgrade safety contracts."""
+"""Portable fresh install and uninterrupted automatic release following."""
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import patch
 import os
+from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from devstack.compat_guard import IncompatibleInstallation, check_installation
 from scripts import updater
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class CleanInstallGuardTests(unittest.TestCase):
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory()
-        self.addCleanup(temp.cleanup)
-        self.home = Path(temp.name) / "home"
-        (self.home / ".config" / "devstack").mkdir(parents=True)
-        self.config = self.home / ".config" / "devstack" / "workspace.toml"
-
-    def test_new_empty_host_accepts_unprovisioned_workspace(self):
-        check_installation(self.home, self.config)
-        self.config.write_text("")
-        check_installation(self.home, self.config)
-
-    def test_new_single_project_is_valid(self):
-        self.config.write_text('[project]\nname = "demo"\n')
-        check_installation(self.home, self.config)
-
-    def test_preexisting_v04_file_is_rejected_even_when_empty(self):
-        (self.home / ".config" / "devstack" / "projects.toml").touch()
-        with self.assertRaisesRegex(IncompatibleInstallation, "v0.4"):
-            check_installation(self.home, self.config)
-
-    def test_symlinked_old_config_is_not_followed(self):
-        (self.home / ".config" / "devstack" / "projects.toml").symlink_to(
-            self.config
-        )
-        with self.assertRaises(IncompatibleInstallation):
-            check_installation(self.home, self.config)
-
-    def test_legacy_environment_config_path_is_rejected(self):
-        with self.assertRaisesRegex(IncompatibleInstallation, "projects.toml"):
-            check_installation(self.home, self.home / "config" / "projects.toml")
-
-    def test_multi_project_schema_never_accepted(self):
-        self.config.write_text('[[projects]]\nname="demo"\n')
-        with self.assertRaisesRegex(IncompatibleInstallation, "Invalid v0.5"):
-            check_installation(self.home, self.config)
-
-    def test_candidate_wsgi_refuses_old_updater_host_before_binding_http(self):
-        # The *old* updater uses v0.4 systemd units without ExecStartPre.
-        # The v0.5 WSGI app must refuse the candidate itself: health fails,
-        # allowing the independent v0.4 updater to restore its previous link.
-        from devstack.web import create_app
-        from devstack.webhooks import create_webhook_app
-        legacy = self.home / ".config" / "devstack" / "projects.toml"
-        legacy.write_text('[[projects]]\nname = "demo"\n')
-        with patch("devstack.compat_guard.Path.home", return_value=self.home):
-            with patch.dict(os.environ, {"DEVSTACK_CONFIG": str(legacy)}):
-                with self.assertRaises(IncompatibleInstallation):
-                    create_app({"TESTING": True})
-                with self.assertRaises(IncompatibleInstallation):
-                    create_webhook_app({"TESTING": True})
-
-
-class ReleaseSafetyTests(unittest.TestCase):
-    def test_updater_series_and_tags(self):
-        self.assertEqual(updater._series("v0.5.7"), (0, 5))
-        self.assertEqual(updater._series("v0.6.0"), (0, 6))
-
-    def test_new_updater_refuses_v04_to_v05_in_place(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder) / "app"
-            old = root / "releases" / "v0.4.0"
-            old.mkdir(parents=True)
-            updater.point_at(root / "current", old)
+class AutoUpdateTests(unittest.TestCase):
+    def test_same_version_is_not_reinstalled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            current = root / "releases" / "v0.5.7"
+            current.mkdir(parents=True)
+            (current / ".ready").write_text("v0.5.7\n")
+            updater.point_at(root / "current", current)
             with patch("scripts.updater.prepare_release") as prepare:
-                with self.assertRaisesRegex(RuntimeError, "Refusing v0.4"):
-                    updater.activate("v0.5.0", "rafaelpivato/devstack",
-                                     root, Path(folder) / "state")
+                message = updater.activate("v0.5.7", "rafaelpivato/devstack",
+                                           root, Path(directory) / "state")
+                self.assertIn("Already running", message)
                 prepare.assert_not_called()
 
-    def test_later_minor_release_requires_explicit_opt_in(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder) / "app"
-            state = Path(folder) / "state"
+    def test_new_minor_release_is_automatically_applied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            old = root / "releases" / "v0.5.7"
+            new = root / "releases" / "v0.6.0"
+            old.mkdir(parents=True)
+            new.mkdir(parents=True)
+            (new / ".ready").write_text("v0.6.0\n")
+            updater.point_at(root / "current", old)
+            with (patch("scripts.updater.execute"),
+                  patch("scripts.updater.healthy", return_value=True)):
+                message = updater.activate("v0.6.0", "rafaelpivato/devstack",
+                                           root, Path(directory) / "state")
+            self.assertEqual(updater.current_release(root / "current"), new)
+            self.assertIn("Activated v0.6.0", message)
+
+    def test_timer_follows_latest_tag_across_release_series(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            state = Path(directory) / "state"
             with (
                 patch.dict(os.environ, {"DEVSTACK_ROOT": str(root),
                                         "DEVSTACK_STATE": str(state)}),
-                patch("scripts.updater.latest_tag", return_value="v0.6.0"),
-                patch("scripts.updater._current_tag", return_value="v0.5.7"),
-                patch("scripts.updater.activate") as activate,
+                patch("scripts.updater.latest_tag", return_value="v0.6.0") as latest,
+                patch("scripts.updater.activate", return_value="Activated v0.6.0") as activate,
                 patch("sys.argv", ["updater.py"]),
             ):
                 self.assertEqual(updater.main(), 0)
-                activate.assert_not_called()
+            latest.assert_called_once_with("rafaelpivato/devstack")
+            self.assertEqual(activate.call_args.args[0][:2],
+                             ("v0.6.0", "rafaelpivato/devstack"))
 
-    def test_install_script_pins_single_release_not_main(self):
-        content = (ROOT / "scripts" / "install.sh").read_text()
-        self.assertIn('DEVSTACK_RELEASE_TAG', content)
-        self.assertIn('raw.githubusercontent.com/$repo/$release_tag', content)
-        self.assertIn('updater.py --tag "$release_tag"', content)
-        self.assertNotIn('raw.githubusercontent.com/$repo/main', content)
-        self.assertIn('Existing v0.4', content)
-        self.assertIn('workspace.toml', content)
+    def test_failed_upgrade_still_rolls_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            previous = root / "releases" / "v0.5.7"
+            target = root / "releases" / "v0.6.0"
+            previous.mkdir(parents=True)
+            target.mkdir(parents=True)
+            (target / ".ready").write_text("v0.6.0\n")
+            updater.point_at(root / "current", previous)
+            with (
+                patch("scripts.updater.execute"),
+                patch("scripts.updater.healthy", return_value=False),
+                patch("scripts.updater.subprocess.run") as process,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "restored previous"):
+                    updater.activate("v0.6.0", "rafaelpivato/devstack",
+                                     root, Path(directory) / "state")
+            self.assertEqual(updater.current_release(root / "current"), previous)
+            self.assertTrue((Path(directory) / "state" / "failed-v0.6.0").exists())
+            process.assert_called_once()
+
+    def test_installer_fetches_latest_once_but_not_a_permanent_pin(self):
+        script = (ROOT / "scripts" / "install.sh").read_text()
+        self.assertIn("/releases/latest", script)
+        self.assertIn("raw.githubusercontent.com/$repo/$release_tag", script)
+        self.assertIn('updater.py --tag "$release_tag"', script)
+        self.assertIn("devstack-update.timer", script)
+        self.assertNotIn("DEVSTACK_RELEASE_TAG", script)
+        self.assertNotIn('raw.githubusercontent.com/$repo/main', script)
+        self.assertNotIn("Existing v0.4", script)
         subprocess.run(["bash", "-n", str(ROOT / "scripts/install.sh")],
                        check=True)
 
-    def test_both_wsgi_services_have_early_compatibility_guards(self):
+    def test_no_upgrade_series_lock_or_legacy_boot_guard(self):
+        script = (ROOT / "scripts" / "updater.py").read_text()
+        self.assertNotIn("def _series(", script)
+        self.assertNotIn("Skipping incompatible automatic release", script)
+        self.assertFalse((ROOT / "src" / "devstack" / "compat_guard.py").exists())
         for unit in ("devstack.service", "devstack-webhooks.service"):
-            with self.subTest(unit=unit):
-                content = (ROOT / "deploy" / unit).read_text()
-                self.assertIn("ExecStartPre=/opt/devstack/current/venv/bin/python -m devstack.compat_guard", content)
+            self.assertNotIn("devstack.compat_guard",
+                             (ROOT / "deploy" / unit).read_text())
+        for module in ("web.py", "webhooks.py"):
+            self.assertNotIn("check_installation(",
+                             (ROOT / "src" / "devstack" / module).read_text())
 
-    def test_package_version_remains_on_planned_05_release_line(self):
+    def test_version_not_bumped_by_pr_06(self):
         import tomllib
-        data = tomllib.loads((ROOT / "pyproject.toml").read_text())
-        self.assertIn(data["project"]["version"], ("0.4.0", "0.5.0"))
+        version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+        self.assertEqual(version, "0.4.0")
 
 
 if __name__ == "__main__":
