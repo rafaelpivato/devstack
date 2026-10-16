@@ -13,7 +13,7 @@ textarea{box-sizing:border-box;width:100%;min-height:300px;border:1px solid #455
 pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:350px;overflow:auto;padding:12px;border-radius:9px}
 .message{padding:12px;border-radius:9px;background:#354354}.message.error{background:#63333d}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
-</style></head><body>
+</style></head><body data-docker-status-url="{{url_for('docker_status',name=project.name)}}">
 <p><a href="{{url_for('index')}}">← Dashboard</a></p>
 <h1>{{project.name}} · Docker</h1>
 <p><a href="{{url_for('commands_page',name=project.name)}}">Run container commands →</a></p>
@@ -53,28 +53,5 @@ Only loopback ports should be published. Saving validates the definition but doe
 <h3 id="job-state">Last operation: {{job.state if job else 'none'}}</h3>
 <pre id="job-output" aria-live="polite">Waiting for logs…</pre>
 </section>
-<script>
-(function(){
- let previous = '';
- async function poll(){
-   try{
-     const result=await fetch('{{url_for("docker_status",name=project.name)}}',
-       {cache:'no-store',credentials:'same-origin'});
-     if(!result.ok)throw new Error('unavailable');
-     const data=await result.json();
-     const summary=data.job ?
-       data.job.action+' · '+data.job.state+
-       (data.job.exit_code===undefined?'':' · exit '+data.job.exit_code) : 'none';
-     document.getElementById('job-state').textContent='Last operation: '+summary;
-     if(data.log!==previous){
-       previous=data.log;
-       document.getElementById('job-output').textContent=data.log || '(no output)';
-     }
-   }catch(e){
-     document.getElementById('job-state').textContent='Connection interrupted; retrying…';
-   }
- }
- poll();setInterval(poll,2500);
-})();
-</script>
+<script type="module" src="{{url_for('static',filename='js/docker.js')}}"></script>
 </body></html>

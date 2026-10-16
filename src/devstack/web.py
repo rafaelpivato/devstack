@@ -27,6 +27,7 @@ from .command_runner import (
 )
 from .dev_ports import application_urls, published_ports
 from . import runtime
+from . import dashboard_state
 from .webhooks import WebhookError, add_webhook, remove_webhook, load_webhooks
 from .project_sync import SyncError, review as sync_review, apply as sync_apply, source_directory
 from .template_import import ImportError as TemplateImportError, import_github_project
@@ -66,16 +67,17 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.before_request
     def protect_writes():
-        if request.method == "POST" and (
-            not session.get("_csrf")
-            or not request.form.get("_csrf")
-            or not secrets.compare_digest(session["_csrf"], request.form["_csrf"])
-        ):
-            abort(403)
+        if request.method == "POST":
+            supplied = (request.headers.get("X-CSRF-Token", "")
+                        if request.path.startswith("/api/v1/")
+                        else request.form.get("_csrf", ""))
+            if (not session.get("_csrf") or not supplied
+                    or not secrets.compare_digest(session["_csrf"], supplied)):
+                abort(403)
 
 
     # Single-project HTTP adapter: project names are not URL parameters.
-    # The underlying services are still named internally until PR 02/03.
+    # The internal adapters are retired in later cleanup; public URLs are singleton.
     project_endpoints = ["webhooks_page","webhooks_add","webhooks_remove","application_create","application_edit","application_remove","commands_page","command_run","command_task_run","command_task_save","command_task_remove","command_details","command_status","command_cancel","docker_project","docker_save","docker_action","docker_status","docker_containers","docker_logs","project_configuration","project_source_update","project_configuration_apply","repo_add","operate","switch","logs"]
 
     @app.url_value_preprocessor
@@ -92,6 +94,25 @@ def create_app(config: dict | None = None) -> Flask:
     def single_project_links(endpoint, values):
         if endpoint in project_endpoints:
             values.pop("name", None)
+
+    @app.get("/api/v1/dashboard")
+    def dashboard_api():
+        configured = projects()
+        project = next(iter(configured.values()), None)
+        return dashboard_state.overview(project)
+
+    @app.post("/api/v1/runtime/<action>")
+    def runtime_action_api(action):
+        if action not in ("activate", "deactivate"):
+            abort(404)
+        configured = projects()
+        if len(configured) != 1:
+            return {"ok": False, "message": "No project configured"}, 404
+        try:
+            result = runtime.request_transition(action)
+        except runtime.RuntimeControlError as exc:
+            return {"ok": False, "message": str(exc)}, 409
+        return {"ok": True, "runtime": result}, 202
 
     @app.get("/api/v1/project")
     def project_api():

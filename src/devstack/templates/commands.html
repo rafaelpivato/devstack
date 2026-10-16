@@ -98,25 +98,5 @@ a{color:#9dccff}small,p{color:#b6c6d5;line-height:1.5}code{overflow-wrap:anywher
 <div class="record row"><a href="{{url_for('command_details',name=project.name,identifier=job.id)}}"><strong>{{job.image or job.service}}</strong> · {{'image' if job.image else job.mode}} · {{job.argv | join(' ') | truncate(80)}}</a><small>{{job.state}}</small></div>
 {% else %}<p>No recent commands.</p>{% endfor %}
 </section>
-<script>
-for(const form of document.querySelectorAll('[data-container-task]')){
-  const target=form.querySelector('.target-picker');
-  const service=form.querySelector('.service-options');
-  const image=form.querySelector('.image-options');
-  const imageInput=image.querySelector('input[name=image]');
-  const serviceInput=service.querySelector('select[name=service]');
-  const modeInput=service.querySelector('select[name=mode]');
-  function update(){
-    const independent=target.value==='image';
-    service.hidden=independent;
-    image.hidden=!independent;
-    serviceInput.disabled=independent;
-    modeInput.disabled=independent;
-    imageInput.disabled=!independent;
-    imageInput.required=independent;
-  }
-  target.addEventListener('change',update);
-  update();
-}
-</script>
+<script type="module" src="{{url_for('static',filename='js/commands.js')}}"></script>
 </body></html>
