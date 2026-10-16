@@ -1,5 +1,11 @@
 # Devstack
 
+> **v0.5 release preparation:** We'll provision a new Ubuntu host for v0.5
+> and retire the v0.4 server. Subsequent releases, including the planned
+> v0.6 UI redesign, are installed automatically without recreating the server.
+> See [installation and automatic updates](docs/v0.5-installation.md).
+
+
 Mobile-first, cloud-agnostic development project controller for a single Ubuntu server.
 One configured project with multiple repositories (v0.5 development branch).
 

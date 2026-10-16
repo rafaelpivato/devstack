@@ -54,6 +54,70 @@ jobs:
           test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
           docker run --rm --network "$network" --security-opt no-new-privileges \
             --cap-drop ALL redis:7-alpine redis-cli -h redis ping
+      - name: Verify fresh-install packaged WSGI and static assets
+        run: |
+          set -euo pipefail
+          venv="$RUNNER_TEMP/devstack-fresh-v05"
+          python3 -m venv "$venv"
+          "$venv/bin/python" -m pip install -q --disable-pip-version-check .
+          "$venv/bin/python" -m pip wheel -q --no-deps --wheel-dir "$RUNNER_TEMP/devstack-wheels" .
+          "$venv/bin/python" - <<'PY'
+          from pathlib import Path
+          import os, zipfile
+          wheels = list(Path(os.environ["RUNNER_TEMP"]).joinpath("devstack-wheels").glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+              for path in (
+                  "devstack/static/js/api.js",
+                  "devstack/static/js/polling.js",
+                  "devstack/static/js/dashboard.js",
+                  "devstack/static/css/dashboard.css",
+                  "devstack/templates/dashboard.html",
+              ):
+                  assert path in names, f"Missing packaged asset: {path}"
+          PY
+          homedir="$(mktemp -d)"
+          mkdir -p "$homedir/.config/devstack"
+          : > "$homedir/.config/devstack/workspace.toml"
+          export HOME="$homedir"
+          export DEVSTACK_CONFIG="$homedir/.config/devstack/workspace.toml"
+          port="$("$venv/bin/python" - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(("127.0.0.1", 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          "$venv/bin/gunicorn" --bind "127.0.0.1:$port" --workers 1 --timeout 25 \
+            'devstack.web:create_app()' > "$RUNNER_TEMP/devstack-wsgi.log" 2>&1 &
+          worker=$!
+          trap 'kill "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; rm -rf "$homedir"' EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:$port/healthz" > "$RUNNER_TEMP/devstack-health.json"; then
+                  ready=1; break
+              fi
+              sleep .3
+          done
+          if [[ "$ready" != 1 ]]; then cat "$RUNNER_TEMP/devstack-wsgi.log"; exit 1; fi
+          curl -fsS "http://127.0.0.1:$port/api/v1/dashboard" > "$RUNNER_TEMP/devstack-dashboard.json"
+          curl -fsS "http://127.0.0.1:$port/static/js/dashboard.js" > /dev/null
+          curl -fsS "http://127.0.0.1:$port/static/css/dashboard.css" > /dev/null
+          "$venv/bin/python" - <<'PY'
+          import json, os
+          from pathlib import Path
+          directory = Path(os.environ["RUNNER_TEMP"])
+          health = json.loads((directory/"devstack-health.json").read_text())
+          overview = json.loads((directory/"devstack-dashboard.json").read_text())
+          assert health["status"] == "ok"
+          assert overview["schema_version"] == 1
+          assert overview["project"] is None
+          assert overview["runtime"]["phase"] == "inactive"
+          PY
+          kill "$worker"; wait "$worker" || true
+          # All fresh-install checks use the packaged wheel and an empty home.
+          # There is intentionally no release-series or v0.4 legacy guard.
       - name: Verify explicit webhook forwarding to actual Compose container
         run: |
           set -euo pipefail

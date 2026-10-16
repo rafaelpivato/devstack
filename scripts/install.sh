@@ -33,6 +33,27 @@ if [[ -z "$home" || ! -d "$home" ]]; then
   echo "User home does not exist: $home" >&2; exit 1
 fi
 
+# Resolve the latest published stable release once for a coherent initial
+# installation. This does NOT pin later upgrades: the updater continues to
+# follow each new published GitHub release automatically (including v0.6).
+release_tag="$(DEVSTACK_REPO="$repo" python3 - <<'PY'
+import json
+import os
+import re
+import urllib.request
+repo = os.environ["DEVSTACK_REPO"]
+req = urllib.request.Request(
+    f"https://api.github.com/repos/{repo}/releases/latest",
+    headers={"Accept": "application/vnd.github+json", "User-Agent": "devstack-install"},
+)
+with urllib.request.urlopen(req, timeout=15) as response:
+    tag = json.load(response)["tag_name"]
+if not isinstance(tag, str) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+    raise SystemExit("No valid published stable DevStack release")
+print(tag)
+PY
+)"
+echo "Installing latest DevStack release $release_tag."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq python3-venv python3-pip git curl ca-certificates
@@ -74,7 +95,7 @@ fi
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
-base="https://raw.githubusercontent.com/$repo/main"
+base="https://raw.githubusercontent.com/$repo/$release_tag"
 for item in scripts/updater.py scripts/private_access.py scripts/webhook_funnel.py scripts/enable-tailscale.sh scripts/bootstrap.py deploy/devstack.service deploy/devstack-webhooks.service deploy/devstack-update.service deploy/devstack-update.timer deploy/devstack-update-request.service deploy/devstack-update-request.path deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer deploy/devstack-bootstrap.service; do
   curl --fail --silent --show-error --location --retry 3 "$base/$item" \
     --output "$tmpdir/$(basename "$item")"
@@ -101,11 +122,13 @@ systemctl daemon-reload
 systemctl enable devstack.service
 # Webhook-only ingress listens on loopback; no Funnel is enabled automatically.
 systemctl enable devstack-webhooks.service
-systemctl enable --now devstack-update.timer
-if ! systemctl start devstack-update.service; then
-  echo "No working release installed yet (or update failed). See updater journal." >&2
-  echo "The timer will retry when a valid stable GitHub release exists." >&2
+# Boot the release matching the downloaded units; later timer runs follow
+# new GitHub releases without a version-series restriction.
+if ! /usr/bin/python3 /usr/local/lib/devstack/updater.py --tag "$release_tag"; then
+  echo "Failed to activate $release_tag. Inspect devstack.service journal." >&2
+  exit 1
 fi
+systemctl enable --now devstack-update.timer
 
 # Refresh the service after changing Docker group membership: systemd assigns
 # supplementary groups only at process startup.

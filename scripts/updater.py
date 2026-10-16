@@ -71,6 +71,12 @@ def prepare_release(root: Path, tag: str, repo: str) -> Path:
                 "--branch", tag, f"https://github.com/{repo}.git",
                 str(source), timeout=180)
         execute(sys.executable, "-m", "venv", str(release_dir / "venv"), timeout=90)
+        # A release tag must correspond to the checked-out Python package
+        # version, not just a Git ref with an arbitrary name.
+        import tomllib
+        metadata = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))
+        if "v" + metadata["project"]["version"] != tag:
+            raise RuntimeError("Release tag disagrees with pyproject.toml version")
         execute(str(release_dir / "venv/bin/python"), "-m", "pip", "install",
                 "--disable-pip-version-check", "--no-input", "--no-cache-dir",
                 str(source), timeout=240)
