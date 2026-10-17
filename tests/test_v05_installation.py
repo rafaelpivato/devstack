@@ -104,10 +104,18 @@ class AutoUpdateTests(unittest.TestCase):
             self.assertNotIn("check_installation(",
                              (ROOT / "src" / "devstack" / module).read_text())
 
-    def test_version_not_bumped_by_pr_06(self):
+    def test_publication_waits_for_docker_and_unit_tests(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        docker = (ROOT / ".github/workflows/docker-smoke.yml").read_text()
+        self.assertIn("workflow_call:", docker)
+        self.assertIn("uses: ./.github/workflows/docker-smoke.yml", release)
+        self.assertIn("needs: [candidate, docker-verification]", release)
+        self.assertIn("python -m unittest discover -s tests -v", release)
+
+    def test_v050_release_version(self):
         import tomllib
         version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-        self.assertEqual(version, "0.4.0")
+        self.assertEqual(version, "0.5.0")
 
 
 if __name__ == "__main__":
