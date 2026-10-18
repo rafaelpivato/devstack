@@ -18,12 +18,12 @@ from devstack.docker_stacks import compose_command
 class ImportURLTests(unittest.TestCase):
     def test_repository_urls_and_subfolder_urls(self):
         self.assertEqual(parse_template_url("https://github.com/rafaelpivato/devstack"), (
-            "git@github.com:rafaelpivato/devstack.git", "devstack", None,
+            "https://github.com/rafaelpivato/devstack.git", "devstack", None,
         ))
         self.assertEqual(parse_template_url(
             "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
         ), (
-            "git@github.com:rafaelpivato/devstack.git", "devstack",
+            "https://github.com/rafaelpivato/devstack.git", "devstack",
             "main/examples/smoke",
         ))
         self.assertEqual(parse_template_url("git@github.com:org/tool.git"), (
@@ -88,7 +88,7 @@ class ImportProjectTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
-        self.config = self.home / ".config" / "devstack" / "projects.toml"
+        self.config = self.home / ".config" / "devstack" / "workspace.toml"
         self.config.parent.mkdir(parents=True)
         self.source = self.home / "source-repo"
         sample = self.source / "examples" / "smoke"
@@ -129,10 +129,21 @@ class ImportProjectTests(unittest.TestCase):
     def test_import_root_discovers_smoke_and_preserves_context(self, command, run):
         command.side_effect = self.command
         run.return_value = subprocess.CompletedProcess([], 0, "", "")
-        name, branch = import_github_project(
-            "https://github.com/rafaelpivato/devstack", "smoke-git",
-        )
+        with (patch("devstack.template_import.git_environment",
+                    side_effect=AssertionError("Public HTTPS must not require SSH")),
+              patch("devstack.template_import.ssh_command",
+                    side_effect=AssertionError("Public HTTPS must not require SSH"))):
+            name, branch = import_github_project(
+                "https://github.com/rafaelpivato/devstack", "smoke-git",
+            )
         self.assertEqual((name, branch), ("smoke-git", ""))
+        clone_call = next(call for call in command.call_args_list
+                          if call.args[0][:2] == ["git", "clone"])
+        self.assertEqual(clone_call.args[0][-2],
+                         "https://github.com/rafaelpivato/devstack.git")
+        self.assertEqual(clone_call.kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertNotIn("sshCommand",
+                         str([call.args for call in command.call_args_list]))
         project = load_projects(self.config)[name]
         self.assertEqual([r.name for r in project.repos], ["devstack"])
         self.assertTrue(project.repos[0].path.exists())
@@ -163,6 +174,22 @@ class ImportProjectTests(unittest.TestCase):
         self.assertEqual((root / "devstack" / "examples" / "smoke" / "app" / "app.py").read_text(),
                          "print('ok')\n")
         self.assertFalse((root / "devstack" / "examples" / "smoke" / ".devstack" / "import.toml").exists())
+
+    @patch("devstack.template_import.subprocess.run")
+    @patch("devstack.template_import._command")
+    def test_explicit_ssh_import_still_uses_existing_identity(self, command, run):
+        command.side_effect = self.command
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        name, branch = import_github_project(
+            "git@github.com:rafaelpivato/devstack.git", "ssh-sample"
+        )
+        self.assertEqual((name, branch), ("ssh-sample", ""))
+        clone_call = next(call for call in command.call_args_list
+                          if call.args[0][:2] == ["git", "clone"])
+        self.assertEqual(clone_call.args[0][-2],
+                         "git@github.com:rafaelpivato/devstack.git")
+        self.assertTrue(any("core.sshCommand" in call.args[0]
+                            for call in command.call_args_list))
 
     @patch("devstack.template_import.subprocess.run")
     @patch("devstack.template_import._command")

@@ -1,17 +1,16 @@
 # Devstack
 
-> **v0.5.0 release candidate:** Install on a fresh Ubuntu host **after** the
-> [stable GitHub Release](https://github.com/rafaelpivato/devstack/releases)
-> is published. Retire the old v0.4 host separately. Future releases—including
-> the planned v0.6 visual redesign—install automatically without rebuilding
-> your workspace. See [installation and updates](docs/v0.5-installation.md).
+> **v0.5.1 update:** Use the standard GitHub import workflow to add the
+> Smoke Test sample without a separate installer or GitHub SSH setup.
+> New stable releases install automatically through DevStack's updater.
+> See [installation and updates](docs/v0.5-installation.md).
 
 
 Mobile-first, cloud-agnostic development project controller for a single Ubuntu server.
 One configured project with multiple Git repositories, managed Docker Compose
 runtime, and private Tailscale network access.
 
-**Version:** v0.5.0 release candidate. Older v0.4 multi-project sections
+**Version:** v0.5.1. Older v0.4 multi-project sections
 in this document are historical and do not apply.
 
 ## Goals
@@ -356,8 +355,9 @@ Set `DEVSTACK_INSTALL_DOCKER=0` if opting out of Docker installation.
 
 ### Managing a project
 
-Create a project from the dashboard (or use **Install smoke example** for a
-disposable test). Then choose **Manage Docker Compose** on its card.
+Create a project from the dashboard, or choose **Use Smoke Test example**
+inside **Add project from GitHub** to prefill the official sample URL and name.
+Review the values and click **Add project**, then open **Manage Docker Compose**.
 
 The editor writes to:
 
@@ -393,13 +393,15 @@ publish any host port. **Avoid wildcard/public port mappings**, since Docker
 can expose published ports independently of host firewall expectations.
 Private Tailscale previews and public Funnel webhooks are future milestones.
 
-### Smoke fixture
+### Smoke Test example (GitHub)
 
-The bundled `examples/smoke/` includes a Python HTTP server, Redis and
-PostgreSQL (with a named database volume). **Install smoke example** copies
-it to `~/workspaces/smoke`; use its Docker page to **Start / rebuild**,
-inspect containers and logs, then **Down**. HTTP is bound only to
-`127.0.0.1:18080` and is not yet previewed via Tailscale Serve.
+The public GitHub `examples/smoke/` sample includes a Python HTTP server,
+Redis and PostgreSQL (with a named database volume). Under **Add project
+from GitHub**, choose **Use Smoke Test example** and confirm the normal import.
+It clones the DevStack repository, copies its sample Compose and application
+registry into the managed workspace, and preserves a Git source link for
+future updates. It does **not** start containers automatically. The sample
+HTTP port is bound to loopback by default.
 GitHub Actions' Docker smoke workflow builds and starts the same stack and
 checks its `/health` endpoint.
 
@@ -441,11 +443,11 @@ Docker Compose** page, even when absent from the main dashboard.
 Applications can be edited or removed from the dashboard without stopping,
 rebuilding or deleting Docker containers.
 
-For the bundled smoke fixture, register **Web** with Compose service
-`web` and port `8000`. The PostgreSQL and Redis services will not appear
-on the dashboard unless you add them deliberately. The HTTP port remains
-bound only to the host loopback; this release adds **no private preview**.
-Private URLs, proxy routing and public webhooks remain future milestones.
+The GitHub Smoke Test sample automatically registers **Web** with Compose
+service `web` and container port `8000`. PostgreSQL and Redis are Compose
+dependencies, not dashboard applications, unless explicitly registered.
+The sample's HTTP port binds only to host loopback by default; private phone
+access requires publishing that port on the server's exact Tailscale IP.
 
 Older explicitly configured `projects.toml` services have a distinct
 **Legacy services** section so they are not confused with applications or
@@ -453,17 +455,12 @@ the managed Docker stack. Existing project and repository data are preserved.
 This is an ordinary application release; no host installer refresh is needed
 for v0.2.1.
 
-### Keeping the smoke fixture's application list current
+### Historical note: older smoke fixture application refresh (v0.2.1)
 
-New imports of `examples/smoke` contain the bundled
-`.devstack/project.toml`, which registers **Web** (`web:8000`) immediately.
-Existing `smoke` workspaces copied in v0.2.0 do not receive files when the
-Devstack application updates. After upgrading to v0.2.1, use **Refresh smoke
-applications** on the smoke project card. This adds missing bundled application
-entries once, preserving any previously added or customized applications.
-It does not replace Compose YAML or source files, rebuild containers, publish
-ports, or touch PostgreSQL volumes. It is safe to repeat: already registered
-service names and labels are not duplicated.
+In older releases, locally copied smoke fixtures required a separate
+application refresh. That path has been removed. GitHub imports now obtain
+the sample's `.devstack/project.toml` (including **Web** on `web:8000`)
+and source-sync metadata through the ordinary importer.
 
 For this milestone, refreshing a project's complete template or upgrading
 its Compose definition is intentionally **not** automatic. Such migrations
@@ -477,7 +474,8 @@ Use **Import GitHub project** on the private dashboard and paste either
 Optionally supply a project name, e.g. `smoke-git` when the existing
 `smoke` fixture is already installed.
 
-Devstack clones the repository using its established GitHub SSH identity,
+DevStack clones public HTTPS repositories without configuring an SSH identity.
+Private repositories may still use the dedicated GitHub SSH key;
 then follows a small convention:
 
 - A URL targeting a directory selects that directory's
@@ -501,10 +499,9 @@ start or publish anything**. Review Compose carefully before running
 rootful Docker; an imported Dockerfile is executable code. Ports published
 by imported services remain subject to their explicit Compose definitions.
 
-Existing projects, including the v0.2.0 smoke fixture, are not overwritten
-by importing another copy; provide a distinct project name when necessary.
-The original dedicated **Install smoke example** button is retained for
-backward compatibility. No Ubuntu installer refresh is required for v0.2.2.
+Only one project can exist in v0.5. The former dedicated Smoke Test
+installation button and refresh endpoint have been retired in favor of the
+normal GitHub importer. Existing configured projects are never overwritten.
 
 ## Container command runner (v0.3.0)
 
@@ -668,7 +665,7 @@ Devstack displays **Open on Tailscale** on an explicitly registered
 application only if Docker Compose already publishes its specified container
 TCP port on exactly the server's Tailscale IP. It **does not rewrite Compose,
 bind ports, automatically open firewalls, or expose 0.0.0.0 bindings**.
-The bundled Smoke project still defaults to loopback-only `127.0.0.1:18080`;
+The GitHub Smoke Test sample defaults to loopback-only `127.0.0.1:18080`;
 edit its Compose port binding to your actual Tailscale IP if you want direct
 phone access. Do not publish the administrative Devstack dashboard or
 development ports on public IP addresses.
