@@ -180,13 +180,10 @@ class DockerWebTests(unittest.TestCase):
         self.assertEqual(result.status_code, 302)
         run.assert_called_once_with("demo","build")
 
-    @patch("devstack.web.import_smoke", return_value="smoke")
-    def test_smoke_import(self, smoke):
-        self.assertEqual(
-            self.client.post("/project/smoke/import", data={"_csrf":self.csrf}).status_code,
-            302
-        )
-        smoke.assert_called_once_with()
+    def test_removed_smoke_install_route_returns_404(self):
+        response = self.client.post("/project/smoke/import",
+                                    data={"_csrf": self.csrf})
+        self.assertEqual(response.status_code, 404)
 
     @patch("devstack.web.load_projects",return_value={})
     def test_unknown_project_stays_404(self, projects):
@@ -270,18 +267,10 @@ class ApplicationWebTests(unittest.TestCase):
         self.assertEqual(result.status_code, 404)
 
 
-    @patch("devstack.web.load_projects", return_value={
-        "smoke": Project("smoke", (), ())
-    })
-    @patch("devstack.web.sync_smoke_applications", return_value=1)
-    def test_sync_smoke_apps_is_csrf_protected(self, sync, projects):
-        response = self.client.post("/project/smoke/sync-applications")
-        self.assertEqual(response.status_code, 403)
-        sync.assert_not_called()
+    def test_removed_smoke_refresh_route_returns_404(self):
         response = self.client.post("/project/smoke/sync-applications",
                                     data={"_csrf": self.csrf})
-        self.assertEqual(response.status_code, 302)
-        sync.assert_called_once_with()
+        self.assertEqual(response.status_code, 404)
 
 
 class GithubProjectImportWebTests(unittest.TestCase):
@@ -305,11 +294,41 @@ class GithubProjectImportWebTests(unittest.TestCase):
         import_project.assert_called_once_with(path, "smoke-git")
 
     @patch("devstack.web.import_github_project")
-    def test_dashboard_shows_import_url_form(self, import_project):
+    def test_dashboard_shows_github_smoke_example_shortcut(self, import_project):
         response = self.client.get("/")
         self.assertIn(b"Add project from GitHub", response.data)
         self.assertIn(b"/project/import", response.data)
+        self.assertIn(b"Use Smoke Test example", response.data)
+        self.assertIn(b"example=smoke", response.data)
+        self.assertNotIn(b"Install smoke example", response.data)
+        self.assertNotIn(b"Refresh smoke applications", response.data)
+        self.assertNotIn(b'smoke_installed', response.data)
         import_project.assert_not_called()
+
+    @patch("devstack.web.import_github_project")
+    def test_shortcut_prefills_same_github_form_without_importing(self, importer):
+        response = self.client.get("/?example=smoke")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            b'value="https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"',
+            response.data,
+        )
+        self.assertIn(b'id="import-project-name" name="name" class="wide" placeholder="e.g. my-project" value="smoke"', response.data)
+        importer.assert_not_called()
+
+    @patch("devstack.web.import_github_project")
+    def test_shortcut_still_requires_explicit_csrf_protected_import(self, importer):
+        self.client.get("/?example=smoke")
+        sample = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+        self.assertEqual(self.client.post("/project/import", data={
+            "url": sample, "name": "smoke",
+        }).status_code, 403)
+        importer.assert_not_called()
+        response = self.client.post("/project/import", data={
+            "_csrf": self.csrf, "url": sample, "name": "smoke",
+        })
+        self.assertEqual(response.status_code, 302)
+        importer.assert_called_once_with(sample, "smoke")
 
 
 class CommandRunnerWebTests(unittest.TestCase):

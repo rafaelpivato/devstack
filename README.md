@@ -356,8 +356,9 @@ Set `DEVSTACK_INSTALL_DOCKER=0` if opting out of Docker installation.
 
 ### Managing a project
 
-Create a project from the dashboard (or use **Install smoke example** for a
-disposable test). Then choose **Manage Docker Compose** on its card.
+Create a project from the dashboard, or choose **Use Smoke Test example**
+inside **Add project from GitHub** to prefill the official sample URL and name.
+Review the values and click **Add project**, then open **Manage Docker Compose**.
 
 The editor writes to:
 
@@ -395,11 +396,13 @@ Private Tailscale previews and public Funnel webhooks are future milestones.
 
 ### Smoke fixture
 
-The bundled `examples/smoke/` includes a Python HTTP server, Redis and
-PostgreSQL (with a named database volume). **Install smoke example** copies
-it to `~/workspaces/smoke`; use its Docker page to **Start / rebuild**,
-inspect containers and logs, then **Down**. HTTP is bound only to
-`127.0.0.1:18080` and is not yet previewed via Tailscale Serve.
+The public GitHub `examples/smoke/` sample includes a Python HTTP server,
+Redis and PostgreSQL (with a named database volume). Under **Add project
+from GitHub**, choose **Use Smoke Test example** and confirm the normal import.
+It clones the DevStack repository, copies its sample Compose and application
+registry into the managed workspace, and preserves a Git source link for
+future updates. It does **not** start containers automatically. The sample
+HTTP port is bound to loopback by default.
 GitHub Actions' Docker smoke workflow builds and starts the same stack and
 checks its `/health` endpoint.
 
@@ -453,17 +456,12 @@ the managed Docker stack. Existing project and repository data are preserved.
 This is an ordinary application release; no host installer refresh is needed
 for v0.2.1.
 
-### Keeping the smoke fixture's application list current
+### Historical note: older smoke fixture application refresh (v0.2.1)
 
-New imports of `examples/smoke` contain the bundled
-`.devstack/project.toml`, which registers **Web** (`web:8000`) immediately.
-Existing `smoke` workspaces copied in v0.2.0 do not receive files when the
-Devstack application updates. After upgrading to v0.2.1, use **Refresh smoke
-applications** on the smoke project card. This adds missing bundled application
-entries once, preserving any previously added or customized applications.
-It does not replace Compose YAML or source files, rebuild containers, publish
-ports, or touch PostgreSQL volumes. It is safe to repeat: already registered
-service names and labels are not duplicated.
+In older releases, locally copied smoke fixtures required a separate
+application refresh. That path has been removed. GitHub imports now obtain
+the sample's `.devstack/project.toml` (including **Web** on `web:8000`)
+and source-sync metadata through the ordinary importer.
 
 For this milestone, refreshing a project's complete template or upgrading
 its Compose definition is intentionally **not** automatic. Such migrations
@@ -477,7 +475,8 @@ Use **Import GitHub project** on the private dashboard and paste either
 Optionally supply a project name, e.g. `smoke-git` when the existing
 `smoke` fixture is already installed.
 
-Devstack clones the repository using its established GitHub SSH identity,
+DevStack clones public HTTPS repositories without configuring an SSH identity.
+Private repositories may still use the dedicated GitHub SSH key;
 then follows a small convention:
 
 - A URL targeting a directory selects that directory's
@@ -501,10 +500,9 @@ start or publish anything**. Review Compose carefully before running
 rootful Docker; an imported Dockerfile is executable code. Ports published
 by imported services remain subject to their explicit Compose definitions.
 
-Existing projects, including the v0.2.0 smoke fixture, are not overwritten
-by importing another copy; provide a distinct project name when necessary.
-The original dedicated **Install smoke example** button is retained for
-backward compatibility. No Ubuntu installer refresh is required for v0.2.2.
+Only one project can exist in v0.5. The former dedicated Smoke Test
+installation button and refresh endpoint have been retired in favor of the
+normal GitHub importer. Existing configured projects are never overwritten.
 
 ## Container command runner (v0.3.0)
 
