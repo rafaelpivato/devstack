@@ -39,3 +39,7 @@ button:disabled{opacity:.55;cursor:not-allowed} h1{margin-bottom:0}h3{margin-bot
 @media(max-width:500px){body{padding:12px 10px}.card{padding:12px;margin:12px 0}
 header{align-items:flex-start}.overview-grid{grid-template-columns:1fr}
 button{min-height:43px}a,button,input{touch-action:manipulation}}
+
+/* Smoke Test is a normal GitHub import preset, not a separate installer. */
+a.example-shortcut{display:inline-flex;align-items:center;min-height:40px;padding:0 12px;border-radius:8px;background:#354354;color:#eaf0f5;text-decoration:none;font-weight:600}
+a.example-shortcut:hover,a.example-shortcut:focus-visible{background:#455668}

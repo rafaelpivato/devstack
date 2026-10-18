@@ -24,7 +24,7 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 <h2>Add project from GitHub</h2>
 <p>Use a repository URL or a GitHub <code>/tree/branch/path</code> URL.
 Devstack finds <code>.devstack/project.toml</code> and copies the configuration outside the Git checkout. Public HTTPS repositories work without configuring GitHub SSH.</p>
-<p><a href="{{url_for('index',example='smoke')}}#github-import" class="secondary">Use Smoke Test example</a> <small>Prefill the official DevStack sample. Review the values, then choose Add project.</small></p>
+<p><a href="{{url_for('index',example='smoke')}}#github-import" class="example-shortcut">Use Smoke Test example</a> <small>Prefill the official DevStack sample. Review the values, then choose Add project.</small></p>
 <form method="post" action="{{url_for('project_import')}}" class="stacked">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <label for="import-project-url">Repository or folder URL</label>

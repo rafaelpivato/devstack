@@ -188,8 +188,7 @@ def create_app(config: dict | None = None) -> Flask:
         except runtime.RuntimeControlError as exc:
             lifecycle = {"phase": "error", "message": str(exc)}
         return render_template("dashboard.html", rows=rows, csrf=token(),
-                               runtime_state=lifecycle,
-)
+                               runtime_state=lifecycle)
 
     @app.get("/api/devstack/update-status")
     def devstack_update_status():
