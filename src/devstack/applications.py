@@ -18,7 +18,6 @@ import tomllib
 
 from .docker_stacks import (
     DockerError, compose_command, compose_path, managed_dir, project_root,
-    smoke_fixture_dir,
 )
 
 
@@ -195,40 +194,6 @@ def remove_application(project: str, name: str) -> None:
         return after
 
     _edit(project, remove)
-
-
-def sync_smoke_applications() -> int:
-    """Add bundled smoke defaults missing from an existing smoke workspace.
-
-    This is an explicit, idempotent metadata import. Keep locally customized
-    applications, avoid duplicates by service/name, and never overwrite Compose
-    files, secrets, application source, or Docker volumes.
-    """
-    source = smoke_fixture_dir() / ".devstack" / "project.toml"
-    try:
-        if source.stat().st_size > MAX_REGISTRY_BYTES:
-            raise ApplicationError("Bundled smoke manifest is too large")
-        defaults = _parse(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError) as exc:
-        raise ApplicationError("Bundled smoke application definitions unavailable") from exc
-    added = 0
-
-    def sync(existing):
-        nonlocal added
-        names = {app.name.casefold() for app in existing}
-        services = {app.service for app in existing}
-        extras = []
-        for app in defaults:
-            if app.name.casefold() in names or app.service in services:
-                continue
-            names.add(app.name.casefold())
-            services.add(app.service)
-            extras.append(app)
-        added = len(extras)
-        return (*existing, *extras)
-
-    _edit("smoke", sync)
-    return added
 
 
 def compose_states(project: str) -> dict[str, str] | None:

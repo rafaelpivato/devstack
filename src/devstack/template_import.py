@@ -42,7 +42,11 @@ class ImportError(ProjectSetupError):
 
 
 def parse_template_url(url: str) -> tuple[str, str, str | None]:
-    """Return normalized SSH clone URL, repository name and optional tree path."""
+    """Return a validated Git clone URL, repository and optional branch/path.
+
+    Public HTTPS URLs clone without requiring a configured GitHub SSH key.
+    Explicit SSH URLs retain their previous private-repository behavior.
+    """
     value = url.strip()
     if value.startswith(("git@github.com:", "ssh://git@github.com/")):
         ssh, repo = github_ssh_url(value)
@@ -56,15 +60,16 @@ def parse_template_url(url: str) -> tuple[str, str, str | None]:
     if not match:
         raise ImportError("Use a GitHub HTTPS repository or /tree/branch/path URL")
     # Reuse Devstack's existing owner and repo validation.
-    ssh, repo = github_ssh_url(
+    _, repo = github_ssh_url(
         f"https://github.com/{match.group('owner')}/{match.group('repo')}"
     )
+    clone_url = f"https://github.com/{match.group('owner')}/{repo}.git"
     tree = match.group("tree")
     if tree is not None:
         tree = tree.rstrip("/")
         if not tree or any(part in ("", ".", "..") for part in tree.split("/")):
             raise ImportError("Invalid GitHub tree path")
-    return ssh, repo, tree
+    return clone_url, repo, tree
 
 
 def _command(args: list[str], *, env: dict | None = None,
@@ -166,14 +171,21 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
     clone, config discovery and validation do we register the new project.
     A failure rolls back the staged workspace and avoids partial registration.
     """
-    ssh, repo, tree = parse_template_url(url)
+    clone_url, repo, tree = parse_template_url(url)
     if repo in (".devstack", ".secrets"):
         raise ImportError("Repository name conflicts with Devstack-managed directories")
-    try:
-        env = git_environment()
-        command = ssh_command()
-    except GitHubSSHError as exc:
-        raise ImportError(str(exc)) from exc
+    if clone_url.startswith("https://github.com/"):
+        # Public samples can be imported without registering an SSH key.
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = "/bin/false"
+        ssh = None
+    else:
+        try:
+            env = git_environment()
+            ssh = ssh_command()
+        except GitHubSSHError as exc:
+            raise ImportError(str(exc)) from exc
     parent = Path.home() / "workspaces"
     if parent.is_symlink():
         raise ImportError("Workspaces directory must not be a symlink")
@@ -181,10 +193,11 @@ def import_github_project(url: str, requested_name: str = "") -> tuple[str, str]
 
     with tempfile.TemporaryDirectory(prefix=".devstack-import-", dir=parent) as temp:
         checkout = Path(temp) / "checkout"
-        _command(["git", "clone", "--", ssh, str(checkout)],
+        _command(["git", "clone", "--", clone_url, str(checkout)],
                  env=env, timeout=240)
-        _command(["git", "-C", str(checkout), "config",
-                  "--local", "core.sshCommand", command], timeout=15)
+        if ssh is not None:
+            _command(["git", "-C", str(checkout), "config",
+                      "--local", "core.sshCommand", ssh], timeout=15)
         branch, selected = resolve_tree(checkout, tree)
         template = discover(checkout, selected, explicit=tree is not None)
         source_dir = template / ".devstack"
