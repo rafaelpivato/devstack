@@ -13,12 +13,11 @@ from .update_control import (
 )
 from .docker_stacks import (
     DockerError, docker_available, read_compose, save_compose, stack_status,
-    stack_logs, current_job, job_log, queue_action, import_smoke,
+    stack_logs, current_job, job_log, queue_action,
 )
 from .applications import (
     ApplicationError, add_application, remove_application, update_application,
     load_applications, compose_states, application_status,
-    sync_smoke_applications,
 )
 from .command_runner import (
     CommandError, load_tasks, services as command_services, recent_jobs,
@@ -190,7 +189,7 @@ def create_app(config: dict | None = None) -> Flask:
             lifecycle = {"phase": "error", "message": str(exc)}
         return render_template("dashboard.html", rows=rows, csrf=token(),
                                runtime_state=lifecycle,
-                               smoke_installed="smoke" in configured)
+)
 
     @app.get("/api/devstack/update-status")
     def devstack_update_status():
@@ -452,33 +451,6 @@ def create_app(config: dict | None = None) -> Flask:
             output = str(exc)
         return render_template("docker_output.html", project=name, title="Container logs",
                                output=output)
-
-    @app.post("/project/smoke/import")
-    def smoke_import():
-        if projects():
-            abort(409)
-        try:
-            import_smoke()
-            flash("Smoke project imported. Open its Docker Compose page to build and run.", "ok")
-        except (DockerError, ValueError) as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("index"))
-
-    @app.post("/project/smoke/sync-applications")
-    def smoke_sync_applications():
-        if "smoke" not in projects():
-            abort(404)
-        get_project("smoke")
-        try:
-            added = sync_smoke_applications()
-            flash(
-                f"Smoke applications refreshed: {added} default application(s) added. "
-                "Existing settings and containers were preserved.",
-                "ok",
-            )
-        except (ApplicationError, DockerError) as exc:
-            flash(str(exc), "error")
-        return redirect(url_for("index") + "#project-smoke")
 
     @app.get("/settings/github")
     def github_settings():

@@ -20,31 +20,20 @@ Configure your <a href="{{url_for('github_settings')}}">GitHub SSH connection</a
 <button type="submit">Create project</button>
 </form>
 </section>
-<section class="card">
+<section class="card" id="github-import">
 <h2>Add project from GitHub</h2>
 <p>Use a repository URL or a GitHub <code>/tree/branch/path</code> URL.
-Devstack finds <code>.devstack/project.toml</code> and copies the configuration outside the Git checkout.</p>
+Devstack finds <code>.devstack/project.toml</code> and copies the configuration outside the Git checkout. Public HTTPS repositories work without configuring GitHub SSH.</p>
+<p><a href="{{url_for('index',example='smoke')}}#github-import" class="secondary">Use Smoke Test example</a> <small>Prefill the official DevStack sample. Review the values, then choose Add project.</small></p>
 <form method="post" action="{{url_for('project_import')}}" class="stacked">
 <input type="hidden" name="_csrf" value="{{csrf}}">
 <label for="import-project-url">Repository or folder URL</label>
 <input id="import-project-url" name="url" class="wide" type="url"
- placeholder="https://github.com/rafaelpivato/devstack/tree/main/examples/smoke" required>
+ placeholder="https://github.com/owner/repository/tree/main/path" value="{{ 'https://github.com/rafaelpivato/devstack/tree/main/examples/smoke' if request.args.get('example') == 'smoke' else '' }}" required>
 <label for="import-project-name">Project name (optional)</label>
-<input id="import-project-name" name="name" class="wide" placeholder="smoke-git">
+<input id="import-project-name" name="name" class="wide" placeholder="e.g. my-project" value="{{ 'smoke' if request.args.get('example') == 'smoke' else '' }}">
 <button type="submit">Add project</button>
 </form>
-</section>
-<section class="card">
-<h2>Docker development</h2>
-<p>Managed Compose files live outside Git repositories in each project's <code>.devstack/</code> directory.</p>
-{% if smoke_installed %}
-<p class="section-detail">Smoke fixture already installed. Refresh its default app registration on the smoke project card below.</p>
-{% else %}
-<form method="post" action="{{url_for('smoke_import')}}">
-<input type="hidden" name="_csrf" value="{{csrf}}">
-<button type="submit" class="secondary">Install smoke example</button>
-</form>
-{% endif %}
 </section>
 {% endif %}
 <section class="card" id="devstack-updates">
@@ -128,13 +117,7 @@ Scheduled checks continue in the background.</small></p>
 <label>Optional container-port filter (Compose controls published ports) <input name="port" class="wide" type="number" min="1" max="65535" placeholder="8000"></label>
 <button type="submit">Add application</button>
 </form>
-{% if project.name == 'smoke' %}
-<form method="post" action="{{url_for('smoke_sync_applications')}}">
-<input type="hidden" name="_csrf" value="{{csrf}}">
-<button type="submit" class="secondary">Refresh smoke applications</button>
-</form>
-<p class="section-detail">Adds bundled default apps without changing containers, Compose or existing application entries.</p>
-{% endif %}
+
 <p><a href="{{url_for('docker_project',name=project.name)}}">Manage Docker Compose and infrastructure →</a> · <a href="{{url_for('commands_page',name=project.name)}}">Commands and tasks →</a> · <a href="{{url_for('webhooks_page',name=project.name)}}">Public webhook routes →</a>{% if linked_source %} · <a href="{{url_for('project_configuration',name=project.name)}}">Sync project configuration →</a>{% endif %}</p>
 {% if repos %}
 <form method="post" action="{{url_for('operate',name=project.name,action='update')}}">
