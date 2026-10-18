@@ -1,17 +1,16 @@
 # Devstack
 
-> **v0.5.0 release candidate:** Install on a fresh Ubuntu host **after** the
-> [stable GitHub Release](https://github.com/rafaelpivato/devstack/releases)
-> is published. Retire the old v0.4 host separately. Future releases—including
-> the planned v0.6 visual redesign—install automatically without rebuilding
-> your workspace. See [installation and updates](docs/v0.5-installation.md).
+> **v0.5.1 update:** Use the standard GitHub import workflow to add the
+> Smoke Test sample without a separate installer or GitHub SSH setup.
+> New stable releases install automatically through DevStack's updater.
+> See [installation and updates](docs/v0.5-installation.md).
 
 
 Mobile-first, cloud-agnostic development project controller for a single Ubuntu server.
 One configured project with multiple Git repositories, managed Docker Compose
 runtime, and private Tailscale network access.
 
-**Version:** v0.5.0 release candidate. Older v0.4 multi-project sections
+**Version:** v0.5.1. Older v0.4 multi-project sections
 in this document are historical and do not apply.
 
 ## Goals
