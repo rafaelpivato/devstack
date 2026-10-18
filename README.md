@@ -393,7 +393,7 @@ publish any host port. **Avoid wildcard/public port mappings**, since Docker
 can expose published ports independently of host firewall expectations.
 Private Tailscale previews and public Funnel webhooks are future milestones.
 
-### Smoke fixture
+### Smoke Test example (GitHub)
 
 The public GitHub `examples/smoke/` sample includes a Python HTTP server,
 Redis and PostgreSQL (with a named database volume). Under **Add project
@@ -443,11 +443,11 @@ Docker Compose** page, even when absent from the main dashboard.
 Applications can be edited or removed from the dashboard without stopping,
 rebuilding or deleting Docker containers.
 
-For the bundled smoke fixture, register **Web** with Compose service
-`web` and port `8000`. The PostgreSQL and Redis services will not appear
-on the dashboard unless you add them deliberately. The HTTP port remains
-bound only to the host loopback; this release adds **no private preview**.
-Private URLs, proxy routing and public webhooks remain future milestones.
+The GitHub Smoke Test sample automatically registers **Web** with Compose
+service `web` and container port `8000`. PostgreSQL and Redis are Compose
+dependencies, not dashboard applications, unless explicitly registered.
+The sample's HTTP port binds only to host loopback by default; private phone
+access requires publishing that port on the server's exact Tailscale IP.
 
 Older explicitly configured `projects.toml` services have a distinct
 **Legacy services** section so they are not confused with applications or
@@ -665,7 +665,7 @@ Devstack displays **Open on Tailscale** on an explicitly registered
 application only if Docker Compose already publishes its specified container
 TCP port on exactly the server's Tailscale IP. It **does not rewrite Compose,
 bind ports, automatically open firewalls, or expose 0.0.0.0 bindings**.
-The bundled Smoke project still defaults to loopback-only `127.0.0.1:18080`;
+The GitHub Smoke Test sample defaults to loopback-only `127.0.0.1:18080`;
 edit its Compose port binding to your actual Tailscale IP if you want direct
 phone access. Do not publish the administrative Devstack dashboard or
 development ports on public IP addresses.
