@@ -159,7 +159,7 @@ jobs:
           set -euo pipefail
           python3 -m venv /tmp/devstack-webhook-ci
           /tmp/devstack-webhook-ci/bin/pip install -q -e .
-          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
           from pathlib import Path
           import tempfile
           from unittest.mock import patch
@@ -207,7 +207,7 @@ jobs:
       - name: Verify actual activation and deactivation lifecycle
         run: |
           set -euo pipefail
-          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
           import secrets
           import tempfile
           from pathlib import Path
@@ -246,7 +246,7 @@ jobs:
       - name: Verify running image worker is stopped by deactivation
         run: |
           set -euo pipefail
-          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
           import json, subprocess, tempfile, threading, time
           from pathlib import Path
           from unittest.mock import patch
