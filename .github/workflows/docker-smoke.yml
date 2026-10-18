@@ -119,6 +119,41 @@ jobs:
           kill "$worker"; wait "$worker" || true
           # All fresh-install checks use the packaged wheel and an empty home.
           # There is intentionally no release-series or v0.4 legacy guard.
+      - name: Verify real public GitHub Smoke Test project import
+        run: |
+          set -euo pipefail
+          workspace="$(mktemp -d)"
+          trap 'rm -rf "$workspace"' EXIT
+          mkdir -p "$workspace/.config/devstack"
+          export HOME="$workspace"
+          export DEVSTACK_CONFIG="$workspace/.config/devstack/workspace.toml"
+          /tmp/devstack-webhook-ci/bin/python - <<'PY'
+          from pathlib import Path
+          from devstack.template_import import import_github_project
+          from devstack.workspace import load_project
+          from devstack.applications import load_applications
+          from devstack.command_runner import load_tasks
+          from devstack.project_sync import source_directory
+          from devstack.docker_stacks import compose_command
+
+          project, branch = import_github_project(
+              "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke",
+              "smoke",
+          )
+          assert (project, branch) == ("smoke", "main")
+          data = load_project()
+          assert data.name == "smoke"
+          assert [repo.name for repo in data.repos] == ["devstack"]
+          assert data.repos[0].path.is_dir()
+          assert [app.name for app in load_applications("smoke")] == ["Web"]
+          assert load_tasks("smoke"), "Smoke Test tasks not imported"
+          assert source_directory("smoke").is_dir(), "Git sync source not recorded"
+          args = compose_command("smoke")
+          assert "--project-directory" in args
+          assert Path(args[args.index("--project-directory") + 1]).is_dir()
+          assert Path(args[args.index("-f") + 1]).is_file()
+          print("Smoke Test imported from public HTTPS GitHub without SSH identity")
+          PY
       - name: Verify explicit webhook forwarding to actual Compose container
         run: |
           set -euo pipefail
