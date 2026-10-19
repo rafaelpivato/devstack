@@ -23,7 +23,7 @@ SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
 NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
-           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError"}
+           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError", "JobInvalid"}
 CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict"}
 
 
@@ -94,11 +94,13 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         compose = call("compose_read", project_id=selected_id) if selected_id else None
         definitions = call("settings_read", project_id=selected_id) if selected_id else None
         webhooks = call("webhooks", project_id=selected_id)["webhooks"] if selected_id else ()
+        job_history = call("jobs", project_id=selected_id)["jobs"] if selected_id else ()
         ssh_identity = call("github_ssh_status")
         return render_template(
             "v2_dashboard.html", projects=overview["projects"], runtime=runtime,
             detail=details, selected_id=selected_id, csrf=csrf(),
             compose=compose, definitions=definitions, webhooks=webhooks,
+            job_history=job_history,
             example=request.args.get("example") == "smoke",
             sample_url=SAMPLE_URL, import_key=secrets.token_hex(16),
             repository_add_key=secrets.token_hex(16), ssh_identity=ssh_identity,
@@ -343,6 +345,36 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         except (ControllerUnavailable, ControllerRejected) as exc:
             flash(problem(exc)[1], "error")
             return redirect_to(identifier)
+
+    @app.post("/projects/<identifier>/adhoc")
+    def submit_adhoc_form(identifier):
+        try:
+            raw = request.form.get("command", "")
+            if not isinstance(raw, str) or len(raw) > 4096:
+                abort(400)
+            command = json.loads(raw)
+        except (ValueError, TypeError):
+            abort(400)
+        try:
+            result = call(
+                "adhoc", project_id=identifier, kind=field("kind"),
+                service=field("service"), image=field("image"),
+                network=field("network"), command=command,
+            )
+            return redirect(url_for("job_page", identifier=identifier,
+                                    job_id=result["job_id"]), code=303)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to(identifier)
+
+    @app.post("/projects/<identifier>/jobs/<job_id>/cancel")
+    def cancel_job_form(identifier, job_id):
+        try:
+            call("job_cancel", project_id=identifier, id=job_id)
+            flash("Cancellation requested and worker stopped.", "success")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect(url_for("job_page", identifier=identifier, job_id=job_id), code=303)
 
     @app.get("/projects/<identifier>/jobs/<job_id>")
     def job_page(identifier, job_id):
@@ -616,6 +648,48 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(404)
         try:
             return jsonify(call("compose", project_id=identifier, action=action)), 202
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/adhoc")
+    def submit_adhoc_api(identifier):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {
+            "kind", "service", "image", "network", "command"
+        }:
+            abort(400)
+        try:
+            return jsonify(call("adhoc", project_id=identifier, **payload)), 202
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/jobs")
+    def jobs_history_api(identifier):
+        try:
+            return jsonify(call("jobs", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/jobs/<job_id>/logs")
+    def job_logs_api(identifier, job_id):
+        try:
+            offset = int(request.args.get("offset", "0"))
+            if offset < 0 or offset > 2 * 1024 * 1024:
+                abort(400)
+        except ValueError:
+            abort(400)
+        try:
+            return jsonify(call("job_logs", project_id=identifier, id=job_id,
+                                offset=offset))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/jobs/<job_id>/cancel")
+    def cancel_job_api(identifier, job_id):
+        try:
+            return jsonify(call("job_cancel", project_id=identifier, id=job_id))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 

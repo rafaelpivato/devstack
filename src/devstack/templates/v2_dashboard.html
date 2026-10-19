@@ -131,6 +131,39 @@
     {% endfor %}
   </section>
   {% endif %}
+  <section class="details" id="adhoc">
+    <h3>Ad-hoc container command</h3>
+    <p class="hint">Runs only inside the active project's Compose service or an isolated standalone image. Enter a JSON argv array (no implicit host shell).</p>
+    <form class="stacked" method="post" action="{{ url_for('submit_adhoc_form', identifier=selected_id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <label>Mode
+        <select name="kind"><option value="exec">Compose exec</option><option value="run">Compose run --rm</option><option value="image">Standalone image</option></select>
+      </label>
+      <label>Compose service (leave empty for image)
+        <input name="service" maxlength="80" placeholder="web"></label>
+      <label>Image (only standalone mode)
+        <input name="image" maxlength="255" placeholder="python:3.12-alpine"></label>
+      <label>Standalone network
+        <select name="network"><option value="none">Isolated (none)</option><option value="project">Project default network</option></select>
+      </label>
+      <label>Command argv (JSON array)
+        <textarea name="command" rows="3" maxlength="4096" spellcheck="false">["python", "--version"]</textarea>
+      </label>
+      {% if active %}<button class="secondary">Run supervised command</button>
+      {% else %}<p class="hint">Activate this project to run commands.</p>{% endif %}
+    </form>
+  </section>
+  <section class="details" id="job-history">
+    <h3>Recent jobs</h3>
+    {% if job_history %}
+    <ul>
+      {% for item in job_history %}
+      <li><a href="{{ url_for('job_page', identifier=selected_id, job_id=item.id) }}">{{ item.action }}</a>
+        <small>{{ item.kind }} · {{ item.status }}</small></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p>No jobs have run for this project yet.</p>{% endif %}
+  </section>
   <section class="details" id="webhooks">
     <h3>Webhook routes</h3>
     <p class="hint">Registered URLs are project-specific. Only the active project can receive forwarded webhook requests. Publishing through Tailscale Funnel is a separate, explicit server setting.</p>
