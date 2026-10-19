@@ -373,6 +373,8 @@ jobs:
           from devstack.control.coordinator import Coordinator, ControlError
           from devstack.control.jobs import JobSupervisor
           from devstack.control.observability import ContainerObservability
+          from devstack.control.private_ports import PrivateApplicationPorts
+          from unittest.mock import patch
           from devstack.control.ingress import WebhookIngress, WebhookServer
           from http.client import HTTPConnection
           from uuid import uuid4
@@ -437,6 +439,23 @@ jobs:
                   assert observer.services(b.id) == {
                       "project_id": b.id, "active": False, "services": []
                   }
+                  # This fixture deliberately exposes web on 127.0.0.1 only.
+                  # Even with a working Tailscale IPv4, that loopback port
+                  # must NOT be mistaken for a tailnet-private published URL.
+                  private_ports = PrivateApplicationPorts(engine, backend)
+                  with patch("devstack.control.private_ports.tailscale_ipv4",
+                             return_value="100.98.76.54"):
+                      assert private_ports.list(a.id) == {
+                          "project_id": a.id, "active": True,
+                          "tailscale_available": True, "ports": [],
+                          "applications": [],
+                      }
+                      assert private_ports.list(b.id) == {
+                          "project_id": b.id, "active": False,
+                          "tailscale_available": False, "ports": [],
+                          "applications": [],
+                      }
+
                   try:
                       observer.logs(b.id, container_id, 20)
                       raise AssertionError("inactive project read Docker logs")
