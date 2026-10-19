@@ -3,6 +3,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from uuid import uuid4
+from unittest.mock import patch
+
+from devstack.projects.source_sync import SourceReviewInvalid, SourceSyncConflict
 
 from devstack.adapters.github import GitHubCheckout
 from devstack.api.client import ControllerRejected
@@ -145,6 +148,171 @@ class SourceReviewTests(unittest.TestCase):
         self.assertEqual(browser.post(
             "/api/v2/projects/" + self.a.id + "/source-review",
         ).status_code, 403)
+
+
+    def _change_source(self):
+        (self.a_source / "project.toml").write_text(
+            '[[applications]]\\nname="API"\\nservice="api"\\nport=9000\\n'
+            '[[applications]]\\nname="Frontend"\\nservice="frontend"\\nport=5173\\n'
+        )
+        (self.a_source / "tasks.toml").write_text(
+            '[[tasks]]\\nname="tests"\\nservice="api"\\ncommand=["pytest", "-q"]\\n'
+        )
+        (self.a_source / "compose.yaml").write_text(
+            'services:\\n  api:\\n    image: python:3.13\\n'
+        )
+
+    def test_selective_apply_only_selected_definitions_and_baseline(self):
+        self._change_source()
+        before_b = self.controller.configuration.settings(self.b.id)
+        rev = self.review(self.a.id)["revision"]
+        result = self.controller.source_review.apply(
+            self.a.id, rev, ["application:API"], [],
+        )
+        self.assertEqual(result["applied"], ["application:API"])
+        local = self.controller.configuration.settings(self.a.id)
+        self.assertEqual(local["applications"], [{"name": "API", "service": "api", "port": 9000}])
+        self.assertEqual(local["tasks"][0]["command"], ["pytest"])
+        self.assertEqual(self.controller.configuration.settings(self.b.id), before_b)
+        remaining = {item["id"] for item in self.review(self.a.id)["changes"]}
+        self.assertEqual(remaining, {"application:Frontend", "task:tests", "compose.yaml"})
+        self.assertEqual(self.controller.registry.import_metadata(self.a.id)["repository_id"],
+                         self.review(self.a.id)["source_repository_id"])
+        with self.assertRaises(SourceSyncConflict):
+            self.controller.source_review.apply(self.a.id, rev, ["task:tests"], [])
+
+    def test_conflicting_local_changes_require_specific_overwrite_approval(self):
+        data = self.controller.configuration.settings(self.a.id)
+        data["applications"][0]["port"] = 8100
+        self.controller.configuration.replace_settings(
+            self.a.id, data["applications"], data["tasks"],
+        )
+        (self.a_source / "project.toml").write_text(
+            '[[applications]]\\nname="API"\\nservice="api"\\nport=9000\\n'
+        )
+        revision = self.review(self.a.id)["revision"]
+        self.assertTrue(self.review(self.a.id)["changes"][0]["locally_modified"])
+        for overwrites in ([], ["application:other"]):
+            with self.subTest(overwrites=overwrites), self.assertRaises(SourceSyncConflict):
+                self.controller.source_review.apply(
+                    self.a.id, revision, ["application:API"], overwrites,
+                )
+        result = self.controller.source_review.apply(
+            self.a.id, revision, ["application:API"], ["application:API"],
+        )
+        self.assertEqual(result["review"]["changes"], [])
+        self.assertEqual(
+            self.controller.configuration.settings(self.a.id)["applications"][0]["port"],
+            9000,
+        )
+
+    def test_missing_or_unselected_change_cannot_be_applied(self):
+        self._change_source()
+        rev = self.review(self.a.id)["revision"]
+        service = self.controller.source_review
+        for items in ([], ["compose.yaml", "compose.yaml"], ["task:unknown"],
+                      ["application:API", "task:deleted"]):
+            with self.subTest(items=items), self.assertRaises(SourceReviewInvalid):
+                service.apply(self.a.id, rev, items, [])
+        with self.assertRaises(SourceReviewInvalid):
+            service.apply(self.a.id, "wrong", ["application:API"], [])
+        (self.a_source / "tasks.toml").write_text("tasks=[]\\n")
+        revised = self.review(self.a.id)
+        with self.assertRaises(SourceReviewInvalid):
+            service.apply(self.a.id, revised["revision"], ["task:tests"], [])
+
+    def test_compose_apply_is_validated_and_uses_private_workspace(self):
+        self._change_source()
+        rev = self.review(self.a.id)["revision"]
+        with patch("devstack.control.docker._execute", return_value="") as validate:
+            applied = self.controller.source_review.apply(
+                self.a.id, rev, ["compose.yaml"], [],
+            )
+        self.assertEqual(validate.call_count, 1)
+        self.assertNotIn("compose.yaml", [item["id"] for item in applied["review"]["changes"]])
+        self.assertIn("python:3.13", self.controller.configuration.compose(self.a.id)["content"])
+        self.assertIn("python:3.12", self.controller.configuration.compose(self.b.id)["content"])
+        self.assertTrue(
+            (self.root / "workspaces" / self.a.id / "baseline" / "compose.yaml").is_file()
+        )
+
+    def test_active_other_project_blocks_all_config_apply(self):
+        self._change_source()
+        rev = self.review(self.a.id)["revision"]
+        self.controller.coordinator.activate(self.b.id)
+        with self.assertRaises(Exception):
+            self.controller.source_review.apply(
+                self.a.id, rev, ["application:API"], [],
+            )
+        self.assertEqual(self.controller.coordinator.status()["project_id"], self.b.id)
+        self.assertEqual(self.controller.configuration.settings(self.a.id)["applications"][0]["port"],
+                         8000)
+        self.controller.coordinator.deactivate()
+
+    def test_crash_after_sql_commit_replays_journal_before_activation(self):
+        self._change_source()
+        revision = self.review(self.a.id)["revision"]
+        with patch.object(self.controller.source_review, "_publish",
+                          side_effect=OSError("simulated failure after commit")):
+            with self.assertRaises(OSError):
+                self.controller.source_review.apply(
+                    self.a.id, revision, ["application:API", "task:tests"], [],
+                )
+        with self.controller.registry.database.transaction() as connection:
+            pending = connection.execute(
+                "SELECT payload FROM source_sync_pending WHERE project_id=?", (self.a.id,),
+            ).fetchone()
+        self.assertIsNotNone(pending)
+        self.assertEqual(self.controller.configuration.settings(self.a.id)["applications"][0]["port"],
+                         9000)
+        with self.assertRaises(SourceSyncConflict):
+            self.controller.handle({"op": "projects"})
+        with self.assertRaises(Exception):
+            self.controller.coordinator.activate(self.b.id)
+        self.assertEqual(self.controller.coordinator.status()["phase"], "inactive")
+        result = self.controller.handle({"op": "reconcile"})
+        self.assertEqual(result["phase"], "inactive")
+        with self.controller.registry.database.transaction() as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT 1 FROM source_sync_pending LIMIT 1",
+            ).fetchone())
+        self.assertEqual(self.review(self.a.id)["changes"],
+                         [item for item in self.review(self.a.id)["changes"]
+                          if item["id"] not in ("application:API", "task:tests")])
+        self.assertEqual(
+            self.controller.configuration.settings(self.a.id)["tasks"][0]["command"],
+            ["pytest", "-q"],
+        )
+
+    def test_v2_api_apply_csrf_and_explicit_confirmations(self):
+        def transport(op, **fields):
+            try:
+                return self.controller.handle({"op": op, **fields})
+            except Exception as exc:
+                raise ControllerRejected(type(exc).__name__) from exc
+        app = create_app({"TESTING": True, "SECRET_KEY": "test",
+                          "SESSION_COOKIE_SECURE": False}, transport=transport)
+        browser = app.test_client()
+        self._change_source()
+        with browser.session_transaction() as session:
+            pass
+        page = browser.get("/projects/" + self.a.id + "/source-review")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Apply selected changes", page.data)
+        with browser.session_transaction() as session:
+            csrf = session["_csrf"]
+        url = "/api/v2/projects/" + self.a.id + "/source-review/apply"
+        revision = self.review(self.a.id)["revision"]
+        payload = {"revision": revision, "selected": ["application:API"], "overwrites": []}
+        self.assertEqual(browser.post(url, json=payload).status_code, 403)
+        response = browser.post(url, json=payload,
+                                headers={"X-CSRF-Token": csrf})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["applied"], ["application:API"])
+        self.assertEqual(browser.post(
+            "/api/v2/projects/" + self.b.id + "/source-review/apply",
+            json=payload, headers={"X-CSRF-Token": csrf},
+        ).status_code, 409)
 
 
 if __name__ == "__main__":
