@@ -189,14 +189,15 @@ class MultiRepositoryTests(unittest.TestCase):
         with patch.object(repository_add.os, "rename", side_effect=crashed):
             operation = self.submit(self.a.id)
             pending = self.wait(self.a.id, operation)
-        self.assertEqual(pending["status"], "failed")
+        self.assertEqual(pending["status"], "recovery")
         self.assertEqual(self.controller.registry.repositories(self.a.id), ())
         self.assertTrue((self.root/"projects"/self.a.id/"repos"/"backend").is_dir())
-        self.assertEqual(self.controller.repository_add.reconcile(), ())
-        # An exception before the in-memory published flag is set cannot be
-        # mistaken for an ordinary failed clone. Recovery must inspect its
-        # filesystem publication state independently.
-        self.assertEqual(self.controller.registry.repositories(self.a.id), ())
+        self.assertEqual(self.controller.repository_add.reconcile(), (pending["id"],))
+        self.assertEqual(len(self.controller.registry.repositories(self.a.id)), 1)
+        self.assertEqual(
+            self.controller.repository_add.get(self.a.id, pending["id"])["status"],
+            "succeeded",
+        )
 
     def test_api_csrf_bounded_args_and_ssh_public_key_only(self):
         def transport(op, **kwargs):

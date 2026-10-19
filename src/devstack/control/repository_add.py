@@ -145,7 +145,7 @@ class RepositoryAddSupervisor:
         with self.database.transaction(write=True) as con:
             con.execute(
                 "UPDATE repository_add_operations SET status=?,error_code=?,"
-                "finished_ns=? WHERE id=? AND project_id=?",
+                "finished_ns=? WHERE id=? AND project_id=? AND status!='succeeded'",
                 (state, code, time.time_ns() if state in ("failed", "succeeded")
                  else None, operation, identifier),
             )
@@ -165,6 +165,7 @@ class RepositoryAddSupervisor:
 
     def _work(self, identifier: str, operation: str) -> None:
         published = False
+        row = None
         try:
             with self.database.transaction(write=True) as con:
                 changed = con.execute(
@@ -219,8 +220,11 @@ class RepositoryAddSupervisor:
             # A rename can reach disk and *then* report an error (or a process
             # can crash before updating the in-memory published flag). Trust
             # the final path and durable journal, never a Python local flag.
-            stage, final = self._paths(identifier, row["name"], operation)
-            if published or final.exists() or final.is_symlink():
+            final = None
+            if row is not None:
+                _, final = self._paths(identifier, row["name"], operation)
+            if published or (final is not None and
+                             (final.exists() or final.is_symlink())):
                 self._finish(identifier, operation, "recovery", "RecoveryRequired")
             else:
                 # An unregistered staged checkout is preserved for inspection.

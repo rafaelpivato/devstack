@@ -44,7 +44,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def call(op: str, **fields):
         if transport is not None:
             return transport(op, **fields)
-        return send(Path(app.config["CONTROLLER_SOCKET"]), op, **fields)
+        return send(Path(app.config["CONTROLLER_SOCKET"]), op,
+                    timeout=60 if op == "github_ssh_test" else 30, **fields)
 
     def csrf() -> str:
         if "_csrf" not in session:
