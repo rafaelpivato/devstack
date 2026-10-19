@@ -10,7 +10,7 @@ import unittest
 from uuid import uuid4
 
 from devstack.control.coordinator import ControlError, Coordinator
-from devstack.control.daemon import Controller, ControlServer, ProtocolError, request
+from devstack.control.daemon import Controller, ControlServer, ProtocolError, request, exclusive_daemon
 from devstack.control.jobs import JobSupervisor, JobError
 from devstack.storage.database import Database
 from devstack.storage.projects import ProjectRegistry
@@ -237,6 +237,14 @@ class JobAndSocketTests(CoordinatorTests):
                           (job_id + ".log")).exists())
         with self.assertRaises(ControlError):
             self.engine.admit(self.a.id, first["generation"])
+
+    def test_second_daemon_cannot_own_same_registry(self):
+        with exclusive_daemon(self.db.path.parent):
+            with self.assertRaisesRegex(ProtocolError, "already owns"):
+                with exclusive_daemon(self.db.path.parent):
+                    self.fail("Second daemon unexpectedly acquired ownership")
+        with exclusive_daemon(self.db.path.parent):
+            pass
 
     def test_socket_has_narrow_allowlisted_commands(self):
         controller = Controller(self.db, self.workspaces, self.backend)
