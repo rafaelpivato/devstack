@@ -14,7 +14,7 @@ from devstack.adapters.github import (
     GitHubCheckout, GitHubSourceError, parse_github_url, discover_manifest,
 )
 from devstack.projects.manifest import ManifestError, parse_template
-from devstack.projects.service import ProjectProvisioner
+from devstack.projects.service import ProjectProvisioner, ProjectProvisionError
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
 from devstack.storage.projects import ProjectConflict, ProjectRegistry
@@ -61,6 +61,9 @@ class ProjectProvisionTests(unittest.TestCase):
         )
         self.assertEqual(self.registry.import_metadata(a.id)["subdirectory"],
                          "examples/smoke")
+        self.assertEqual(self.service.source_directory(a.id),
+                         self.workspaces.path(a.id) / "repos" / "devstack"
+                         / "examples" / "smoke" / ".devstack")
         self.assertEqual([app["name"] for app in self.registry.import_metadata(a.id)["applications"]],
                          ["Web"])
         self.assertIn("tests", [task["name"] for task
@@ -140,6 +143,20 @@ class ProjectProvisionTests(unittest.TestCase):
         self.assertEqual(self.service.recover_published_imports(), (project.id,))
         self.assertEqual(self.registry.list(), (project,))
         self.assertFalse(self.registry.pending_imports())
+
+    def test_interrupted_import_refuses_corrupted_published_manifest(self):
+        with patch.object(self.registry, "finalize_import",
+                          side_effect=RuntimeError("simulated crash")):
+            with self.assertRaisesRegex(RuntimeError, "simulated crash"):
+                self.service.import_github(URL, "unsafe", "Unsafe")
+        pending = self.registry.pending_imports()
+        self.assertEqual(len(pending), 1)
+        broken_file = self.workspaces.root(pending[0].id) / "managed" / "project.toml"
+        broken_file.unlink()
+        with self.assertRaisesRegex(ProjectProvisionError, "Missing managed import baseline"):
+            self.service.recover_published_imports()
+        self.assertFalse(self.registry.list())
+        self.assertEqual(self.registry.pending_imports(), pending)
 
     def test_repository_files_are_not_modified_by_import(self):
         project = self.service.import_github(URL, "sample", "Sample")
