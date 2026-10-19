@@ -1,6 +1,6 @@
 # ADR-0001: Multiple persistent projects, one active runtime
 
-- **Status:** Proposed — requires human approval before implementation
+- **Status:** Accepted — approved and merged in PR #22; mandatory for v0.5.2 implementation
 - **Decision scope:** DevStack v0.5.2 clean-break control-plane redesign
 - **Supersedes:** The v0.5 single-configured-project design and its singleton API assumptions
 - **Related:** [Acceptance contract](../v0.5.2-acceptance-plan.md)
@@ -147,4 +147,4 @@ A docs-only ADR does **not** enforce runtime behavior by itself. The CI release 
 3. Should switching be strictly fail-closed without automatically reactivating the previously active project?
 4. Is a fresh-server-only v0.5.2 release acceptable, explicitly excluding any in-place v0.5.1 upgrade?
 
-These are architecture choices for approval, **not** currently implemented functionality.
+These choices were approved in PR #22. This ADR defines the architecture, **not** currently implemented functionality.
