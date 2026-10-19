@@ -68,6 +68,7 @@ class Database:
 
     @contextmanager
     def transaction(self, *, write: bool = False):
+        con = None
         try:
             con = sqlite3.connect(str(self.path), timeout=10, isolation_level=None)
             con.row_factory = sqlite3.Row
@@ -81,7 +82,11 @@ class Database:
                 if con.in_transaction:
                     con.execute("ROLLBACK")
                 raise
-            finally:
-                con.close()
+        except sqlite3.IntegrityError:
+            # Domain registry translates UNIQUE and FK violations itself.
+            raise
         except sqlite3.DatabaseError as exc:
             raise StorageError("SQLite registry operation failed") from exc
+        finally:
+            if con is not None:
+                con.close()
