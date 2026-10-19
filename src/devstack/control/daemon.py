@@ -89,6 +89,10 @@ class Controller:
             "task": {"op", "project_id", "name"},
             "compose": {"op", "project_id", "action"},
             "job": {"op", "project_id", "id"},
+            "adhoc": {"op", "project_id", "kind", "service", "image", "network", "command"},
+            "jobs": {"op", "project_id"},
+            "job_logs": {"op", "project_id", "id", "offset"},
+            "job_cancel": {"op", "project_id", "id"},
         }
         if operation not in fields or set(request) != fields[operation]:
             raise ProtocolError("Unexpected or missing controller parameters")
@@ -220,6 +224,19 @@ class Controller:
         if operation == "compose":
             return {"job_id": self.jobs.submit_compose(
                 request["project_id"], request["action"])}
+        if operation == "adhoc":
+            return {"job_id": self.jobs.submit_adhoc(
+                request["project_id"], request["kind"], request["service"],
+                request["image"], request["network"], request["command"],
+            )}
+        if operation == "jobs":
+            return self.jobs.list(request["project_id"])
+        if operation == "job_logs":
+            return self.jobs.logs(
+                request["project_id"], request["id"], request["offset"],
+            )
+        if operation == "job_cancel":
+            return self.jobs.cancel(request["project_id"], request["id"])
         if operation == "job":
             from devstack.domain.models import project_id
             project_id(request["project_id"])
