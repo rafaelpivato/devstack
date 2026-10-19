@@ -212,6 +212,73 @@ class ProjectBulkUpdatesTests(unittest.TestCase):
         self.assertEqual(self.controller.coordinator.status()["project_id"], self.b)
         self.controller.coordinator.deactivate()
 
+    def test_activation_waits_until_bulk_source_update_finishes(self):
+        from threading import Event, Thread
+        from unittest.mock import patch
+
+        entered = Event()
+        release = Event()
+        finished_activation = Event()
+        self._advance("backend")
+        original = self.controller.repositories.update_locked
+
+        def paused_update(*args):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError("test update gate timed out")
+            return original(*args)
+
+        with patch.object(self.controller.repositories, "update_locked",
+                          side_effect=paused_update):
+            op = self._start()
+            self.assertTrue(entered.wait(3), "Bulk worker did not reach Git")
+            def activate():
+                try:
+                    self.controller.coordinator.activate(self.b)
+                finally:
+                    finished_activation.set()
+
+            activator = Thread(target=activate, daemon=True)
+            activator.start()
+            self.assertFalse(
+                finished_activation.wait(.15),
+                "Another project activated during the source update batch",
+            )
+            release.set()
+            self.assertEqual(self._wait(op)["status"], "succeeded")
+            self.assertTrue(finished_activation.wait(4))
+            activator.join(timeout=1)
+        self.assertEqual(self.controller.coordinator.status()["project_id"], self.b)
+        self.controller.coordinator.deactivate()
+
+    def test_blocked_worker_does_not_touch_repositories(self):
+        self.controller.coordinator.activate(self.b)
+        before = self.controller.repositories.status(self.a, self.a_backend.id)["head"]
+        op = str(uuid4())
+        items = [
+            {"repository_id": self.a_backend.id, "name": "backend",
+             "status": "queued", "reason": None},
+            {"repository_id": self.a_frontend.id, "name": "frontend",
+             "status": "queued", "reason": None},
+        ]
+        with self.db.transaction(write=True) as con:
+            con.execute(
+                "INSERT INTO repository_bulk_updates "
+                "(id,project_id,request_key,status,items_json,started_ns) "
+                "VALUES(?,?,?,'queued',?,?)",
+                (op, self.a, uuid4().hex, json.dumps(items), time.time_ns()),
+            )
+        self.controller.bulk_repositories._work(self.a, op)
+        record = self.controller.bulk_repositories.get(self.a, op)
+        self.assertEqual(record["status"], "blocked")
+        self.assertEqual({x["reason"] for x in record["items"]},
+                         {"runtime_active"})
+        self.assertEqual(
+            self.controller.repositories.status(self.a, self.a_backend.id)["head"],
+            before,
+        )
+        self.controller.coordinator.deactivate()
+
     def test_restart_marks_interrupted_without_replaying_remote_updates(self):
         items = [
             {"repository_id": self.a_backend.id, "name": "backend",
