@@ -17,6 +17,7 @@ import socketserver
 import threading
 
 from devstack.projects.service import ProjectProvisioner
+from devstack.projects.configuration import ConfigurationService
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
 from devstack.storage.projects import ProjectRegistry
@@ -40,6 +41,7 @@ class Controller:
         self.coordinator = Coordinator(database, self.registry, self.backend)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
+        self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
 
     def handle(self, request: dict) -> dict:
         if not isinstance(request, dict) or not isinstance(request.get("op"), str):
@@ -51,6 +53,10 @@ class Controller:
             "projects": {"op"},
             "project_detail": {"op", "project_id"},
             "project_rename": {"op", "project_id", "name"},
+            "compose_read": {"op", "project_id"},
+            "compose_save": {"op", "project_id", "content", "revision"},
+            "settings_read": {"op", "project_id"},
+            "settings_replace": {"op", "project_id", "applications", "tasks"},
             "project_create": {"op", "slug", "name"},
             "import_submit": {"op", "url", "slug", "name", "request_key"},
             "import_status": {"op", "id"},
@@ -98,6 +104,18 @@ class Controller:
         if operation == "project_rename":
             entry = self.registry.rename(request["project_id"], request["name"])
             return {"id": entry.id, "slug": entry.slug, "name": entry.name}
+        if operation == "compose_read":
+            return self.configuration.compose(request["project_id"])
+        if operation == "compose_save":
+            return self.configuration.save_compose(
+                request["project_id"], request["content"], request["revision"],
+            )
+        if operation == "settings_read":
+            return self.configuration.settings(request["project_id"])
+        if operation == "settings_replace":
+            return self.configuration.replace_settings(
+                request["project_id"], request["applications"], request["tasks"],
+            )
         if operation == "project_create":
             entry = self.provisioner.create_empty(request["slug"], request["name"])
             return {"id": entry.id, "name": entry.name}
