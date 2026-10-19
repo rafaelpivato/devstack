@@ -347,6 +347,16 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             flash(problem(exc)[1], "error")
             return redirect_to(identifier)
 
+    @app.get("/projects/<identifier>/services/<container_id>/logs")
+    def service_logs_page(identifier, container_id):
+        try:
+            result = call("service_logs", project_id=identifier,
+                          container_id=container_id, tail=150)
+            return render_template("v2_service_logs.html",
+                                   result=result, identifier=identifier)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
     @app.post("/projects/<identifier>/adhoc")
     def submit_adhoc_form(identifier):
         try:
@@ -663,6 +673,27 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(400)
         try:
             return jsonify(call("adhoc", project_id=identifier, **payload)), 202
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/services")
+    def services_api(identifier):
+        try:
+            return jsonify(call("services", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/services/<container_id>/logs")
+    def service_logs_api(identifier, container_id):
+        try:
+            tail = int(request.args.get("tail", "150"))
+        except (ValueError, TypeError):
+            abort(400)
+        if not 1 <= tail <= 200:
+            abort(400)
+        try:
+            return jsonify(call("service_logs", project_id=identifier,
+                                container_id=container_id, tail=tail))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 

@@ -409,7 +409,7 @@ class DockerBackend:
             "docker", "ps", "--all", "--no-trunc", "--quiet",
             "--filter", "label=com.docker.compose.project=" + compose_id(identifier),
         ], 25).splitlines()
-        if len(ids) > 256 or len(set(ids)) != len(ids):
+        if len(ids) > 64 or len(set(ids)) != len(ids):
             raise DockerControlError("Ambiguous or excessive Docker containers")
         rows = {name: [] for name in services}
         for container_id in ids:

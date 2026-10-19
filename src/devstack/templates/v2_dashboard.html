@@ -96,6 +96,19 @@
     {% else %}<p class="hint">Deactivate the runtime before adding a repository.</p>{% endif %}
     <p class="hint">Repositories belong to this project only. Adding one never changes managed Compose or source templates.</p>
   </section>
+  <section class="details" id="compose-services" data-services-project="{{ selected_id }}"
+           data-services-active="{{ 'true' if active else 'false' }}">
+    <div class="heading">
+      <h3>Docker Compose services</h3>
+      {% if active %}<button type="button" class="secondary" id="refresh-services">Refresh</button>{% endif %}
+    </div>
+    {% if active %}
+    <p id="services-status" class="hint" aria-live="polite">Loading service status…</p>
+    <ul id="services-list"></ul>
+    {% else %}
+    <p class="hint">Services are not running for this project. Selecting it never activates Docker.</p>
+    {% endif %}
+  </section>
   <section class="details">
     <h3>Applications</h3>
     {% if detail.applications %}

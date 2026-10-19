@@ -26,6 +26,7 @@ from devstack.storage.projects import ProjectRegistry
 from .coordinator import Coordinator
 from .docker import DockerBackend
 from .jobs import JobSupervisor
+from .observability import ContainerObservability
 from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
 from devstack.github_ssh import public_key, generate_key, test_connection
@@ -45,6 +46,7 @@ class Controller:
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
+        self.observability = ContainerObservability(self.coordinator, self.backend)
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
         self.repositories = RepositoryGitService(self.registry, workspaces, self.coordinator)
@@ -91,6 +93,8 @@ class Controller:
             "job": {"op", "project_id", "id"},
             "adhoc": {"op", "project_id", "kind", "service", "image", "network", "command"},
             "jobs": {"op", "project_id"},
+            "services": {"op", "project_id"},
+            "service_logs": {"op", "project_id", "container_id", "tail"},
             "job_logs": {"op", "project_id", "id", "offset"},
             "job_cancel": {"op", "project_id", "id"},
         }
@@ -229,6 +233,12 @@ class Controller:
                 request["project_id"], request["kind"], request["service"],
                 request["image"], request["network"], request["command"],
             )}
+        if operation == "services":
+            return self.observability.services(request["project_id"])
+        if operation == "service_logs":
+            return self.observability.logs(
+                request["project_id"], request["container_id"], request["tail"],
+            )
         if operation == "jobs":
             return self.jobs.list(request["project_id"])
         if operation == "job_logs":
