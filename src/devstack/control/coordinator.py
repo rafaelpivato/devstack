@@ -28,6 +28,7 @@ class Coordinator:
         self.registry = registry
         self.backend = backend
         self.jobs = None
+        self.ingress = None
         self.lock_path = database.path.with_suffix(".runtime.lock")
         if self.lock_path.is_symlink():
             raise ControlError("Runtime lock path must not be a symlink")
@@ -128,6 +129,8 @@ class Coordinator:
         identifier = current["project_id"]
         self._update(transition, identifier, None)
         try:
+            if self.ingress is not None:
+                self.ingress.drain(identifier)
             if self.jobs is not None:
                 self.jobs.cancel_all(identifier)
             self.backend.stop(identifier)
@@ -186,6 +189,8 @@ class Coordinator:
             self._update("error", previous["project_id"], None,
                          "Checking Docker ownership after controller restart")
             try:
+                if self.ingress is not None and previous["project_id"] is not None:
+                    self.ingress.drain(previous["project_id"])
                 if self.jobs is not None:
                     self.jobs.cancel_all(None)
                 registered = {p.id for p in self.registry.list()}

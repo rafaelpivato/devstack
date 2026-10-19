@@ -119,6 +119,33 @@
     {% endfor %}
   </section>
   {% endif %}
+  <section class="details" id="webhooks">
+    <h3>Webhook routes</h3>
+    <p class="hint">Registered URLs are project-specific. Only the active project can receive forwarded webhook requests. Publishing through Tailscale Funnel is a separate, explicit server setting.</p>
+    {% if webhooks %}
+    <ul>{% for route in webhooks %}
+      <li><div><strong>{{ route.route }}</strong> <small>{{ route.service }}:{{ route.port }}{{ route.destination }}</small>
+        <p class="hint"><code>/hooks/{{ selected_id }}/{{ route.route }}</code></p>
+      </div>
+      <form method="post" action="{{ url_for('remove_webhook_form', identifier=selected_id, route=route.route) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <button class="danger">Remove</button>
+      </form></li>
+    {% endfor %}</ul>
+    {% else %}<p>No webhook routes configured.</p>{% endif %}
+    <form class="stacked" method="post" action="{{ url_for('save_webhook_form', identifier=selected_id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <label for="hook-route">Route name</label>
+      <input id="hook-route" name="route" pattern="[a-z][a-z0-9_-]*" maxlength="63" placeholder="stripe" required>
+      <label for="hook-service">Compose service</label>
+      <input id="hook-service" name="service" maxlength="80" placeholder="web" required>
+      <label for="hook-port">Container port</label>
+      <input id="hook-port" name="port" type="number" min="1" max="65535" value="8000" required>
+      <label for="hook-destination">Destination path</label>
+      <input id="hook-destination" name="destination" placeholder="/hooks/stripe" maxlength="255" required>
+      <button class="secondary">Add or update route</button>
+    </form>
+  </section>
   <section class="details" id="compose-editor">
     <h3>Managed Docker Compose</h3>
     <p class="hint">This configuration belongs only to this project; it never overwrites its Git checkout or its original import baseline. Deactivate the runtime before editing.</p>

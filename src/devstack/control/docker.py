@@ -236,3 +236,52 @@ class DockerBackend:
             return self.command(identifier) + ["run", "--rm", "--no-deps", "-T",
                                                service, *argv]
         raise DockerControlError("Invalid saved task mode")
+
+    def webhook_target(self, identifier: str, generation: str,
+                       service: str) -> str:
+        """Return verified private IPv4 of exactly one active Compose service.
+
+        Never accept client-supplied addresses: the target must be obtained
+        from Docker inspect for the current immutable project/generation.
+        """
+        import ipaddress
+        project_id(identifier)
+        if not _SERVICE.fullmatch(service):
+            raise DockerControlError("Invalid webhook service")
+        if not re.fullmatch(r"[0-9a-f]{32}", generation):
+            raise DockerControlError("Invalid activation generation")
+        output = _execute(self.command(identifier) + [
+            "ps", "-q", service,
+        ], 35).splitlines()
+        if len(output) != 1:
+            raise DockerControlError("Webhook requires exactly one running Compose service")
+        data = json.loads(_execute(["docker", "inspect", "--", output[0]], 35))
+        if len(data) != 1:
+            raise DockerControlError("Docker inspection returned ambiguous service")
+        record = data[0]
+        labels = record.get("Config", {}).get("Labels", {})
+        if (labels.get("com.docker.compose.project") != compose_id(identifier)
+                or labels.get("com.docker.compose.service") != service
+                or labels.get("devstack.project_id") != identifier
+                or labels.get("devstack.generation") != generation
+                or not record.get("State", {}).get("Running")):
+            raise DockerControlError("Webhook service ownership could not be verified")
+        networks = record.get("NetworkSettings", {}).get("Networks", {})
+        matches = []
+        for net_name, details in networks.items():
+            labels = json.loads(_execute([
+                "docker", "network", "inspect", net_name,
+                "--format", "{{json .Labels}}",
+            ], 35))
+            if (labels.get("com.docker.compose.project") == compose_id(identifier)
+                    and labels.get("com.docker.compose.network") == "default"):
+                host = details.get("IPAddress", "")
+                try:
+                    address = ipaddress.ip_address(host)
+                except ValueError:
+                    continue
+                if address.version == 4 and address.is_private and not address.is_loopback:
+                    matches.append(host)
+        if len(matches) != 1:
+            raise DockerControlError("No unambiguous private default project network target")
+        return matches[0]

@@ -372,7 +372,10 @@ jobs:
           from devstack.control.docker import DockerBackend, compose_id
           from devstack.control.coordinator import Coordinator
           from devstack.control.jobs import JobSupervisor
-          import time
+          from devstack.control.ingress import WebhookIngress, WebhookServer
+          from http.client import HTTPConnection
+          from uuid import uuid4
+          import threading, time
 
           url = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
           with tempfile.TemporaryDirectory() as location:
@@ -386,6 +389,24 @@ jobs:
               backend = DockerBackend(service, workspaces)
               engine = Coordinator(db, registry, backend)
               jobs = JobSupervisor(engine, backend, workspaces)
+              ingress = WebhookIngress(engine, registry, backend)
+              engine.ingress = ingress
+              for project in (a, b):
+                  ingress.configure(project.id, "smoke", "web", 8000, "/webhooks/smoke")
+              hook_server = WebhookServer(ingress, 0)
+              hook_thread = threading.Thread(target=hook_server.serve_forever, daemon=True)
+              hook_thread.start()
+              def webhook(project_id, route="smoke"):
+                  conn = HTTPConnection("127.0.0.1", hook_server.server_address[1], timeout=8)
+                  try:
+                      content = b'{"hello":"webhook"}'
+                      conn.request("POST", "/hooks/" + project_id + "/" + route, content,
+                                   headers={"Content-Type": "application/json",
+                                            "Stripe-Signature": "signature-fixture"})
+                      response = conn.getresponse()
+                      return response.status, response.read()
+                  finally:
+                      conn.close()
               try:
                   assert engine.reconcile()["phase"] == "inactive"
                   first = engine.activate(a.id)
@@ -393,6 +414,9 @@ jobs:
                       x["project"] == a.id and x["generation"] == first["generation"]
                       for x in backend.owned()
                   ), backend.owned()
+                  assert webhook(a.id) == (200, b'{"hello":"webhook"}')
+                  assert webhook(b.id)[0] == 503
+                  assert webhook(str(uuid4()))[0] == 404
                   compose_a = backend.command(a.id)
                   subprocess.run(
                       compose_a + ["exec", "-T", "postgres", "sh", "-c",
@@ -414,10 +438,13 @@ jobs:
                   second = engine.switch(b.id)
                   assert jobs.get(job_id)["status"] == "cancelled", jobs.get(job_id)
                   assert second["project_id"] == b.id
+                  assert webhook(b.id) == (200, b'{"hello":"webhook"}')
+                  assert webhook(a.id)[0] == 503
                   assert all(x["project"] == b.id for x in backend.owned())
                   assert not engine.authorized(a.id, first["generation"])
                   third = engine.switch(a.id)
                   assert third["project_id"] == a.id
+                  assert webhook(a.id) == (200, b'{"hello":"webhook"}')
                   assert third["generation"] != first["generation"]
                   assert all(x["project"] == a.id for x in backend.owned())
                   output = subprocess.run(
@@ -431,6 +458,9 @@ jobs:
                   assert len(registry.list()) == 2
                   print("Two GitHub projects switched A-B-A, no overlap, volume persisted")
               finally:
+                  hook_server.shutdown()
+                  hook_thread.join(timeout=8)
+                  hook_server.server_close()
                   for p in (a, b):
                       try:
                           backend.stop(p.id)

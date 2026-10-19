@@ -21,10 +21,10 @@ from .client import ControllerRejected, ControllerUnavailable, send
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"ProjectNotFound", "ImportNotFound"}
-INVALID = {"ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
+NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound"}
+INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError"}
-CONFLICT = {"ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict"}
+CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -92,10 +92,11 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         selected_id = details["project"]["id"] if details else None
         compose = call("compose_read", project_id=selected_id) if selected_id else None
         definitions = call("settings_read", project_id=selected_id) if selected_id else None
+        webhooks = call("webhooks", project_id=selected_id)["webhooks"] if selected_id else ()
         return render_template(
             "v2_dashboard.html", projects=overview["projects"], runtime=runtime,
             detail=details, selected_id=selected_id, csrf=csrf(),
-            compose=compose, definitions=definitions,
+            compose=compose, definitions=definitions, webhooks=webhooks,
             example=request.args.get("example") == "smoke",
             sample_url=SAMPLE_URL, import_key=secrets.token_hex(16),
         )
@@ -202,6 +203,21 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(400)
         return perform("settings_replace", target=identifier, project_id=identifier,
                        applications=data["applications"], tasks=data["tasks"])
+
+    @app.post("/projects/<identifier>/webhooks")
+    def save_webhook_form(identifier):
+        try:
+            port = int(field("port"))
+        except ValueError:
+            abort(400)
+        return perform("webhook_upsert", target=identifier, project_id=identifier,
+                       route=field("route"), service=field("service"),
+                       port=port, destination=field("destination"))
+
+    @app.post("/projects/<identifier>/webhooks/<route>/remove")
+    def remove_webhook_form(identifier, route):
+        return perform("webhook_remove", target=identifier,
+                       project_id=identifier, route=route)
 
     @app.post("/projects/<identifier>/activate")
     def activate(identifier):
@@ -337,6 +353,35 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(400)
         try:
             return jsonify(call("settings_replace", project_id=identifier, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/webhooks")
+    def webhooks_api(identifier):
+        try:
+            return jsonify(call("webhooks", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.put("/api/v2/projects/<identifier>/webhooks/<route>")
+    def upsert_webhook_api(identifier, route):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {
+            "service", "port", "destination"
+        }:
+            abort(400)
+        try:
+            return jsonify(call("webhook_upsert", project_id=identifier,
+                                route=route, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.delete("/api/v2/projects/<identifier>/webhooks/<route>")
+    def delete_webhook_api(identifier, route):
+        try:
+            return jsonify(call("webhook_remove", project_id=identifier, route=route))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
