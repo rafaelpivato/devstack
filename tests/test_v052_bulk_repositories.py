@@ -328,6 +328,9 @@ class ProjectBulkUpdatesTests(unittest.TestCase):
         self.assertEqual(self.browser.get(
             "/projects/" + self.a + "/repository-updates/" + operation["id"],
         ).status_code, 200)
+        dashboard = self.browser.get("/projects/" + self.a)
+        self.assertIn(b"Last repository update", dashboard.data)
+        self.assertIn(operation["id"].encode(), dashboard.data)
         self.assertEqual(self.browser.get(
             "/api/v2/projects/" + self.b +
             "/repository-updates/" + operation["id"],

@@ -154,6 +154,7 @@ class Controller:
                     for item in repositories
                 ],
                 "linked_source": self._has_linked_source(identifier),
+                "last_repository_update": self._last_repository_update(identifier),
                 "applications": [dict(row) for row in apps],
                 "tasks": [dict(row) for row in tasks],
             }
@@ -285,6 +286,15 @@ class Controller:
                 raise ProtocolError("Job does not belong to requested project")
             return job
         raise ProtocolError("Unknown operation")
+
+    def _last_repository_update(self, identifier: str) -> dict | None:
+        with self.registry.database.transaction() as con:
+            row = con.execute(
+                "SELECT id,status FROM repository_bulk_updates "
+                "WHERE project_id=? ORDER BY started_ns DESC,id DESC LIMIT 1",
+                (identifier,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def _has_linked_source(self, identifier: str) -> bool:
         with self.registry.database.transaction() as con:
