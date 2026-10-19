@@ -252,7 +252,9 @@ class RepositoryAddSupervisor:
                 state = self.coordinator.status()
                 if state["phase"] != "inactive" or state["project_id"] is not None:
                     raise RepositoryAddConflict("Deactivate the runtime before repository recovery")
-                self.coordinator._verify_clear()
+                # The recovery journal itself blocks ordinary admission.
+                # Inspect actual Docker ownership while explicitly repairing it.
+                self.coordinator._verify_clear(allow_pending_sync=True)
                 with self.database.transaction() as con:
                     rows = con.execute(
                         "SELECT id,project_id,name,clone_url,repo_id,status "

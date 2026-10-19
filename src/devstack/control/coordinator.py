@@ -88,8 +88,12 @@ class Coordinator:
                 pending = con.execute(
                     "SELECT 1 FROM source_sync_pending LIMIT 1"
                 ).fetchone()
-            if pending is not None:
-                raise ControlError("Source sync publication must recover before activation")
+                unresolved = con.execute(
+                    "SELECT 1 FROM repository_add_operations "
+                    "WHERE status='recovery' LIMIT 1"
+                ).fetchone()
+            if pending is not None or unresolved is not None:
+                raise ControlError("Unfinished source or repository publication blocks activation")
         owned = self._inspect()
         if owned:
             raise ControlError("Unverified or remaining DevStack-owned containers prevent activation")

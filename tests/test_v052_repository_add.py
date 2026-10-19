@@ -217,6 +217,8 @@ class MultiRepositoryTests(unittest.TestCase):
         self.assertEqual(pending["status"], "recovery")
         self.assertEqual(self.controller.registry.repositories(self.a.id), ())
         self.assertTrue((self.root/"projects"/self.a.id/"repos"/"backend").is_dir())
+        with self.assertRaises(Exception):
+            self.controller.coordinator.activate(self.b.id)
         self.assertEqual(self.controller.repository_add.reconcile(), (pending["id"],))
         self.assertEqual(len(self.controller.registry.repositories(self.a.id)), 1)
         self.assertEqual(
