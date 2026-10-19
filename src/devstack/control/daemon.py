@@ -414,10 +414,15 @@ def main():
             controller.coordinator.reconcile()
             controller.source_review.recover_pending()
             controller.repository_add.reconcile()
-            controller.bulk_repositories.recover()
         except Exception:
             # A pending durable journal remains as a fail-closed barrier;
             # explicit reconcile retries runtime cleanup and replay.
+            pass
+        try:
+            # Unlike Docker/source publication, unfinished Git batches are
+            # never resumed after restart, even if runtime recovery failed.
+            controller.bulk_repositories.recover()
+        except Exception:
             pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
             with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:

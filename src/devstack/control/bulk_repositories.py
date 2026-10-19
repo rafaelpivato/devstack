@@ -74,6 +74,8 @@ class BulkRepositoryUpdater:
                 repositories = self.registry.repositories(identifier)
                 if not repositories:
                     raise BulkRepositoryConflict("Project has no repositories")
+                if len(repositories) > 80:
+                    raise BulkRepositoryConflict("A batch may contain at most 80 repositories")
                 with self.database.transaction(write=True) as con:
                     pending = con.execute(
                         "SELECT 1 FROM repository_bulk_updates "
@@ -134,6 +136,29 @@ class BulkRepositoryUpdater:
                 (status, time.time_ns(), operation_id),
             )
 
+    def _abort(self, operation_id: str, status: str, reason: str) -> None:
+        """Persist explicit per-repo outcomes even when admission was denied."""
+        with self.database.transaction(write=True) as con:
+            row = con.execute(
+                "SELECT items_json FROM repository_bulk_updates "
+                "WHERE id=? AND status IN ('queued','running')",
+                (operation_id,),
+            ).fetchone()
+            if row is None:
+                return
+            items = json.loads(row["items_json"])
+            for item in items:
+                if item["status"] in ("queued", "running"):
+                    item["status"] = ("interrupted" if status == "interrupted"
+                                      else "skipped")
+                    item["reason"] = reason
+            con.execute(
+                "UPDATE repository_bulk_updates "
+                "SET status=?,items_json=?,finished_ns=? WHERE id=?",
+                (status, json.dumps(items, separators=(",", ":")),
+                 time.time_ns(), operation_id),
+            )
+
     def _update_item(self, identifier: str, item: dict) -> dict:
         result = dict(item)
         try:
@@ -175,7 +200,7 @@ class BulkRepositoryUpdater:
             with self.coordinator.locked():
                 state = self.coordinator.status()
                 if state["phase"] != "inactive" or state["project_id"] is not None:
-                    self._finish(operation_id, "blocked")
+                    self._abort(operation_id, "blocked", "runtime_active")
                     return
                 self.coordinator._verify_clear()
                 items = self._snapshot(operation_id)
@@ -191,7 +216,7 @@ class BulkRepositoryUpdater:
         except Exception:
             # A restart/crash or lost Docker safety check must never retry Git
             # automatically; retain successful repos and mark unfinished.
-            self._finish(operation_id, "interrupted")
+            self._abort(operation_id, "interrupted", "interrupted")
         finally:
             with self._guard:
                 self._threads.pop(operation_id, None)
