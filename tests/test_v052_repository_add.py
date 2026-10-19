@@ -89,6 +89,31 @@ class MultiRepositoryTests(unittest.TestCase):
             time.sleep(.02)
         self.fail("Timed out waiting for Git clone")
 
+    def test_git_adapter_clones_real_repository_without_devstack_manifest(self):
+        from devstack.adapters.github import GitHubSource, GitHubLocation
+        original = self.root / "original"
+        origin = self.root / "origin.git"
+        git("init", original)
+        git("-C", original, "config", "user.name", "DevStack Test")
+        git("-C", original, "config", "user.email", "test@example.invalid")
+        (original / "readme.txt").write_text("ordinary source")
+        git("-C", original, "add", ".")
+        git("-C", original, "commit", "-m", "initial")
+        git("-C", original, "branch", "-M", "main")
+        git("init", "--bare", origin)
+        git("-C", original, "remote", "add", "origin", origin)
+        git("-C", original, "push", "-u", "origin", "main")
+        git("--git-dir", origin, "symbolic-ref", "HEAD", "refs/heads/main")
+        target = self.root / "ordinary"
+        with patch("devstack.adapters.github.parse_github_url",
+                   return_value=GitHubLocation(str(origin), "backend", None)):
+            head = GitHubSource().clone_repository(
+                "https://github.com/org/backend", target, "main"
+            )
+        self.assertEqual(git("-C", target, "rev-parse", "HEAD"), head)
+        self.assertEqual((target / "readme.txt").read_text(), "ordinary source")
+        self.assertFalse((target / ".devstack").exists())
+
     def test_multiple_repos_and_projects_persist_without_activation(self):
         one = self.wait(self.a.id, self.submit(self.a.id, name="backend"))
         two = self.wait(self.a.id, self.submit(self.a.id, name="frontend"))
