@@ -216,18 +216,19 @@ class RepositoryAddSupervisor:
                         (time.time_ns(), operation, identifier),
                     )
         except Exception as exc:
-            # Unregistered staging directories are intentionally preserved;
-            # no deletion, rollback of Git working data or retry-on-boot.
-            # A published path whose DB commit is uncertain must be reconciled
-            # from its durable journal; never classify it as a failed clone.
-            if not published:
+            # A rename can reach disk and *then* report an error (or a process
+            # can crash before updating the in-memory published flag). Trust
+            # the final path and durable journal, never a Python local flag.
+            stage, final = self._paths(identifier, row["name"], operation)
+            if published or final.exists() or final.is_symlink():
+                self._finish(identifier, operation, "recovery", "RecoveryRequired")
+            else:
+                # An unregistered staged checkout is preserved for inspection.
                 self._finish(identifier, operation, "failed", type(exc).__name__
                              if type(exc).__name__ in {
                                  "RepositoryAddConflict", "GitHubSourceError",
                                  "WorkspaceError", "ProjectNotFound",
                              } else "RepositoryAddFailed")
-            else:
-                self._finish(identifier, operation, "recovery", "RecoveryRequired")
         finally:
             with self._guard:
                 self._threads.pop(operation, None)
@@ -244,6 +245,10 @@ class RepositoryAddSupervisor:
             if any(thread.is_alive() for thread in self._threads.values()):
                 raise RepositoryAddConflict("Cannot reconcile while clone workers run")
             with self.coordinator.locked():
+                state = self.coordinator.status()
+                if state["phase"] != "inactive" or state["project_id"] is not None:
+                    raise RepositoryAddConflict("Deactivate the runtime before repository recovery")
+                self.coordinator._verify_clear()
                 with self.database.transaction() as con:
                     rows = con.execute(
                         "SELECT id,project_id,name,clone_url,repo_id,status "
