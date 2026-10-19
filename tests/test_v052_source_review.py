@@ -292,6 +292,64 @@ class SourceReviewTests(unittest.TestCase):
             ["pytest", "-q"],
         )
 
+    def test_interrupted_file_rename_rolls_forward_all_snapshots(self):
+        self._change_source()
+        revision = self.review(self.a.id)["revision"]
+        from devstack.projects import source_sync
+        real_replace = source_sync.os.replace
+        count = [0]
+
+        def interrupt_after_one(source, destination):
+            count[0] += 1
+            if count[0] == 2:
+                raise OSError("simulated mid-publication failure")
+            return real_replace(source, destination)
+
+        with patch.object(source_sync.os, "replace", side_effect=interrupt_after_one):
+            with self.assertRaises(SourceSyncConflict):
+                self.controller.source_review.apply(
+                    self.a.id, revision, ["application:API", "task:tests"], [],
+                )
+        self.assertEqual(count[0], 2)
+        self.assertEqual(self.controller.configuration.settings(self.a.id)[
+            "applications"][0]["port"], 9000)
+        with self.assertRaises(SourceSyncConflict):
+            self.controller.handle({"op": "health"})
+        result = self.controller.handle({"op": "reconcile"})
+        self.assertEqual(result["phase"], "inactive")
+        self.assertEqual(self.review(self.a.id)["changes"], [
+            item for item in self.review(self.a.id)["changes"]
+            if item["id"] not in ("application:API", "task:tests")
+        ])
+        managed = self.root / "workspaces" / self.a.id / "managed"
+        baseline = self.root / "workspaces" / self.a.id / "baseline"
+        self.assertIn("port = 9000", (managed / "project.toml").read_text())
+        self.assertIn("port = 9000", (baseline / "project.toml").read_text())
+        self.assertIn('"-q"', (managed / "tasks.toml").read_text())
+        self.assertIn('"-q"', (baseline / "tasks.toml").read_text())
+
+    def test_reconcile_stale_runtime_before_replaying_pending_publication(self):
+        self._change_source()
+        revision = self.review(self.a.id)["revision"]
+        with patch.object(self.controller.source_review, "_publish",
+                          side_effect=OSError("simulated crash")):
+            with self.assertRaises(OSError):
+                self.controller.source_review.apply(
+                    self.a.id, revision, ["application:API"], [],
+                )
+        # Simulate an unclean restart with unexpected owned containers:
+        # replay may begin only after actual Docker ownership is verified.
+        self.controller.coordinator._update("error", self.b.id, None, "crash")
+        self.docker.containers.append({
+            "project": self.b.id, "generation": "stale",
+        })
+        result = self.controller.handle({"op": "reconcile"})
+        self.assertEqual(result["phase"], "inactive")
+        self.assertFalse(self.docker.containers)
+        self.assertNotIn("application:API", {
+            item["id"] for item in self.review(self.a.id)["changes"]
+        })
+
     def test_v2_api_apply_csrf_and_explicit_confirmations(self):
         def transport(op, **fields):
             try:
