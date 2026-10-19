@@ -6,6 +6,8 @@ Docker CLI success alone does not establish cleanup.
 """
 from pathlib import Path
 import json
+import selectors
+import time
 import os
 import re
 import subprocess
@@ -15,6 +17,63 @@ from devstack.projects.service import ProjectProvisioner
 from devstack.projects.workspaces import WorkspaceStore
 
 _SERVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
+_CONTAINER_ID = re.compile(r"[a-f0-9]{64}\Z")
+_LOG_TAIL_MAX = 200
+_LOG_OUTPUT_LIMIT = 64 * 1024
+
+
+def _tail_logs(container_id: str, tail: int) -> dict:
+    """Bound both Docker log output memory and execution time.
+
+    Keep recent bytes only; a single enormous log line cannot allocate
+    unlimited memory in the privileged controller.
+    """
+    if not _CONTAINER_ID.fullmatch(container_id):
+        raise DockerControlError("Invalid container identity")
+    if type(tail) is not int or not 1 <= tail <= _LOG_TAIL_MAX:
+        raise DockerControlError("Invalid log tail count")
+    try:
+        process = subprocess.Popen(
+            ["docker", "logs", "--timestamps", "--tail", str(tail), "--", container_id],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except OSError as exc:
+        raise DockerControlError("Cannot start Docker log reader") from exc
+    output = bytearray()
+    truncated = False
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        deadline = time.monotonic() + 12
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DockerControlError("Docker log read timed out")
+            events = selector.select(remaining)
+            if not events:
+                raise DockerControlError("Docker log read timed out")
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            output.extend(chunk)
+            if len(output) > _LOG_OUTPUT_LIMIT:
+                truncated = True
+                del output[:-_LOG_OUTPUT_LIMIT]
+        if process.wait(timeout=2) != 0:
+            raise DockerControlError("Docker log read failed")
+        return {"text": output.decode("utf-8", errors="replace"),
+                "truncated": truncated, "tail": tail}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise DockerControlError("Docker log read failed") from exc
+    finally:
+        selector.close()
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        process.stdout.close()
+
+
 
 
 class DockerControlError(RuntimeError):
@@ -304,6 +363,94 @@ class DockerBackend:
         _execute(["docker", "rm", "-f", "--", container_id], 30)
         if inspect() is not None:
             raise DockerControlError("Job container termination not verified")
+
+    @staticmethod
+    def _checked_service_container(identifier: str, generation: str,
+                                   container_id: str, *, allow_oneoff: bool = False) -> dict:
+        """Inspect Docker identity and reject other projects/jobs/generations."""
+        project_id(identifier)
+        if not re.fullmatch(r"[a-f0-9]{32}", generation):
+            raise DockerControlError("Invalid activation generation")
+        if not isinstance(container_id, str) or not _CONTAINER_ID.fullmatch(container_id):
+            raise DockerControlError("Invalid container identity")
+        data = json.loads(_execute(
+            ["docker", "inspect", "--type", "container", "--", container_id], 20,
+        ))
+        if not isinstance(data, list) or len(data) != 1:
+            raise DockerControlError("Ambiguous Docker container inspection")
+        record = data[0]
+        if record.get("Id") != container_id:
+            raise DockerControlError("Docker identity changed during inspection")
+        labels = record.get("Config", {}).get("Labels") or {}
+        service = labels.get("com.docker.compose.service")
+        if (labels.get("com.docker.compose.project") != compose_id(identifier)
+                or labels.get("devstack.project_id") != identifier
+                or labels.get("devstack.generation") != generation
+                or not isinstance(service, str) or not _SERVICE.fullmatch(service)
+                or (not allow_oneoff and
+                    str(labels.get("com.docker.compose.oneoff", "")).lower() in ("true", "1"))
+                or (not allow_oneoff and labels.get("devstack.job_id"))):
+            raise DockerControlError("Container is not an owned Compose service")
+        return record
+
+    def service_snapshot(self, identifier: str, generation: str) -> dict:
+        """Configured Compose services and their verified owned containers."""
+        project_id(identifier)
+        if not re.fullmatch(r"[a-f0-9]{32}", generation):
+            raise DockerControlError("Invalid activation generation")
+        services = _execute(self.command(identifier) + [
+            "config", "--services",
+        ], 25).splitlines()
+        if (len(services) > 96 or not services or
+                any(not _SERVICE.fullmatch(name) for name in services) or
+                len(set(services)) != len(services)):
+            raise DockerControlError("Invalid Compose service configuration")
+        ids = _execute([
+            "docker", "ps", "--all", "--no-trunc", "--quiet",
+            "--filter", "label=com.docker.compose.project=" + compose_id(identifier),
+        ], 25).splitlines()
+        if len(ids) > 256 or len(set(ids)) != len(ids):
+            raise DockerControlError("Ambiguous or excessive Docker containers")
+        rows = {name: [] for name in services}
+        for container_id in ids:
+            if not _CONTAINER_ID.fullmatch(container_id):
+                raise DockerControlError("Invalid Docker container ID")
+            record = self._checked_service_container(
+                identifier, generation, container_id,
+                allow_oneoff=True,
+            )
+            labels = record["Config"]["Labels"]
+            # Compose run containers are jobs, not ordinary Compose services.
+            if str(labels.get("com.docker.compose.oneoff", "")).lower() in ("true", "1"):
+                continue
+            service = labels["com.docker.compose.service"]
+            if service not in rows:
+                raise DockerControlError("Unexpected Compose service in project")
+            state = record.get("State", {})
+            health = state.get("Health")
+            rows[service].append({
+                "id": container_id, "name": str(record.get("Name", "")).lstrip("/")[:180],
+                "state": str(state.get("Status", "unknown"))[:40],
+                "health": (str(health.get("Status", "unknown"))[:40]
+                           if isinstance(health, dict) else None),
+                "restart_count": record.get("RestartCount", 0)
+                                 if type(record.get("RestartCount", 0)) is int else 0,
+            })
+        return {"services": [
+            {"name": name, "containers": sorted(rows[name], key=lambda x: x["name"]),
+             "status": ("not-created" if not rows[name] else
+                        ("running" if any(c["state"] == "running" for c in rows[name])
+                         else rows[name][0]["state"]))}
+            for name in services
+        ]}
+
+    def service_logs(self, identifier: str, generation: str,
+                     container_id: str, tail: int) -> dict:
+        record = self._checked_service_container(identifier, generation, container_id)
+        result = _tail_logs(container_id, tail)
+        return {"container_id": container_id,
+                "service": record["Config"]["Labels"]["com.docker.compose.service"],
+                **result}
 
     def webhook_target(self, identifier: str, generation: str,
                        service: str) -> str:
