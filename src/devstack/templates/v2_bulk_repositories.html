@@ -10,7 +10,7 @@
 </header><main class="card">
 <p>Status: <strong>{{ result.status }}</strong></p>
 <p class="hint">Safe fetch and fast-forward only. Local changes and divergent histories are preserved. No .devstack configuration is applied.</p>
-<ul>{% for entry in result.items %}
+<ul>{% for entry in result['items'] %}
 <li><strong>{{ entry.name }}</strong> — {{ entry.status }}
 {% if entry.branch %}<small>({{ entry.branch }})</small>{% endif %}
 {% if entry.reason %}<small>· {{ entry.reason|replace('_',' ') }}</small>{% endif %}
