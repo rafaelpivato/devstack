@@ -193,6 +193,7 @@ class WebhookTests(unittest.TestCase):
                     finally:
                         conn.close()
                 self.assertEqual(post("/hooks/" + self.b.id + "/stripe")[0], 503)
+                self.assertEqual(post("/hooks/" + str(uuid4()) + "/stripe")[0], 404)
                 self.assertEqual(post("/hooks/" + self.a.id + "/nonexistent")[0], 404)
                 self.assertEqual(post("/bad")[0], 404)
                 with patch("devstack.control.ingress.urlopen", return_value=Response()):
