@@ -6,6 +6,7 @@ No raw argv, Docker socket or host shell is available over controller IPC.
 import json
 import os
 from pathlib import Path
+import stat
 import signal
 import subprocess
 import threading
@@ -13,12 +14,19 @@ import time
 from uuid import uuid4
 
 from devstack.domain.models import project_id
+from devstack.projects.manifest import _tasks, ManifestError
 from .coordinator import ControlError
 
 _ALLOWED_COMPOSE = {"build", "restart"}
+_LOG_LIMIT = 2 * 1024 * 1024
+_LOG_CHUNK = 16 * 1024
 
 
 class JobError(RuntimeError):
+    pass
+
+
+class JobInvalid(ValueError):
     pass
 
 
@@ -54,15 +62,60 @@ class JobSupervisor:
             raise JobError("Unsupported Compose action")
         return self._submit(identifier, "compose", action)
 
-    def _submit(self, identifier: str, kind: str, action: str) -> str:
+    @staticmethod
+    def _adhoc_spec(kind: str, service: str, image: str,
+                    network: str, command: list) -> dict:
+        if kind not in ("exec", "run", "image"):
+            raise JobInvalid("Invalid ad-hoc execution mode")
+        if not all(isinstance(value, str) for value in (service, image, network)):
+            raise JobInvalid("Invalid container target")
+        if kind == "image" and (not image or service):
+            raise JobInvalid("Standalone image requires only an image name")
+        if kind != "image" and (image or not service or network != "none"):
+            raise JobInvalid("Compose command requires a service and no network override")
+        if network not in ("none", "project"):
+            raise JobInvalid("Invalid network mode")
+        if not isinstance(command, list):
+            raise JobInvalid("Command must be an argv array")
+        # Delegate validation to the same strict manifest specification used
+        # for saved tasks; never allow a caller-defined host/Docker argv.
+        try:
+            toml = (
+                "[[tasks]]\nname = \"adhoc\"\n"
+                + "service = " + json.dumps(service) + "\n"
+                + "image = " + json.dumps(image) + "\n"
+                + "mode = " + json.dumps("run" if kind == "image" else kind) + "\n"
+                + "network = " + json.dumps(network) + "\n"
+                + "command = " + json.dumps(command) + "\n"
+            ).encode("utf-8")
+            item = _tasks(toml)[0]
+        except (ManifestError, TypeError, ValueError, UnicodeError) as exc:
+            raise JobInvalid("Invalid or oversized container command") from exc
+        return {"service": item.service, "image": item.image,
+                "mode": item.mode, "network": item.network,
+                "argv": list(item.argv)}
+
+    def submit_adhoc(self, identifier: str, kind: str, service: str,
+                     image: str, network: str, command: list) -> str:
+        spec = self._adhoc_spec(kind, service, image, network, command)
+        return self._submit(identifier, "adhoc",
+                            kind + ": " + (service or image), adhoc=spec)
+
+    def _submit(self, identifier: str, kind: str, action: str,
+                adhoc: dict | None = None) -> str:
         project_id(identifier)
         with self.coordinator.locked():
             state = self.coordinator.status()
             self.coordinator.admit(identifier, state["generation"] or "")
             job_id = str(uuid4())
-            argv = (self._task(identifier, action, state["generation"], job_id)
-                    if kind == "task"
-                    else self.backend.command(identifier) + [action])
+            if kind == "task":
+                argv = self._task(identifier, action, state["generation"], job_id)
+            elif kind == "adhoc":
+                argv = self.backend.task_command(
+                    identifier, adhoc, state["generation"], job_id,
+                )
+            else:
+                argv = self.backend.command(identifier) + [action]
             if not all(isinstance(arg, str) and arg for arg in argv):
                 raise JobError("Invalid worker command")
             with self.database.transaction() as con:
@@ -118,13 +171,21 @@ class JobSupervisor:
                 log_path = logs / (job_id + ".log")
                 if log_path.is_symlink() or log_path.exists():
                     raise JobError("Unsafe job log destination")
-                with log_path.open("xb") as out:
-                    log_path.chmod(0o600)
-                    proc = subprocess.Popen(
-                        list(argv), stdin=subprocess.DEVNULL,
-                        stdout=out, stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                    )
+                with log_path.open("xb"):
+                    pass
+                log_path.chmod(0o600)
+                proc = subprocess.Popen(
+                    list(argv), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                # Stream to a bounded private log without blocking Docker
+                # when its stdout is larger than our retention allowance.
+                drain = threading.Thread(
+                    target=self._drain, args=(proc, log_path),
+                    daemon=True, name="devstack-job-log-" + job_id[:8],
+                )
+                drain.start()
                 with self._guard:
                     self._running[job_id] = (threading.current_thread(), proc)
                 self._set(job_id, "running")
@@ -134,6 +195,9 @@ class JobSupervisor:
             except subprocess.TimeoutExpired:
                 self._terminate(proc)
                 final, exit_code = "failed", None
+            drain.join(timeout=10)
+            if drain.is_alive():
+                raise JobError("Worker log stream did not finish")
             if self._state(job_id) != "cancelled":
                 self._set(job_id, final, exit_code)
         except Exception:
@@ -144,6 +208,20 @@ class JobSupervisor:
         finally:
             with self._guard:
                 self._running.pop(job_id, None)
+
+    @staticmethod
+    def _drain(proc: subprocess.Popen, log_path: Path) -> None:
+        written = 0
+        with log_path.open("wb", buffering=0) as output:
+            while True:
+                data = proc.stdout.read(4096)
+                if not data:
+                    break
+                if written < _LOG_LIMIT:
+                    chunk = data[:_LOG_LIMIT - written]
+                    output.write(chunk)
+                    written += len(chunk)
+        proc.stdout.close()
 
     @staticmethod
     def _terminate(proc: subprocess.Popen) -> None:
@@ -195,6 +273,63 @@ class JobSupervisor:
             thread.join(timeout=8)
             if thread.is_alive():
                 raise JobError("Worker thread did not stop")
+
+    def cancel(self, identifier: str, job_id: str) -> dict:
+        project_id(identifier)
+        project_id(job_id)
+        with self.coordinator.locked():
+            current = self.get(job_id)
+            if current["project_id"] != identifier:
+                raise JobError("Job does not belong to requested project")
+            if current["status"] not in ("queued", "running"):
+                return current
+            self._set(job_id, "cancelled")
+            with self._guard:
+                thread, proc = self._running.get(job_id, (None, None))
+            if proc is not None:
+                self._terminate(proc)
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=8)
+                if thread.is_alive():
+                    raise JobError("Worker could not be confirmed stopped")
+            return self.get(job_id)
+
+    def list(self, identifier: str) -> dict:
+        project_id(identifier)
+        self.coordinator.registry.get(identifier)
+        with self.database.transaction() as con:
+            rows = con.execute(
+                "SELECT id,project_id,kind,status,action,started_ns,"
+                "finished_ns,exit_code FROM jobs WHERE project_id=? "
+                "ORDER BY started_ns DESC,id DESC LIMIT 40",
+                (identifier,),
+            ).fetchall()
+        return {"jobs": [dict(row) for row in rows]}
+
+    def logs(self, identifier: str, job_id: str, offset: int = 0) -> dict:
+        project_id(identifier)
+        project_id(job_id)
+        if type(offset) is not int or not 0 <= offset <= _LOG_LIMIT:
+            raise JobInvalid("Invalid job log offset")
+        current = self.get(job_id)
+        if current["project_id"] != identifier:
+            raise JobError("Job does not belong to requested project")
+        file = self.workspaces.path(identifier) / "logs" / (job_id + ".log")
+        try:
+            fd = os.open(file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except FileNotFoundError:
+            return {"text": "", "offset": offset, "next_offset": offset,
+                    "complete": current["status"] not in ("queued", "running")}
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > _LOG_LIMIT:
+                raise JobError("Unsafe or oversized log file")
+            data = os.pread(fd, _LOG_CHUNK, offset)
+        finally:
+            os.close(fd)
+        return {"text": data.decode("utf-8", errors="replace"),
+                "offset": offset, "next_offset": offset + len(data),
+                "complete": current["status"] not in ("queued", "running")}
 
     def get(self, job_id: str) -> dict:
         with self.database.transaction() as con:
