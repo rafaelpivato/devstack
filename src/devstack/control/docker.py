@@ -159,15 +159,17 @@ class DockerBackend:
             if not compose.startswith("devstack-") and not extra:
                 continue
             suffix = compose.removeprefix("devstack-")
+            candidate = suffix if compose.startswith("devstack-") else extra
             try:
-                project_id(suffix)
-                valid = compose == compose_id(suffix)
+                project_id(candidate)
+                valid = (compose == compose_id(candidate) or
+                         (not compose and extra == candidate))
             except ValueError:
                 valid = False
-            if extra and extra != suffix:
+            if extra and extra != candidate:
                 valid = False
             found.append({
-                "id": ident, "project": suffix if valid else "",
+                "id": ident, "project": candidate if valid else "",
                 "generation": labels.get("devstack.generation", ""),
                 "state": record.get("State", ""),
             })
@@ -183,7 +185,8 @@ class DockerBackend:
         if any(x["generation"] != generation for x in items):
             raise DockerControlError("Project container generation mismatch")
 
-    def task_command(self, identifier: str, task: dict) -> list[str]:
+    def task_command(self, identifier: str, task: dict,
+                     generation: str, job_id: str) -> list[str]:
         """Translate a registered task to a fixed Docker argv without a host shell."""
         argv = task["argv"]
         if (not isinstance(argv, list) or not argv
@@ -208,12 +211,21 @@ class DockerBackend:
                 network = output[0]
             else:
                 raise DockerControlError("Invalid task network")
-            # Job IDs and generation are not accepted from the caller here.
-            # The next stage will ensure every disposable image task carries
-            # an exact controller-generated name and activation-generation label.
-            raise DockerControlError(
-                "Standalone image execution requires generation-scoped launch metadata"
-            )
+            from uuid import UUID
+            try:
+                UUID(job_id)
+            except ValueError as exc:
+                raise DockerControlError("Invalid job ID") from exc
+            if not re.fullmatch(r"[0-9a-f]{32}", generation):
+                raise DockerControlError("Invalid activation generation")
+            return [
+                "docker", "run", "--rm", "--name", "devstack-task-" + job_id,
+                "--label", "devstack.project_id=" + identifier,
+                "--label", "devstack.generation=" + generation,
+                "--network", network,
+                "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
+                image, *argv,
+            ]
         service = task["service"]
         if not _SERVICE.fullmatch(service):
             raise DockerControlError("Invalid saved task service")
