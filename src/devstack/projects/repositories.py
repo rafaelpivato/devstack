@@ -11,7 +11,7 @@ import subprocess
 from devstack.domain.models import project_id
 
 
-_HEAD = re.compile(r"[a-f0-9]{40,64}\\Z")
+_HEAD = re.compile(r"[a-f0-9]{40,64}\Z")
 
 
 class RepositoryNotFound(LookupError):
