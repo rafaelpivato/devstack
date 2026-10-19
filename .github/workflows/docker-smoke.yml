@@ -468,3 +468,20 @@ jobs:
                           print("Cleanup failure:", exc)
                           raise
           PY
+
+  systemd-privilege-boundary:
+    name: Fresh Ubuntu systemd and Unix-socket permissions
+    needs: compose-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify actual web/controller Linux identities and restart
+        env:
+          DEVSTACK_EPHEMERAL_CI: "1"
+        run: sudo --preserve-env=DEVSTACK_EPHEMERAL_CI bash scripts/verify-systemd-ci.sh
+      - name: Inspect systemd diagnostics on failure
+        if: failure()
+        run: |
+          sudo systemctl status devstack-ci-control.service devstack-ci-web.service --no-pager || true
+          sudo journalctl -u devstack-ci-control.service -u devstack-ci-web.service --no-pager -n 160 || true
