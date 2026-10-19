@@ -124,3 +124,26 @@ class ProjectProvisioner:
             self.registry.finalize_import(entry.id)
             recovered.append(entry.id)
         return tuple(recovered)
+
+    def source_directory(self, identifier: str) -> Path:
+        """Resolve the linked Git template for later reviewed source sync."""
+        metadata = self.registry.import_metadata(identifier)
+        repositories = self.registry.repositories(identifier)
+        repository = next(
+            (r for r in repositories if r.id == metadata["repository_id"]),
+            None,
+        )
+        if repository is None:
+            raise ProjectProvisionError("Linked GitHub repository not registered")
+        checkout = self.workspaces.repository(identifier, repository.relative_path)
+        selected = checkout
+        if metadata["subdirectory"]:
+            for part in metadata["subdirectory"].split("/"):
+                selected = selected / part
+                if selected.is_symlink():
+                    raise ProjectProvisionError("Linked GitHub source contains symlink")
+        source = selected / ".devstack"
+        if (source.is_symlink() or not source.is_dir()
+                or not source.resolve().is_relative_to(checkout.resolve())):
+            raise ProjectProvisionError("Linked project source is unavailable")
+        return source
