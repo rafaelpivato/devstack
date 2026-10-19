@@ -23,7 +23,7 @@ SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
 NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
-           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid"}
+           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid"}
 CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError"}
 
 
@@ -172,6 +172,14 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         try:
             job = call("import_status", id=identifier)
             return render_template("v2_import.html", job=job)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/projects/<identifier>/source-review")
+    def project_source_review(identifier):
+        try:
+            review = call("source_review", project_id=identifier)
+            return render_template("v2_source_review.html", review=review)
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
@@ -404,6 +412,13 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def delete_webhook_api(identifier, route):
         try:
             return jsonify(call("webhook_remove", project_id=identifier, route=route))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/source-review")
+    def project_source_review_api(identifier):
+        try:
+            return jsonify(call("source_review", project_id=identifier))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 

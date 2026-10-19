@@ -19,6 +19,7 @@ import threading
 from devstack.projects.service import ProjectProvisioner
 from devstack.projects.configuration import ConfigurationService
 from devstack.projects.repositories import RepositoryGitService
+from devstack.projects.source_sync import SourceReviewService
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
 from devstack.storage.projects import ProjectRegistry
@@ -45,6 +46,7 @@ class Controller:
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
         self.repositories = RepositoryGitService(self.registry, workspaces, self.coordinator)
+        self.source_review = SourceReviewService(self.registry, workspaces, self.provisioner, self.configuration)
         self.ingress = WebhookIngress(self.coordinator, self.registry, self.backend)
         self.coordinator.ingress = self.ingress
 
@@ -58,6 +60,7 @@ class Controller:
             "projects": {"op"},
             "project_detail": {"op", "project_id"},
             "project_rename": {"op", "project_id", "name"},
+            "source_review": {"op", "project_id"},
             "repository_status": {"op", "project_id", "repository_id"},
             "repository_update": {"op", "project_id", "repository_id", "expected_head"},
             "compose_read": {"op", "project_id"},
@@ -115,12 +118,15 @@ class Controller:
                     {"id": item.id, "name": item.name, "relative_path": item.relative_path}
                     for item in repositories
                 ],
+                "linked_source": self._has_linked_source(identifier),
                 "applications": [dict(row) for row in apps],
                 "tasks": [dict(row) for row in tasks],
             }
         if operation == "project_rename":
             entry = self.registry.rename(request["project_id"], request["name"])
             return {"id": entry.id, "slug": entry.slug, "name": entry.name}
+        if operation == "source_review":
+            return self.source_review.review(request["project_id"])
         if operation == "repository_status":
             return self.repositories.status(request["project_id"], request["repository_id"])
         if operation == "repository_update":
@@ -184,6 +190,12 @@ class Controller:
                 raise ProtocolError("Job does not belong to requested project")
             return job
         raise ProtocolError("Unknown operation")
+
+    def _has_linked_source(self, identifier: str) -> bool:
+        with self.registry.database.transaction() as con:
+            return con.execute(
+                "SELECT 1 FROM project_sources WHERE project_id=?", (identifier,),
+            ).fetchone() is not None
 
     @staticmethod
     def _public_status(state: dict) -> dict:

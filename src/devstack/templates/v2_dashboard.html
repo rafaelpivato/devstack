@@ -78,6 +78,7 @@
   {% endif %}
   <section class="details">
     <h3>Repositories</h3>
+    {% if detail.linked_source %}<p><a href="{{ url_for('project_source_review', identifier=selected_id) }}">Review Git template changes</a></p>{% endif %}
     {% if detail.repositories %}
     <ul>{% for repo in detail.repositories %}
       <li><strong><a href="{{ url_for('repository_page', identifier=selected_id, repository_id=repo.id) }}">{{ repo.name }}</a></strong> <small>{{ repo.relative_path }}</small></li>
