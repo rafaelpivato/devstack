@@ -12,7 +12,8 @@ if (phase) {
       if (!response.ok) return;
       const current = await response.json();
       const text = phase.querySelector("strong");
-      if (text && text.textContent !== current.phase) {
+      if (text && (text.textContent !== current.phase ||
+          (phase.dataset.activeProject || "") !== (current.project_id || ""))) {
         // Re-render actions using the server's current state.
         window.location.reload();
       }
