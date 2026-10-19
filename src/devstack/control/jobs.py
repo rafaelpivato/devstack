@@ -86,7 +86,7 @@ class JobSupervisor:
                 + "image = " + json.dumps(image) + "\n"
                 + "mode = " + json.dumps("run" if kind == "image" else kind) + "\n"
                 + "network = " + json.dumps(network) + "\n"
-                + "command = " + json.dumps(command) + "\n"
+                + "command = " + json.dumps(command, ensure_ascii=False) + "\n"
             ).encode("utf-8")
             item = _tasks(toml)[0]
         except (ManifestError, TypeError, ValueError, UnicodeError) as exc:
@@ -214,7 +214,9 @@ class JobSupervisor:
         written = 0
         with log_path.open("wb", buffering=0) as output:
             while True:
-                data = proc.stdout.read(4096)
+                # Unbuffered pipe read makes even short flushed output visible
+                # immediately instead of waiting for a 4-KiB buffer to fill.
+                data = os.read(proc.stdout.fileno(), 4096)
                 if not data:
                     break
                 if written < _LOG_LIMIT:
