@@ -18,6 +18,14 @@
   <p>Upstream: {{ repo.upstream or 'none' }}</p>
   <p>Working tree: {{ 'modified' if repo.dirty else 'clean' }}</p>
   <p>Remote tracking: {% if repo.behind is none %}not configured{% else %}{{ repo.ahead }} ahead / {{ repo.behind }} behind (last fetched){% endif %}</p>
+  {% if runtime.phase == 'inactive' %}
+  <form method="get" action="{{ url_for('branch_preview_page', identifier=repo.project_id) }}">
+    <input type="hidden" name="repository_id" value="{{ repo.id }}">
+    <label>Switch this repository to branch
+      <input name="branch" maxlength="200" placeholder="feature/my-work" required></label>
+    <button class="secondary">Preview branch switch</button>
+  </form>
+  {% endif %}
   <p class="hint">Updating fetches origin and fast-forwards only. It never imports .devstack
   templates, edits managed configuration, activates projects or runs workloads.</p>
   {% if runtime.phase == 'inactive' and repo.branch and repo.upstream and repo.upstream.startswith('origin/') and not repo.dirty %}

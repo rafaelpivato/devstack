@@ -71,6 +71,8 @@ class Controller:
             "source_apply": {"op", "project_id", "revision", "selected", "overwrites"},
             "repository_status": {"op", "project_id", "repository_id"},
             "repository_update": {"op", "project_id", "repository_id", "expected_head"},
+            "branch_preview": {"op", "project_id", "branch", "repository_id"},
+            "branch_apply": {"op", "project_id", "branch", "repository_id", "revision"},
             "repository_add_submit": {"op", "project_id", "url", "name", "branch", "request_key"},
             "repository_add_status": {"op", "project_id", "id"},
             "github_ssh_status": {"op"},
@@ -172,6 +174,15 @@ class Controller:
             return {"public_key": generate_key()}
         if operation == "github_ssh_test":
             return {"authenticated_user": test_connection()}
+        if operation == "branch_preview":
+            return self.repositories.branch_preview(
+                request["project_id"], request["branch"], request["repository_id"],
+            )
+        if operation == "branch_apply":
+            return self.repositories.branch_apply(
+                request["project_id"], request["branch"],
+                request["repository_id"], request["revision"],
+            )
         if operation == "repository_status":
             return self.repositories.status(request["project_id"], request["repository_id"])
         if operation == "repository_update":

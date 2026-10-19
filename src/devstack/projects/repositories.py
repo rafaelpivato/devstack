@@ -7,11 +7,27 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import hashlib
+import json
 
 from devstack.domain.models import project_id
 
 
 _HEAD = re.compile(r"[a-f0-9]{40,64}\Z")
+
+
+
+_BRANCH = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,199}\Z")
+
+
+def _branch_name(name: str) -> str:
+    """Accept only conservative Git branch refs, never revspecs or options."""
+    if (not isinstance(name, str) or not _BRANCH.fullmatch(name)
+            or ".." in name or "//" in name or name.endswith((".", "/"))
+            or any(part in ("", ".", "..") or part.endswith(".lock")
+                   for part in name.split("/"))):
+        raise RepositoryGitInvalid("Invalid Git branch name")
+    return name
 
 
 class RepositoryNotFound(LookupError):
@@ -91,6 +107,176 @@ class RepositoryGitService:
             "branch": branch or None, "head": head, "upstream": upstream,
             "dirty": dirty, "ahead": ahead, "behind": behind,
         }
+
+
+    def _source_editable(self) -> None:
+        state = self.coordinator.status()
+        if state["phase"] != "inactive" or state["project_id"] is not None:
+            raise RepositoryGitError("Deactivate the runtime before changing Git branches")
+        self.coordinator._verify_clear()
+
+    @staticmethod
+    def _ref(checkout: Path, ref: str) -> str | None:
+        value = RepositoryGitService._git(
+            checkout, "rev-parse", "--verify", ref + "^{commit}",
+            allow_missing=True,
+        )
+        return value if value and _HEAD.fullmatch(value) else None
+
+    def _origin_default(self, checkout: Path) -> str:
+        """Verify the remote's advertised HEAD rather than assuming main/master."""
+        response = self._git(checkout, "ls-remote", "--symref", "origin", "HEAD")
+        matches = [
+            line.split("\t", 1)[0][len("ref: refs/heads/"):]
+            for line in response.splitlines()
+            if line.startswith("ref: refs/heads/") and line.endswith("\tHEAD")
+        ]
+        if len(matches) != 1:
+            raise RepositoryGitError("Origin does not advertise one default branch")
+        name = _branch_name(matches[0])
+        if self._ref(checkout, "refs/remotes/origin/" + name) is None:
+            raise RepositoryGitError("Origin default branch not fetched")
+        return name
+
+    def _branch_entry(self, identifier: str, repository, requested: str,
+                      *, fetch: bool) -> dict:
+        # Resolve checkout only from registry, never a client-supplied path.
+        _, checkout = self._checkout(identifier, repository.id)
+        before = self.status(identifier, repository.id)
+        if fetch:
+            self._git(checkout, "fetch", "--no-tags", "origin")
+        current = self.status(identifier, repository.id)
+        if (before["head"] != current["head"] or
+                before["branch"] != current["branch"] or
+                before["dirty"] != current["dirty"]):
+            raise RepositoryGitError("Repository changed while inspecting branches")
+        default = self._origin_default(checkout)
+        target = requested if self._ref(
+            checkout, "refs/remotes/origin/" + requested,
+        ) is not None else default
+        remote_head = self._ref(checkout, "refs/remotes/origin/" + target)
+        local_head = self._ref(checkout, "refs/heads/" + target)
+        if remote_head is None:
+            raise RepositoryGitError("Verified target branch is unavailable")
+        return {
+            "repository_id": repository.id,
+            "name": repository.name,
+            "current_branch": current["branch"],
+            "head": current["head"],
+            "dirty": current["dirty"],
+            "default_branch": default,
+            "target_branch": target,
+            "fallback": target != requested,
+            "target_head": local_head or remote_head,
+            "remote_head": remote_head,
+            "local_exists": local_head is not None,
+            "action": ("blocked" if current["dirty"] or not current["branch"]
+                       else "already" if current["branch"] == target else "switch"),
+        }
+
+    @staticmethod
+    def _revision(identifier: str, requested: str, scope: str | None,
+                  entries: list[dict]) -> str:
+        serialized = json.dumps(
+            [identifier, requested, scope, entries],
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(serialized).hexdigest()
+
+    def branch_preview(self, identifier: str, requested: str,
+                       repository_id: str | None = None) -> dict:
+        project_id(identifier)
+        _branch_name(requested)
+        if repository_id is not None:
+            project_id(repository_id)
+        with self.coordinator.locked():
+            self._source_editable()
+            repositories = self.registry.repositories(identifier)
+            if repository_id is not None:
+                repositories = tuple(repo for repo in repositories
+                                     if repo.id == repository_id)
+                if not repositories:
+                    raise RepositoryNotFound("Repository not registered for this project")
+            if not repositories:
+                raise RepositoryGitError("No repositories registered for project")
+            entries = [self._branch_entry(
+                identifier, repo, requested, fetch=True,
+            ) for repo in repositories]
+            return {
+                "project_id": identifier, "requested_branch": requested,
+                "repository_id": repository_id,
+                "entries": entries,
+                "ready": all(row["action"] != "blocked" for row in entries),
+                "revision": self._revision(
+                    identifier, requested, repository_id, entries,
+                ),
+            }
+
+    def branch_apply(self, identifier: str, requested: str,
+                     repository_id: str | None, revision: str) -> dict:
+        project_id(identifier)
+        _branch_name(requested)
+        if repository_id is not None:
+            project_id(repository_id)
+        if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{64}", revision):
+            raise RepositoryGitInvalid("Expected reviewed branch revision")
+        with self.coordinator.locked():
+            self._source_editable()
+            repositories = self.registry.repositories(identifier)
+            if repository_id is not None:
+                repositories = tuple(repo for repo in repositories
+                                     if repo.id == repository_id)
+                if not repositories:
+                    raise RepositoryNotFound("Repository not registered for this project")
+            if not repositories:
+                raise RepositoryGitError("No repositories registered for project")
+            # Re-check every repo before changing *any*. No fetch here:
+            # the preview pins remote-tracking refs and local worktree state,
+            # and the revision covers all inputs.
+            entries = [self._branch_entry(
+                identifier, repo, requested, fetch=False,
+            ) for repo in repositories]
+            if self._revision(identifier, requested, repository_id, entries) != revision:
+                raise RepositoryGitError("Branch preview is stale; review again")
+            if any(row["action"] == "blocked" for row in entries):
+                raise RepositoryGitError("A repository has local changes or detached HEAD")
+
+            results = []
+            for row in entries:
+                try:
+                    if row["action"] == "switch":
+                        _, checkout = self._checkout(identifier, row["repository_id"])
+                        target = row["target_branch"]
+                        if row["local_exists"]:
+                            self._git(checkout, "switch", "--", target)
+                        else:
+                            self._git(
+                                checkout, "switch", "--track", "-c", target,
+                                "origin/" + target,
+                            )
+                    after = self.status(identifier, row["repository_id"])
+                    if after["branch"] != row["target_branch"]:
+                        raise RepositoryGitError("Git did not reach reviewed branch")
+                    results.append({
+                        "repository_id": row["repository_id"], "name": row["name"],
+                        "target_branch": row["target_branch"],
+                        "fallback": row["fallback"], "status": "succeeded",
+                        "head": after["head"],
+                    })
+                except RepositoryGitError:
+                    # Already-completed repos remain switched; never reset or
+                    # attempt an unsafe rollback. Return per-repo partial
+                    # results so the operator can inspect and re-preview.
+                    results.append({
+                        "repository_id": row["repository_id"], "name": row["name"],
+                        "target_branch": row["target_branch"],
+                        "fallback": row["fallback"], "status": "failed",
+                    })
+                    break
+            return {"project_id": identifier, "requested_branch": requested,
+                    "results": results,
+                    "complete": len(results) == len(entries)
+                    and all(row["status"] == "succeeded" for row in results)}
 
     def update(self, identifier: str, repository_id: str, expected_head: str) -> dict:
         if not isinstance(expected_head, str) or not _HEAD.fullmatch(expected_head):

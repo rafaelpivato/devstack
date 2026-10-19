@@ -44,7 +44,9 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def call(op: str, **fields):
         if transport is not None:
             return transport(op, **fields)
-        timeout = 210 if op == "job_cancel" else (60 if op == "github_ssh_test" else 30)
+        timeout = (240 if op in ("branch_preview", "branch_apply")
+                   else 210 if op == "job_cancel"
+                   else 60 if op == "github_ssh_test" else 30)
         return send(Path(app.config["CONTROLLER_SOCKET"]), op,
                     timeout=timeout, **fields)
 
@@ -242,6 +244,33 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         except (ControllerUnavailable, ControllerRejected) as exc:
             flash(problem(exc)[1], "error")
         return redirect(url_for("project_source_review", identifier=identifier), code=303)
+
+    @app.get("/projects/<identifier>/git/branch-preview")
+    def branch_preview_page(identifier):
+        branch = request.args.get("branch", "")
+        repository_id = request.args.get("repository_id") or None
+        if len(branch) > 200:
+            abort(400)
+        try:
+            review = call("branch_preview", project_id=identifier,
+                          branch=branch, repository_id=repository_id)
+            return render_template("v2_branch_review.html", review=review,
+                                   csrf=csrf())
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/projects/<identifier>/git/branch-apply")
+    def branch_apply_page(identifier):
+        try:
+            result = call("branch_apply", project_id=identifier,
+                          branch=field("branch"),
+                          repository_id=request.form.get("repository_id") or None,
+                          revision=field("revision"))
+            return render_template("v2_branch_result.html", result=result,
+                                   identifier=identifier)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to(identifier)
 
     @app.get("/projects/<identifier>/repositories/<repository_id>")
     def repository_page(identifier, repository_id):
@@ -590,6 +619,31 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(400)
         try:
             return jsonify(call("source_apply", project_id=identifier, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/git/branch-preview")
+    def branch_preview_api(identifier):
+        branch = request.args.get("branch", "")
+        if len(branch) > 200:
+            abort(400)
+        try:
+            return jsonify(call("branch_preview", project_id=identifier,
+                                branch=branch,
+                                repository_id=request.args.get("repository_id") or None))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/git/branch-apply")
+    def branch_apply_api(identifier):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if (not isinstance(payload, dict) or
+                set(payload) != {"branch", "repository_id", "revision"}):
+            abort(400)
+        try:
+            return jsonify(call("branch_apply", project_id=identifier, **payload))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
