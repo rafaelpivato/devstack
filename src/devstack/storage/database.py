@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -13,7 +13,9 @@ _SCHEMA = (
            id TEXT PRIMARY KEY,
            slug TEXT NOT NULL UNIQUE,
            name TEXT NOT NULL,
-           created_at INTEGER NOT NULL)""",
+           created_at INTEGER NOT NULL,
+           status TEXT NOT NULL DEFAULT 'ready'
+             CHECK(status IN ('ready','pending')))""",
     """CREATE TABLE IF NOT EXISTS repositories (
            id TEXT PRIMARY KEY,
            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -24,6 +26,26 @@ _SCHEMA = (
            UNIQUE(project_id, name),
            UNIQUE(project_id, relative_path))""",
     "CREATE INDEX IF NOT EXISTS repositories_by_project ON repositories(project_id)",
+    """CREATE TABLE IF NOT EXISTS project_sources (
+           project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+           repository_id TEXT NOT NULL REFERENCES repositories(id),
+           subdirectory TEXT NOT NULL,
+           branch TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS applications (
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           name TEXT NOT NULL,
+           service TEXT NOT NULL,
+           port INTEGER,
+           PRIMARY KEY(project_id,name))""",
+    """CREATE TABLE IF NOT EXISTS tasks (
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           name TEXT NOT NULL,
+           service TEXT NOT NULL,
+           mode TEXT NOT NULL,
+           image TEXT NOT NULL,
+           network TEXT NOT NULL,
+           argv_json TEXT NOT NULL,
+           PRIMARY KEY(project_id,name))""",
 )
 
 
@@ -57,6 +79,9 @@ class Database:
                 ).fetchone()
                 if row is None or row[0] != SCHEMA_VERSION:
                     raise StorageError("Unsupported database schema version")
+                if not {"projects", "repositories", "project_sources",
+                        "applications", "tasks"}.issubset(existing):
+                    raise StorageError("Database schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)
             if not existing:
