@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from devstack.domain.models import project_id
+from devstack.storage.projects import ProjectNotFound
 
 _ROUTE = re.compile(r"[a-z][a-z0-9_-]{0,62}\Z")
 _SERVICE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
@@ -251,7 +252,7 @@ class _WebhookHandler(BaseHTTPRequestHandler):
                 code, body, kind = self.server.ingress.forward(
                     identifier, route, data, dict(self.headers.items()),
                 )
-            except WebhookNotFound:
+            except (WebhookNotFound, ProjectNotFound):
                 self.respond(404)
             except WebhookInactive:
                 self.respond(503)
