@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -83,6 +83,10 @@ _SCHEMA = (
            project_id TEXT NOT NULL REFERENCES projects(id),
            generation TEXT NOT NULL,
            started_ns INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS source_sync_pending (
+           project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE RESTRICT,
+           payload TEXT NOT NULL,
+           started_ns INTEGER NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS tasks (
            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
            name TEXT NOT NULL,
@@ -126,7 +130,7 @@ class Database:
                 if row is None or row[0] != SCHEMA_VERSION:
                     raise StorageError("Unsupported database schema version")
                 if not {"projects", "repositories", "project_sources",
-                        "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases"}.issubset(existing):
+                        "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending"}.issubset(existing):
                     raise StorageError("Database schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)

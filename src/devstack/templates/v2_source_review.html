@@ -13,20 +13,39 @@
 <main class="card">
   <p>Compare the registered Git source with the original import baseline and
      this project's current managed applications, tasks, and Compose settings.</p>
-  <p class="hint">Review-only in this stage: no source code, managed configuration,
-  containers or other projects are modified. Applying changes will be added
-  separately with explicit selection and revision checks.</p>
+  <p class="hint">Applying changes edits only the selected managed definitions;
+  the Git checkout and other projects remain untouched. Runtime must be inactive.
+  Locally customized definitions require a separate overwrite confirmation.</p>
   {% if review.changes %}
-  <ul>
+  <form method="post" action="{{ url_for('project_source_apply_form', identifier=review.project_id) }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="hidden" name="revision" value="{{ review.revision }}">
+    <ul>
     {% for change in review.changes %}
     <li>
+      {% if change.selectable %}
+      <label><input type="checkbox" name="selected" value="{{ change.id }}">
+      <strong>{{ change.kind }} · {{ change.name }}</strong></label>
+      {% else %}
       <strong>{{ change.kind }} · {{ change.name }}</strong>
+      {% endif %}
       <span>{{ change.action.replace('_',' ') }}</span>
-      {% if change.locally_modified %}<strong>Local customization detected</strong>{% endif %}
+      {% if change.locally_modified %}
+        <strong>Local customization detected</strong>
+        {% if change.selectable %}<label>
+          <input type="checkbox" name="overwrites" value="{{ change.id }}">
+          Confirm replacing my local customization</label>{% endif %}
+      {% endif %}
       {% if not change.selectable %}<small>No automatic deletion</small>{% endif %}
     </li>
     {% endfor %}
-  </ul>
+    </ul>
+    {% if runtime.phase == 'inactive' %}
+    <button type="submit">Apply selected changes</button>
+    {% else %}
+    <p>Deactivate the runtime before applying changes.</p>
+    {% endif %}
+  </form>
   {% else %}
   <p>No source configuration changes pending.</p>
   {% endif %}

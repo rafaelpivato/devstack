@@ -61,6 +61,7 @@ class Controller:
             "project_detail": {"op", "project_id"},
             "project_rename": {"op", "project_id", "name"},
             "source_review": {"op", "project_id"},
+            "source_apply": {"op", "project_id", "revision", "selected", "overwrites"},
             "repository_status": {"op", "project_id", "repository_id"},
             "repository_update": {"op", "project_id", "repository_id", "expected_head"},
             "compose_read": {"op", "project_id"},
@@ -83,6 +84,13 @@ class Controller:
         }
         if operation not in fields or set(request) != fields[operation]:
             raise ProtocolError("Unexpected or missing controller parameters")
+        # A committed but incompletely published sync is a global barrier.
+        # The operator can explicitly request reconciliation/replay.
+        if operation != "reconcile":
+            with self.registry.database.transaction() as con:
+                if con.execute("SELECT 1 FROM source_sync_pending LIMIT 1").fetchone():
+                    from devstack.projects.source_sync import SourceSyncConflict
+                    raise SourceSyncConflict("Source sync publication is pending recovery")
         if operation == "health":
             state = self.coordinator.status()
             # A successful Unix-socket ping alone is not sufficient to
@@ -127,6 +135,11 @@ class Controller:
             return {"id": entry.id, "slug": entry.slug, "name": entry.name}
         if operation == "source_review":
             return self.source_review.review(request["project_id"])
+        if operation == "source_apply":
+            return self.source_review.apply(
+                request["project_id"], request["revision"],
+                request["selected"], request["overwrites"],
+            )
         if operation == "repository_status":
             return self.repositories.status(request["project_id"], request["repository_id"])
         if operation == "repository_update":
@@ -175,7 +188,11 @@ class Controller:
         if operation == "deactivate":
             return self._public_status(self.coordinator.deactivate())
         if operation == "reconcile":
-            return self._public_status(self.coordinator.reconcile())
+            # Reconcile actual execution before replaying file snapshots, then
+            # verify absence of both owned workloads and unfinished journals.
+            self.coordinator.reconcile()
+            self.source_review.recover_pending()
+            return self._public_status(self.coordinator.status())
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
         if operation == "compose":
@@ -317,8 +334,10 @@ def main():
             pass
         try:
             controller.coordinator.reconcile()
+            controller.source_review.recover_pending()
         except Exception:
-            # Keep the API available in ERROR so an operator can recover.
+            # A pending durable journal remains as a fail-closed barrier;
+            # explicit reconcile retries runtime cleanup and replay.
             pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
             with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
