@@ -182,3 +182,45 @@ class DockerBackend:
             raise DockerControlError("No running project containers after activation")
         if any(x["generation"] != generation for x in items):
             raise DockerControlError("Project container generation mismatch")
+
+    def task_command(self, identifier: str, task: dict) -> list[str]:
+        """Translate a registered task to a fixed Docker argv without a host shell."""
+        argv = task["argv"]
+        if (not isinstance(argv, list) or not argv
+                or any(not isinstance(arg, str) or not arg for arg in argv)):
+            raise DockerControlError("Invalid saved task command")
+        image = task["image"]
+        if image:
+            if task["mode"] != "run":
+                raise DockerControlError("Standalone tasks must use run")
+            state_network = task["network"]
+            if state_network == "none":
+                network = "none"
+            elif state_network == "project":
+                output = _execute([
+                    "docker", "network", "ls",
+                    "--filter", "label=com.docker.compose.project=" + compose_id(identifier),
+                    "--filter", "label=com.docker.compose.network=default",
+                    "--format", "{{.ID}}",
+                ], 30).splitlines()
+                if len(output) != 1:
+                    raise DockerControlError("Project default network is unavailable")
+                network = output[0]
+            else:
+                raise DockerControlError("Invalid task network")
+            # Job IDs and generation are not accepted from the caller here.
+            # The next stage will ensure every disposable image task carries
+            # an exact controller-generated name and activation-generation label.
+            raise DockerControlError(
+                "Standalone image execution requires generation-scoped launch metadata"
+            )
+        service = task["service"]
+        if not _SERVICE.fullmatch(service):
+            raise DockerControlError("Invalid saved task service")
+        mode = task["mode"]
+        if mode == "exec":
+            return self.command(identifier) + ["exec", "-T", service, *argv]
+        if mode == "run":
+            return self.command(identifier) + ["run", "--rm", "--no-deps", "-T",
+                                               service, *argv]
+        raise DockerControlError("Invalid saved task mode")
