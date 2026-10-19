@@ -423,6 +423,53 @@ jobs:
                                    "echo persistent > /var/lib/postgresql/data/devstack-check"],
                       check=True, timeout=30,
                   )
+                  # AC-17: multiple long-running commands do not block each other.
+                  # Independent cancellation must preserve other jobs and Compose services.
+                  def running_container(job_id):
+                      inspection = subprocess.run(
+                          ["docker", "inspect", "--type", "container", "--",
+                           "devstack-task-" + job_id],
+                          text=True, capture_output=True, timeout=20,
+                      )
+                      return inspection.returncode == 0
+
+                  first_long = jobs.submit_adhoc(
+                      a.id, "image", "", "python:3.12-alpine", "none",
+                      ["python", "-c", "import time;time.sleep(120)"],
+                  )
+                  second_long = jobs.submit_adhoc(
+                      a.id, "image", "", "python:3.12-alpine", "none",
+                      ["python", "-c", "import time;time.sleep(120)"],
+                  )
+                  deadline = time.monotonic() + 70
+                  while time.monotonic() < deadline:
+                      if (jobs.get(first_long)["status"] == "running"
+                              and jobs.get(second_long)["status"] == "running"
+                              and running_container(first_long)
+                              and running_container(second_long)):
+                          break
+                      time.sleep(.4)
+                  assert running_container(first_long) and running_container(second_long), (
+                      jobs.get(first_long), jobs.get(second_long)
+                  )
+                  fast = jobs.submit_adhoc(
+                      a.id, "image", "", "python:3.12-alpine", "none",
+                      ["python", "-c", "print('third job completed')"],
+                  )
+                  deadline = time.monotonic() + 30
+                  while time.monotonic() < deadline and jobs.get(fast)["status"] in ("queued","running"):
+                      time.sleep(.2)
+                  assert jobs.get(fast)["status"] == "succeeded", jobs.get(fast)
+                  assert jobs.get(first_long)["status"] == "running"
+                  assert jobs.cancel(a.id, second_long)["status"] == "cancelled"
+                  assert not running_container(second_long)
+                  assert jobs.get(first_long)["status"] == "running"
+                  assert engine.status()["phase"] == "active"
+                  assert webhook(a.id) == (200, b'{"hello":"webhook"}')
+                  assert jobs.cancel(a.id, first_long)["status"] == "cancelled"
+                  assert not running_container(first_long)
+                  assert backend.verify(a.id, first["generation"]) is None
+
                   # Supervise an actual long-lived disposable Docker image task.
                   with db.transaction(write=True) as con:
                       con.execute(

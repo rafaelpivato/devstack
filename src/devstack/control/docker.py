@@ -222,6 +222,7 @@ class DockerBackend:
                 "docker", "run", "--rm", "--name", "devstack-task-" + job_id,
                 "--label", "devstack.project_id=" + identifier,
                 "--label", "devstack.generation=" + generation,
+                "--label", "devstack.job_id=" + job_id,
                 "--network", network,
                 "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                 image, *argv,
@@ -233,9 +234,76 @@ class DockerBackend:
         if mode == "exec":
             return self.command(identifier) + ["exec", "-T", service, *argv]
         if mode == "run":
-            return self.command(identifier) + ["run", "--rm", "--no-deps", "-T",
-                                               service, *argv]
+            from uuid import UUID
+            try:
+                UUID(job_id)
+            except ValueError as exc:
+                raise DockerControlError("Invalid job UUID") from exc
+            if not re.fullmatch(r"[0-9a-f]{32}", generation):
+                raise DockerControlError("Invalid project generation")
+            return self.command(identifier) + [
+                "run", "--rm", "--no-deps", "-T",
+                "--name", "devstack-task-" + job_id,
+                "--label", "devstack.project_id=" + identifier,
+                "--label", "devstack.generation=" + generation,
+                "--label", "devstack.job_id=" + job_id,
+                service, *argv,
+            ]
         raise DockerControlError("Invalid saved task mode")
+
+    def stop_job(self, identifier: str, generation: str, job_id: str) -> None:
+        """Stop only a job-owned disposable container; never stop a service.
+
+        The Docker CLI process may disappear before the container stops.
+        Inspect labels and verify removal of the specifically owned container.
+        """
+        from uuid import UUID
+        project_id(identifier)
+        try:
+            UUID(job_id)
+        except ValueError as exc:
+            raise DockerControlError("Invalid job UUID") from exc
+        if not re.fullmatch(r"[0-9a-f]{32}", generation):
+            raise DockerControlError("Invalid project generation")
+        name = "devstack-task-" + job_id
+
+        def inspect():
+            try:
+                result = subprocess.run(
+                    ["docker", "inspect", "--type", "container", "--", name],
+                    capture_output=True, text=True, timeout=20, check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise DockerControlError("Cannot inspect job container") from exc
+            if result.returncode != 0:
+                # Distinguish a missing container from Docker daemon errors.
+                error = result.stderr.lower()
+                if "no such object" in error or "no such container" in error:
+                    return None
+                raise DockerControlError("Docker job inspection failed")
+            try:
+                records = json.loads(result.stdout)
+                if len(records) != 1:
+                    raise ValueError("ambiguous")
+                return records[0]
+            except (ValueError, TypeError, KeyError) as exc:
+                raise DockerControlError("Malformed job container inspection") from exc
+
+        record = inspect()
+        if record is None:
+            return
+        labels = record.get("Config", {}).get("Labels") or {}
+        if (record.get("Name") != "/" + name
+                or labels.get("devstack.project_id") != identifier
+                or labels.get("devstack.generation") != generation
+                or labels.get("devstack.job_id") != job_id):
+            raise DockerControlError("Refusing to stop a container not owned by this job")
+        container_id = record.get("Id")
+        if not isinstance(container_id, str) or not re.fullmatch(r"[a-f0-9]{64}", container_id):
+            raise DockerControlError("Cannot verify Docker container identity")
+        _execute(["docker", "rm", "-f", "--", container_id], 30)
+        if inspect() is not None:
+            raise DockerControlError("Job container termination not verified")
 
     def webhook_target(self, identifier: str, generation: str,
                        service: str) -> str:

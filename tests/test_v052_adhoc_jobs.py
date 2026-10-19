@@ -23,6 +23,7 @@ class Backend:
         self.containers = []
         self.invocations = []
         self.fail_stop = False
+        self.stopped_jobs = []
 
     def owned(self):
         return list(self.containers)
@@ -43,6 +44,11 @@ class Backend:
         if self.fail_stop:
             raise RuntimeError("Cannot stop owned container")
         self.containers = []
+
+    def stop_job(self, identifier, generation, job_id):
+        if self.fail_stop:
+            raise RuntimeError("Job container could not be verified stopped")
+        self.stopped_jobs.append((identifier, generation, job_id))
 
     def task_command(self, identifier, task, generation, job_id):
         self.invocations.append((identifier, task, generation, job_id))
@@ -84,7 +90,7 @@ class JobTests(unittest.TestCase):
         with self.browser.session_transaction() as session:
             self.csrf = session["_csrf"]
 
-    def _submit(self, identifier=None, *, kind="exec", service="web", image="",
+    def _submit(self, identifier=None, *, kind="run", service="web", image="",
                 network="none", script="print('hello from container')"):
         if kind == "image":
             service, image = "", "python:3.12-alpine"
@@ -104,8 +110,8 @@ class JobTests(unittest.TestCase):
             time.sleep(.02)
         self.fail("job did not transition within timeout")
 
-    def test_compose_exec_and_run_and_standalone_image_use_one_supervisor(self):
-        for kind in ("exec", "run", "image"):
+    def test_compose_run_and_standalone_image_use_one_supervisor(self):
+        for kind in ("run", "image"):
             with self.subTest(kind=kind):
                 ident = self._submit(kind=kind)
                 self.assertEqual(self._wait(ident)["status"], "succeeded")
@@ -117,7 +123,7 @@ class JobTests(unittest.TestCase):
                 self.assertEqual(self.backend.invocations[-1][1]["mode"],
                                  "run" if kind == "image" else kind)
         history = self.controller.jobs.list(self.a)["jobs"]
-        self.assertEqual(len(history), 3)
+        self.assertEqual(len(history), 2)
         self.assertEqual(self.controller.jobs.list(self.b)["jobs"], [])
 
     def test_invalid_argv_and_modes_rejected_before_process_admission(self):
@@ -203,17 +209,19 @@ class JobTests(unittest.TestCase):
         self.assertEqual(self._wait(job_id)["status"], "succeeded")
         self.assertIn("café", self.controller.jobs.logs(self.a, job_id)["text"])
 
-    def test_global_admission_rejects_second_job_until_first_finishes(self):
+    def test_concurrent_commands_run_and_finish_independently(self):
         first = self._submit(script="import time;time.sleep(60)")
         self._wait(first, "running")
-        with self.assertRaises(JobError):
-            self._submit(kind="run")
-        self.assertEqual(len(self.controller.jobs.list(self.a)["jobs"]), 1)
-        self.controller.jobs.cancel(self.a, first)
-        self.controller.coordinator.activate(self.a)
-        second = self._submit(kind="run")
+        second = self._submit(kind="image", script="print('migration complete')")
         self.assertEqual(self._wait(second)["status"], "succeeded")
-        self.assertNotEqual(first, second)
+        self.assertEqual(self.controller.jobs.get(first)["status"], "running")
+        self.assertEqual(len(self.controller.jobs.list(self.a)["jobs"]), 2)
+        self.controller.jobs.cancel(self.a, first)
+        self.assertEqual(self.controller.jobs.get(first)["status"], "cancelled")
+        self.assertEqual(self.controller.jobs.get(second)["status"], "succeeded")
+        self.assertEqual(self.controller.coordinator.status()["phase"], "active")
+        third = self._submit(script="print('tests complete')")
+        self.assertEqual(self._wait(third)["status"], "succeeded")
 
     def test_cancel_completed_job_does_not_stop_runtime(self):
         job_id = self._submit()
@@ -223,15 +231,21 @@ class JobTests(unittest.TestCase):
         self.assertEqual(self.controller.coordinator.status()["phase"], "active")
         self.assertTrue(self.backend.owned())
 
-    def test_cancel_running_adhoc_fences_all_execution_and_deactivates(self):
-        job_id = self._submit(script="import time; time.sleep(60)")
-        self._wait(job_id, "running")
-        result = self.controller.jobs.cancel(self.a, job_id)
-        self.assertEqual(result["status"], "cancelled")
-        self.assertEqual(self.controller.coordinator.status()["phase"], "inactive")
+    def test_cancel_one_command_keeps_other_commands_and_service_running(self):
+        ngrok = self._submit(script="import time;time.sleep(60)")
+        tests = self._submit(script="import time;time.sleep(60)")
+        self._wait(ngrok, "running")
+        self._wait(tests, "running")
+        generation = self.controller.coordinator.status()["generation"]
+        cancelled = self.controller.jobs.cancel(self.a, tests)
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(self.controller.jobs.get(ngrok)["status"], "running")
+        self.assertEqual(self.controller.coordinator.status()["phase"], "active")
+        self.assertTrue(self.backend.owned())
+        self.assertEqual(self.backend.stopped_jobs, [(self.a, generation, tests)])
+        self.controller.coordinator.deactivate()
+        self.assertEqual(self.controller.jobs.get(ngrok)["status"], "cancelled")
         self.assertFalse(self.backend.owned())
-        with self.assertRaises(Exception):
-            self._submit()
         self.controller.coordinator.activate(self.b)
         self.assertEqual(self.controller.coordinator.status()["project_id"], self.b)
         self.controller.coordinator.deactivate()
@@ -247,6 +261,31 @@ class JobTests(unittest.TestCase):
             self.controller.coordinator.activate(self.b)
         self.backend.fail_stop = False
         self.controller.coordinator.reconcile()
+
+    def test_long_running_is_not_automatically_timed_out(self):
+        long_command = self._submit(script="import time;time.sleep(60)")
+        self._wait(long_command, "running")
+        # A 60-second command would outlive our typical unit test execution;
+        # the new worker has no 900-second timeout branch.
+        from devstack.control import jobs as job_module
+        import inspect
+        self.assertNotIn("wait(timeout=900)", inspect.getsource(job_module.JobSupervisor._worker))
+        self.assertEqual(self.controller.jobs.get(long_command)["status"], "running")
+        self.controller.jobs.cancel(self.a, long_command)
+
+    def test_multiple_commands_drain_before_project_switch(self):
+        a = self._submit(script="import time;time.sleep(60)")
+        b = self._submit(script="import time;time.sleep(60)")
+        self._wait(a, "running")
+        self._wait(b, "running")
+        switched = self.controller.coordinator.switch(self.b)
+        self.assertEqual(switched["project_id"], self.b)
+        self.assertEqual(self.controller.jobs.get(a)["status"], "cancelled")
+        self.assertEqual(self.controller.jobs.get(b)["status"], "cancelled")
+        self.assertFalse(any(x["project"] == self.a for x in self.backend.owned()))
+        with self.assertRaises(Exception):
+            self._submit(identifier=self.a)
+        self.controller.coordinator.deactivate()
 
     def test_http_history_logs_csrf_and_no_raw_host_proxy(self):
         job_id = self._submit()
@@ -303,7 +342,7 @@ class JobTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()["status"], "cancelled")
-        self.assertEqual(self.controller.coordinator.status()["phase"], "inactive")
+        self.assertEqual(self.controller.coordinator.status()["phase"], "active")
 
 
 if __name__ == "__main__":

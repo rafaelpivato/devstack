@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -52,8 +52,9 @@ _SCHEMA = (
            generation TEXT NOT NULL,
            kind TEXT NOT NULL CHECK(kind IN ('task','compose','adhoc')),
            status TEXT NOT NULL CHECK(status IN
-             ('queued','running','succeeded','failed','cancelled')),
+             ('queued','running','cancelling','succeeded','failed','cancelled')),
            action TEXT NOT NULL,
+           cancel_policy TEXT NOT NULL DEFAULT 'project' CHECK(cancel_policy IN ('independent','project')),
            started_ns INTEGER NOT NULL,
            finished_ns INTEGER,
            exit_code INTEGER)""",
