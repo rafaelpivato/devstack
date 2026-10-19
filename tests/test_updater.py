@@ -76,11 +76,16 @@ class DeploymentTests(unittest.TestCase):
                 updater.activate("v1.0.1", "rafaelpivato/devstack", root, state)
             self.assertEqual(updater.current_release(root / "current"), old)
             self.assertTrue((state / "failed-v1.0.1").exists())
-            self.assertEqual(process.call_count, 2)
-            self.assertIn(["systemctl", "stop", "devstack-web-v2.service"],
-                          [item.args[0] for item in process.call_args_list])
-            self.assertIn(["systemctl", "stop", "devstack-control.service"],
-                          [item.args[0] for item in process.call_args_list])
+            process.assert_not_called()
+            self.assertEqual(execute.call_count, 10)
+            self.assertEqual(
+                execute.call_args_list[0].args[:3],
+                ("systemctl", "stop", "devstack-web-v2.service"),
+            )
+            self.assertEqual(
+                execute.call_args_list[5].args[:3],
+                ("systemctl", "stop", "devstack-web-v2.service"),
+            )
 
     def test_v051_cannot_be_installed_on_v2_server(self):
         with tempfile.TemporaryDirectory() as d:
