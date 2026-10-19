@@ -198,7 +198,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v2/projects/" + unknown).status_code, 404)
         self.assertEqual(self.client.get("/projects/" + unknown).status_code, 404)
         self.assertEqual(
-            self.api_post("/api/v2/projects/" + unknown + "/activate").status_code, 409
+            self.api_post("/api/v2/projects/" + unknown + "/activate").status_code, 404
         )
         self.assertEqual(self.controller.coordinator.status()["project_id"], a)
 
