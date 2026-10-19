@@ -83,7 +83,9 @@ class SourceReviewService:
         project_id(identifier)
         metadata = self.registry.import_metadata(identifier)
         source = self.provisioner.source_directory(identifier)
-        template = parse_template(source)
+        # Provisioner resolves the validated .devstack folder; the manifest
+        # parser accepts the containing repository/template directory.
+        template = parse_template(source.parent)
         baselines = {
             name: self._baseline(identifier, name)
             for name in ("project.toml", "tasks.toml", "compose.yaml")
