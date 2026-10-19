@@ -676,6 +676,13 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
+    @app.get("/api/v2/projects/<identifier>/private-ports")
+    def private_ports_api(identifier):
+        try:
+            return jsonify(call("private_ports", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
     @app.get("/api/v2/projects/<identifier>/services")
     def services_api(identifier):
         try:

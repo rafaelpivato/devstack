@@ -162,3 +162,66 @@ if (servicesPanel && servicesPanel.dataset.servicesActive === "true") {
   window.setInterval(refreshServices, 8000);
   refreshServices();
 }
+
+const portsPanel = document.querySelector("[data-private-ports-project]");
+if (portsPanel && portsPanel.dataset.privatePortsActive === "true") {
+  const id = portsPanel.dataset.privatePortsProject;
+  const list = document.getElementById("private-ports-list");
+  const status = document.getElementById("private-ports-status");
+  const button = document.getElementById("refresh-private-ports");
+  let busy = false;
+  async function refreshPrivatePorts() {
+    if (document.hidden || busy) return;
+    busy = true;
+    try {
+      const response = await fetch(
+        `/api/v2/projects/${encodeURIComponent(id)}/private-ports`,
+        {credentials: "same-origin", cache: "no-store"}
+      );
+      if (!response.ok) {
+        status.textContent = "Private port information unavailable.";
+        return;
+      }
+      const data = await response.json();
+      list.replaceChildren();
+      if (!data.active) {
+        status.textContent = "This project is no longer active.";
+        return;
+      }
+      if (!data.tailscale_available) {
+        status.textContent = "Tailscale IPv4 is unavailable on the server.";
+        return;
+      }
+      if (!data.ports.length) {
+        status.textContent = "No running Compose services publish TCP ports on the Tailscale IP.";
+        return;
+      }
+      status.textContent = "Available private TCP ports";
+      for (const mapping of data.ports) {
+        const row = document.createElement("li");
+        const label = document.createElement("span");
+        const matches = data.applications.filter(app => app.url === mapping.url
+          && app.service === mapping.service);
+        const appNames = matches.map(app => app.name);
+        label.textContent = (appNames.length ? appNames.join(", ") + " · " : "") +
+          mapping.service + ":" + mapping.container_port +
+          " → " + mapping.host_port + " ";
+        const link = document.createElement("a");
+        link.href = mapping.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = mapping.url;
+        row.append(label, link);
+        list.appendChild(row);
+      }
+    } catch (_) {
+      status.textContent = "Private port information unavailable.";
+    } finally {
+      busy = false;
+    }
+  }
+  button?.addEventListener("click", refreshPrivatePorts);
+  document.addEventListener("visibilitychange", refreshPrivatePorts);
+  window.setInterval(refreshPrivatePorts, 12000);
+  refreshPrivatePorts();
+}
