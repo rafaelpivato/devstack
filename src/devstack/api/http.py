@@ -439,7 +439,13 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
 
     @app.post("/api/v2/projects/<identifier>/source-review/apply")
     def project_source_apply_api(identifier):
-        payload = json_input({"revision", "selected", "overwrites"})
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {
+            "revision", "selected", "overwrites"
+        }:
+            abort(400)
         try:
             return jsonify(call("source_apply", project_id=identifier, **payload))
         except (ControllerUnavailable, ControllerRejected) as exc:
