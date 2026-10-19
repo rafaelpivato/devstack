@@ -241,3 +241,20 @@ class ProjectRegistry:
                 "argv": tuple(json.loads(row["argv_json"])),
             } for row in tasks),
         }
+
+    def reserve_empty(self, identifier: str, project_slug: str, name: str) -> Project:
+        """Reserve a blank project; its workspace is published before visibility."""
+        project_id(identifier)
+        slug(project_slug)
+        display_name(name)
+        entry = Project(identifier, project_slug, name, time.time_ns())
+        try:
+            with self.database.transaction(write=True) as con:
+                con.execute(
+                    "INSERT INTO projects(id,slug,name,created_at,status)"
+                    " VALUES(?,?,?,?,'pending')",
+                    (entry.id, entry.slug, entry.name, entry.created_at),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ProjectConflict("Project slug already registered") from exc
+        return entry
