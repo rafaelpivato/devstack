@@ -141,6 +141,7 @@
   <p><a class="example-link" href="{{ url_for('index', example='smoke') }}#add-project">Use Smoke Test example</a></p>
   <form class="stacked" method="post" action="{{ url_for('import_project') }}">
     <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <input type="hidden" name="request_key" value="{{ import_key }}">
     <label for="import-url">GitHub repository or tree URL</label>
     <input type="url" id="import-url" name="url" maxlength="2048" required
            placeholder="https://github.com/owner/repository/tree/main/path"
