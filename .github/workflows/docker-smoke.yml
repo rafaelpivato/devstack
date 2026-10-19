@@ -154,6 +154,52 @@ jobs:
           assert Path(args[args.index("-f") + 1]).is_file()
           print("Smoke Test imported from public HTTPS GitHub without SSH identity")
           PY
+      - name: Verify two independent v0.5.2 GitHub project imports
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
+          from pathlib import Path
+          import json
+          import subprocess
+          import tempfile
+          from devstack.storage.database import Database
+          from devstack.storage.projects import ProjectRegistry
+          from devstack.projects.workspaces import WorkspaceStore
+          from devstack.projects.service import ProjectProvisioner
+
+          url = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+          with tempfile.TemporaryDirectory() as folder:
+              root = Path(folder)
+              registry = ProjectRegistry(Database(root / "state" / "control.sqlite3"))
+              store = WorkspaceStore(root / "workspaces")
+              provisioner = ProjectProvisioner(registry, store)
+              a = provisioner.import_github(url, "smoke-a", "Smoke A")
+              b = provisioner.import_github(url, "smoke-b", "Smoke B")
+              assert {p.id for p in registry.list()} == {a.id, b.id}
+              assert a.id != b.id
+              for project in (a, b):
+                  meta = registry.import_metadata(project.id)
+                  assert meta["branch"] == "main"
+                  assert meta["subdirectory"] == "examples/smoke"
+                  assert [app["name"] for app in meta["applications"]] == ["Web"]
+                  assert any(task["name"] == "tests" for task in meta["tasks"])
+                  template = provisioner.source_directory(project.id)
+                  compose = store.path(project.id) / "managed" / "compose.yaml"
+                  result = subprocess.run(
+                      ["docker", "compose", "-p", "devstack-" + project.id,
+                       "--project-directory", str(template),
+                       "-f", str(compose), "config", "--format", "json"],
+                      text=True, capture_output=True, check=True, timeout=40,
+                  )
+                  actual = Path(json.loads(result.stdout)["services"]["web"]["build"]["context"])
+                  assert actual == template.parent / "app", (actual, template)
+              assert not list(store.base.glob(".pending-*"))
+              assert not list(subprocess.run(
+                  ["docker", "ps", "--all", "--filter", "name=devstack-v052-",
+                   "--format", "{{.ID}}"], check=True, text=True, capture_output=True
+              ).stdout.splitlines()), "Import must not start runtime containers"
+              print("Two independent v0.5.2 project imports completed without activation.")
+          PY
       - name: Verify explicit webhook forwarding to actual Compose container
         run: |
           set -euo pipefail
