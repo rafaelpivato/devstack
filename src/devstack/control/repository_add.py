@@ -18,7 +18,7 @@ from uuid import uuid4
 from devstack.adapters.github import GitHubSource, parse_github_url
 from devstack.domain.models import project_id, repo_name
 
-_KEY = re.compile(r"[0-9a-f]{32}\\Z")
+_KEY = re.compile(r"[0-9a-f]{32}\Z")
 
 
 class RepositoryAddConflict(RuntimeError):
