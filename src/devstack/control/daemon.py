@@ -41,7 +41,7 @@ class Controller:
         self.coordinator = Coordinator(database, self.registry, self.backend)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
-        self.configuration = ConfigurationService(self.registry, workspaces, self.backend, self.coordinator)
+        self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
 
     def handle(self, request: dict) -> dict:
         if not isinstance(request, dict) or not isinstance(request.get("op"), str):
