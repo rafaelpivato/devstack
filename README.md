@@ -1,6 +1,6 @@
 # DevStack
 
-**v0.5.2 release candidate — not published.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**v0.5.2.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 
@@ -22,9 +22,9 @@ Check for published stable DevStack releases or request **Update now** through a
 
 ## Installation and release status
 
-The upcoming v0.5.2 cutover **requires a clean Ubuntu host**. No automatic v0.5.1 migration or old singleton daemon is supported. The trusted `scripts/install.sh` installs the latest **published v0.5.2-or-later release**; it intentionally refuses installation while 0.5.1 remains the latest published release. Do not attempt to deploy the integration branch as a production release.
+The v0.5.2 cutover **requires a clean Ubuntu host**. No automatic v0.5.1 migration or old singleton daemon is supported. The trusted `scripts/install.sh` installs the latest **published v0.5.2-or-later release**, and refuses a pre-v0.5.2 release. Do not deploy an unverified feature or integration branch as a production release.
 
-Development branch: `integration/v052-control-plane`. The release is tracked in [draft PR #40](https://github.com/rafaelpivato/devstack/pull/40); it is **not yet merged to main or published**.
+For the breaking changes and installation notes, see [v0.5.2 release notes](docs/releases/v0.5.2.md) and [acceptance evidence](docs/v0.5.2-acceptance-evidence.md).
 
 Architecture and acceptance requirements: [ADR-0001](docs/adr/0001-multiple-projects-single-runtime.md) and [v0.5.2 acceptance plan](docs/v0.5.2-acceptance-plan.md).
 
