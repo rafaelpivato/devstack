@@ -132,7 +132,7 @@ class AutoUpdateTests(unittest.TestCase):
     def test_current_patch_release_version(self):
         import tomllib
         version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-        self.assertEqual(version, "0.5.1")
+        self.assertEqual(version, "0.5.2")
 
 
 if __name__ == "__main__":
