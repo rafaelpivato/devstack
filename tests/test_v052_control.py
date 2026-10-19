@@ -208,23 +208,35 @@ class JobAndSocketTests(CoordinatorTests):
         self.assertEqual(self.engine.status()["project_id"], self.b.id)
 
     def test_stale_queued_job_cannot_run_after_reactivation(self):
+        from unittest.mock import patch
+        gate = threading.Event()
+        original = self.jobs._worker
+
+        def gated_worker(*args):
+            gate.wait(5)
+            return original(*args)
+
         self.engine.reconcile()
-        a = self.engine.activate(self.a.id)
-        # A worker blocked on the global lock until after deactivation is
-        # cancelled and cannot be replayed for a new activation generation.
-        with self.engine.locked():
-            job_id = self.jobs.submit_task if False else None
-            with self.db.transaction(write=True) as con:
-                con.execute(
-                    "INSERT INTO jobs(id,project_id,generation,kind,status,"
-                    "action,started_ns) VALUES (?,?,?,?,?,?,?)",
-                    (str(uuid4()), self.a.id, a["generation"], "task",
-                     "cancelled", "long", time.time_ns()),
-                )
+        first = self.engine.activate(self.a.id)
+        with patch.object(self.jobs, "_worker", gated_worker):
+            job_id = self.jobs.submit_task(self.a.id, "long")
+        # The queued job has not entered its admission phase.
+        self.assertEqual(self.jobs.get(job_id)["status"], "queued")
         self.engine.deactivate()
-        self.engine.activate(self.a.id)
+        restarted = self.engine.activate(self.a.id)
+        self.assertNotEqual(first["generation"], restarted["generation"])
+        gate.set()
+        for _ in range(100):
+            with self.jobs._guard:
+                still_queued = job_id in self.jobs._running
+            if not still_queued:
+                break
+            time.sleep(.02)
+        self.assertEqual(self.jobs.get(job_id)["status"], "cancelled")
+        self.assertFalse((self.workspaces.path(self.a.id) / "logs" /
+                          (job_id + ".log")).exists())
         with self.assertRaises(ControlError):
-            self.engine.admit(self.a.id, a["generation"])
+            self.engine.admit(self.a.id, first["generation"])
 
     def test_socket_has_narrow_allowlisted_commands(self):
         controller = Controller(self.db, self.workspaces, self.backend)
