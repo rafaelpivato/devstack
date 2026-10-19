@@ -11,7 +11,7 @@
 <header class="top">
   <div><h1><a href="{{ url_for('index') }}">DevStack</a></h1>
   <p class="subhead">Multi-project development control</p></div>
-  <div class="phase"><span id="runtime-phase" aria-live="polite">
+  <div class="phase"><span id="runtime-phase" data-active-project="{{ runtime.project_id or '' }}" aria-live="polite">
     Runtime: <strong>{{ runtime.phase }}</strong>
   </span>
   {% if runtime.project_id %}
