@@ -182,6 +182,27 @@ class JobTests(unittest.TestCase):
         self.assertEqual(total, 2097152)
         self.assertEqual(self.controller.jobs.logs(self.a, job_id, offset)["text"], "")
 
+    def test_streams_short_output_before_process_exit(self):
+        job_id = self._submit(
+            script="import time;print('ready', flush=True);time.sleep(60)"
+        )
+        self._wait(job_id, "running")
+        observed = ""
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            observed = self.controller.jobs.logs(self.a, job_id)["text"]
+            if "ready" in observed:
+                break
+            time.sleep(.02)
+        self.assertIn("ready", observed)
+        self.assertEqual(self.controller.jobs.get(job_id)["status"], "running")
+        self.controller.jobs.cancel(self.a, job_id)
+
+    def test_unicode_arguments_are_not_corrupted_by_toml_validation(self):
+        job_id = self._submit(script="print('café')")
+        self.assertEqual(self._wait(job_id)["status"], "succeeded")
+        self.assertIn("café", self.controller.jobs.logs(self.a, job_id)["text"])
+
     def test_global_admission_rejects_second_job_until_first_finishes(self):
         first = self._submit(script="import time;time.sleep(60)")
         self._wait(first, "running")
