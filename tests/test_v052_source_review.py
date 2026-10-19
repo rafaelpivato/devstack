@@ -150,17 +150,22 @@ class SourceReviewTests(unittest.TestCase):
         ).status_code, 403)
 
 
+    @staticmethod
+    def _lines(*rows):
+        return chr(10).join(rows) + chr(10)
+
     def _change_source(self):
-        (self.a_source / "project.toml").write_text(
-            '[[applications]]\\nname="API"\\nservice="api"\\nport=9000\\n'
-            '[[applications]]\\nname="Frontend"\\nservice="frontend"\\nport=5173\\n'
-        )
-        (self.a_source / "tasks.toml").write_text(
-            '[[tasks]]\\nname="tests"\\nservice="api"\\ncommand=["pytest", "-q"]\\n'
-        )
-        (self.a_source / "compose.yaml").write_text(
-            'services:\\n  api:\\n    image: python:3.13\\n'
-        )
+        (self.a_source / "project.toml").write_text(self._lines(
+            '[[applications]]', 'name="API"', 'service="api"', 'port=9000',
+            '[[applications]]', 'name="Frontend"', 'service="frontend"', 'port=5173',
+        ))
+        (self.a_source / "tasks.toml").write_text(self._lines(
+            '[[tasks]]', 'name="tests"', 'service="api"',
+            'command=["pytest", "-q"]',
+        ))
+        (self.a_source / "compose.yaml").write_text(self._lines(
+            'services:', '  api:', '    image: python:3.13',
+        ))
 
     def test_selective_apply_only_selected_definitions_and_baseline(self):
         self._change_source()
@@ -187,9 +192,9 @@ class SourceReviewTests(unittest.TestCase):
         self.controller.configuration.replace_settings(
             self.a.id, data["applications"], data["tasks"],
         )
-        (self.a_source / "project.toml").write_text(
-            '[[applications]]\\nname="API"\\nservice="api"\\nport=9000\\n'
-        )
+        (self.a_source / "project.toml").write_text(self._lines(
+            '[[applications]]', 'name="API"', 'service="api"', 'port=9000',
+        ))
         revision = self.review(self.a.id)["revision"]
         self.assertTrue(self.review(self.a.id)["changes"][0]["locally_modified"])
         for overwrites in ([], ["application:other"]):
@@ -216,7 +221,7 @@ class SourceReviewTests(unittest.TestCase):
                 service.apply(self.a.id, rev, items, [])
         with self.assertRaises(SourceReviewInvalid):
             service.apply(self.a.id, "wrong", ["application:API"], [])
-        (self.a_source / "tasks.toml").write_text("tasks=[]\\n")
+        (self.a_source / "tasks.toml").write_text(self._lines("tasks=[]"))
         revised = self.review(self.a.id)
         with self.assertRaises(SourceReviewInvalid):
             service.apply(self.a.id, revised["revision"], ["task:tests"], [])
@@ -276,9 +281,12 @@ class SourceReviewTests(unittest.TestCase):
             self.assertIsNone(connection.execute(
                 "SELECT 1 FROM source_sync_pending LIMIT 1",
             ).fetchone())
-        self.assertEqual(self.review(self.a.id)["changes"],
-                         [item for item in self.review(self.a.id)["changes"]
-                          if item["id"] not in ("application:API", "task:tests")])
+        self.assertNotIn("application:API", {
+            item["id"] for item in self.review(self.a.id)["changes"]
+        })
+        self.assertNotIn("task:tests", {
+            item["id"] for item in self.review(self.a.id)["changes"]
+        })
         self.assertEqual(
             self.controller.configuration.settings(self.a.id)["tasks"][0]["command"],
             ["pytest", "-q"],
@@ -294,8 +302,6 @@ class SourceReviewTests(unittest.TestCase):
                           "SESSION_COOKIE_SECURE": False}, transport=transport)
         browser = app.test_client()
         self._change_source()
-        with browser.session_transaction() as session:
-            pass
         page = browser.get("/projects/" + self.a.id + "/source-review")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"Apply selected changes", page.data)
