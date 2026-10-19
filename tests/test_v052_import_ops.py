@@ -9,6 +9,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 from devstack.control.imports import ImportConflict, ImportSupervisor
+from devstack.adapters.github import GitHubSourceError
 from devstack.projects.service import ProjectProvisioner
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
@@ -124,7 +125,7 @@ class ImportOperationTests(unittest.TestCase):
 
     def test_invalid_github_or_key_does_not_write_a_job(self):
         for url, key in ((URL, "not a key"), ("https://evil.invalid/o/r", uuid4().hex)):
-            with self.assertRaises((ValueError, ImportConflict)):
+            with self.assertRaises((ValueError, ImportConflict, GitHubSourceError)):
                 self.imports.submit(url, "smoke", "Smoke", key)
         with self.db.transaction() as con:
             count = con.execute("SELECT COUNT(*) FROM import_operations").fetchone()[0]
