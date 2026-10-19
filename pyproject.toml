@@ -11,6 +11,7 @@ dependencies = ["Flask>=3.0,<4", "gunicorn>=23,<24"]
 
 [project.scripts]
 devstack = "devstack.web:main"
+devstack-control = "devstack.control.daemon:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
