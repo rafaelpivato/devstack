@@ -16,10 +16,16 @@ root=/opt/devstack-ci
 control_unit=/etc/systemd/system/devstack-ci-control.service
 web_unit=/etc/systemd/system/devstack-ci-web.service
 envfile=/etc/devstack-ci/app.env
+request_path=/etc/systemd/system/devstack-ci-update-request.path
+request_service=/etc/systemd/system/devstack-ci-update-request.service
+update_target=/etc/systemd/system/devstack-ci-update.service
 
 cleanup() {
-  systemctl stop devstack-ci-web.service devstack-ci-control.service 2>/dev/null || :
-  rm -f "$control_unit" "$web_unit"
+  systemctl stop devstack-ci-update-request.path devstack-ci-update-request.service \
+    devstack-ci-update.service devstack-ci-web.service \
+    devstack-ci-control.service 2>/dev/null || :
+  rm -f "$control_unit" "$web_unit" "$request_path" "$request_service" \
+    "$update_target" /run/devstack-ci-update-sentinel
   systemctl daemon-reload
 }
 trap cleanup EXIT
@@ -64,9 +70,24 @@ sed \
   -e 's|127.0.0.1:8765|127.0.0.1:18765|g' \
   deploy/devstack-web-v2.service > "$web_unit"
 
+# Exercise the exact path-watcher privilege handoff with a harmless
+# CI-only root service rather than contacting or installing a real release.
+sed 's|devstack-update-request.service|devstack-ci-update-request.service|g' \
+  deploy/devstack-update-request.path > "$request_path"
+sed 's|devstack-update.service|devstack-ci-update.service|g' \
+  deploy/devstack-update-request.service > "$request_service"
+cat > "$update_target" <<'UNIT'
+[Unit]
+Description=CI-only proof of manual update request handoff
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/touch /run/devstack-ci-update-sentinel
+UNIT
+
 systemctl daemon-reload
 systemctl start devstack-ci-control.service
 systemctl start devstack-ci-web.service
+systemctl start devstack-ci-update-request.path
 for attempt in $(seq 1 45); do
   if curl --silent --fail http://127.0.0.1:18765/healthz > /tmp/devstack-ci-health.json; then
     break
@@ -82,6 +103,19 @@ with urllib.request.urlopen("http://127.0.0.1:18765/api/v2/runtime", timeout=3) 
     state = json.load(r)
     assert (state["phase"], state["project_id"]) == ("inactive", None)
 PY
+
+# Verify the real web-user -> root systemd.path handoff without running
+# the updater or making an outbound release request.
+test "$(stat -c '%a' /run/devstack-update-request)" = "700"
+runuser -u "$web" -- test -w /run/devstack-update-request
+runuser -u "$web" -- touch /run/devstack-update-request/trigger
+for attempt in $(seq 1 30); do
+  [[ -f /run/devstack-ci-update-sentinel ]] && break
+  sleep 1
+done
+test -f /run/devstack-ci-update-sentinel
+test ! -e /run/devstack-update-request/trigger
+echo "Manual update systemd path handoff exercised successfully"
 
 # Verify permissions using the actual web user, not a mock or text inspection.
 if runuser -u "$web" -- test -r "$state/control.sqlite3"; then
