@@ -69,8 +69,8 @@ class JobSupervisor:
             raise JobInvalid("Invalid ad-hoc execution mode")
         if not all(isinstance(value, str) for value in (service, image, network)):
             raise JobInvalid("Invalid container target")
-        if kind == "image" and (not image or service):
-            raise JobInvalid("Standalone image requires only an image name")
+        if kind == "image" and (not image or service or "://" in image):
+            raise JobInvalid("Standalone image requires a Docker image reference")
         if kind != "image" and (image or not service or network != "none"):
             raise JobInvalid("Compose command requires a service and no network override")
         if network not in ("none", "project"):
