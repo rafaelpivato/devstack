@@ -367,6 +367,8 @@ jobs:
           from devstack.storage.projects import ProjectRegistry
           from devstack.control.docker import DockerBackend, compose_id
           from devstack.control.coordinator import Coordinator
+          from devstack.control.jobs import JobSupervisor
+          import time
 
           url = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
           with tempfile.TemporaryDirectory() as location:
@@ -379,6 +381,7 @@ jobs:
               b = service.import_github(url, "smoke-b", "Smoke B")
               backend = DockerBackend(service, workspaces)
               engine = Coordinator(db, registry, backend)
+              jobs = JobSupervisor(engine, backend, workspaces)
               try:
                   assert engine.reconcile()["phase"] == "inactive"
                   first = engine.activate(a.id)
@@ -392,7 +395,20 @@ jobs:
                                    "echo persistent > /var/lib/postgresql/data/devstack-check"],
                       check=True, timeout=30,
                   )
+                  # Supervise an actual long-lived disposable Docker image task.
+                  with db.transaction(write=True) as con:
+                      con.execute(
+                          "INSERT INTO tasks(project_id,name,service,mode,image,network,argv_json)"
+                          " VALUES (?,'wait','', 'run','python:3.12-alpine','none',?)",
+                          (a.id, '["python","-c","import time;time.sleep(120)"]'),
+                      )
+                  job_id = jobs.submit_task(a.id, "wait")
+                  deadline = time.monotonic() + 20
+                  while jobs.get(job_id)["status"] == "queued" and time.monotonic() < deadline:
+                      time.sleep(.1)
+                  assert jobs.get(job_id)["status"] == "running", jobs.get(job_id)
                   second = engine.switch(b.id)
+                  assert jobs.get(job_id)["status"] == "cancelled", jobs.get(job_id)
                   assert second["project_id"] == b.id
                   assert all(x["project"] == b.id for x in backend.owned())
                   assert not engine.authorized(a.id, first["generation"])
