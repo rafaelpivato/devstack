@@ -104,6 +104,9 @@ class Controller:
             )
             return {"id": entry.id, "name": entry.name}
         if operation == "activate":
+            # Resolve explicit identity even when another project is active.
+            # Unknown project IDs are never silently interpreted as the active one.
+            self.registry.get(request["project_id"])
             return self._public_status(self.coordinator.activate(request["project_id"]))
         if operation == "switch":
             return self._public_status(self.coordinator.switch(request["project_id"]))
