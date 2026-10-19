@@ -7,6 +7,7 @@ one browser tab does not mutate the global active runtime.
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import secrets
 
@@ -21,9 +22,9 @@ from .client import ControllerRejected, ControllerUnavailable, send
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
 NOT_FOUND = {"ProjectNotFound", "ImportNotFound"}
-INVALID = {"DomainError", "ProtocolError", "GitHubSourceError",
+INVALID = {"ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError"}
-CONFLICT = {"ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict"}
+CONFLICT = {"ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -61,7 +62,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         if (not expected or not supplied
                 or not secrets.compare_digest(expected, supplied)):
             abort(403)
-        if request.is_json and request.content_length and request.content_length > 8192:
+        if request.is_json and request.content_length and request.content_length > 60 * 1024:
             abort(413)
 
     def problem(exc):
@@ -89,9 +90,12 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         runtime = call("status")
         details = project_data(identifier) if identifier else None
         selected_id = details["project"]["id"] if details else None
+        compose = call("compose_read", project_id=selected_id) if selected_id else None
+        definitions = call("settings_read", project_id=selected_id) if selected_id else None
         return render_template(
             "v2_dashboard.html", projects=overview["projects"], runtime=runtime,
             detail=details, selected_id=selected_id, csrf=csrf(),
+            compose=compose, definitions=definitions,
             example=request.args.get("example") == "smoke",
             sample_url=SAMPLE_URL, import_key=secrets.token_hex(16),
         )
@@ -174,6 +178,30 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def rename_project(identifier):
         return perform("project_rename", target=identifier,
                        project_id=identifier, name=field("name"))
+
+    @app.post("/projects/<identifier>/compose/config")
+    def save_compose_form(identifier):
+        content = request.form.get("content", "")
+        revision = request.form.get("revision", "")
+        if not isinstance(content, str) or len(content) > 48 * 1024:
+            abort(413)
+        return perform("compose_save", target=identifier,
+                       project_id=identifier, content=content, revision=revision)
+
+    @app.post("/projects/<identifier>/settings")
+    def save_settings_form(identifier):
+        raw = request.form.get("definitions", "")
+        if not isinstance(raw, str) or len(raw) > 32 * 1024:
+            abort(413)
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            flash("Project settings must be valid JSON.", "error")
+            return redirect_to(identifier)
+        if not isinstance(data, dict) or set(data) != {"applications", "tasks"}:
+            abort(400)
+        return perform("settings_replace", target=identifier, project_id=identifier,
+                       applications=data["applications"], tasks=data["tasks"])
 
     @app.post("/projects/<identifier>/activate")
     def activate(identifier):
@@ -275,6 +303,40 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             return jsonify({"project": call(
                 "project_rename", project_id=identifier, name=payload["name"],
             )})
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/compose")
+    def compose_config_api(identifier):
+        try:
+            return jsonify(call("compose_read", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.put("/api/v2/projects/<identifier>/compose")
+    def save_compose_api(identifier):
+        payload = json_input({"content", "revision"})
+        try:
+            return jsonify(call("compose_save", project_id=identifier, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/settings")
+    def read_settings_api(identifier):
+        try:
+            return jsonify(call("settings_read", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.put("/api/v2/projects/<identifier>/settings")
+    def save_settings_api(identifier):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {"applications", "tasks"}:
+            abort(400)
+        try:
+            return jsonify(call("settings_replace", project_id=identifier, **payload))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
