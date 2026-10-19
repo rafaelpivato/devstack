@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -37,6 +37,26 @@ _SCHEMA = (
            service TEXT NOT NULL,
            port INTEGER,
            PRIMARY KEY(project_id,name))""",
+    """CREATE TABLE IF NOT EXISTS runtime_state (
+           singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+           phase TEXT NOT NULL CHECK(phase IN
+             ('inactive','activating','active','deactivating','switching','error')),
+           project_id TEXT,
+           generation TEXT,
+           message TEXT NOT NULL DEFAULT '',
+           updated_ns INTEGER NOT NULL,
+           FOREIGN KEY(project_id) REFERENCES projects(id))""",
+    """CREATE TABLE IF NOT EXISTS jobs (
+           id TEXT PRIMARY KEY,
+           project_id TEXT NOT NULL REFERENCES projects(id),
+           generation TEXT NOT NULL,
+           kind TEXT NOT NULL CHECK(kind IN ('task','compose')),
+           status TEXT NOT NULL CHECK(status IN
+             ('queued','running','succeeded','failed','cancelled')),
+           action TEXT NOT NULL,
+           started_ns INTEGER NOT NULL,
+           finished_ns INTEGER,
+           exit_code INTEGER)""",
     """CREATE TABLE IF NOT EXISTS tasks (
            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
            name TEXT NOT NULL,
@@ -80,11 +100,16 @@ class Database:
                 if row is None or row[0] != SCHEMA_VERSION:
                     raise StorageError("Unsupported database schema version")
                 if not {"projects", "repositories", "project_sources",
-                        "applications", "tasks"}.issubset(existing):
+                        "applications", "tasks", "runtime_state", "jobs"}.issubset(existing):
                     raise StorageError("Database schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)
             if not existing:
+                con.execute(
+                    "INSERT INTO runtime_state"
+                    "(singleton,phase,project_id,generation,updated_ns)"
+                    " VALUES(1,'inactive',NULL,NULL,0)"
+                )
                 con.execute(
                     "INSERT INTO schema_version(singleton,version) VALUES (1,?)",
                     (SCHEMA_VERSION,),
