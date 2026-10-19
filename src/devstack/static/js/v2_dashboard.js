@@ -40,3 +40,33 @@ if (job) {
   }
   document.addEventListener("visibilitychange", updateJob);
 }
+
+const imported = document.querySelector("[data-import-id]");
+if (imported) {
+  let outstanding = false;
+  async function refreshImport() {
+    if (document.hidden || outstanding) return;
+    const label = document.getElementById("import-status");
+    if (!label || !["queued", "running"].includes(label.textContent.trim())) return;
+    outstanding = true;
+    try {
+      const id = encodeURIComponent(imported.dataset.importId);
+      const response = await fetch("/api/v2/imports/" + id, {
+        credentials: "same-origin", cache: "no-store",
+        headers: {Accept: "application/json"},
+      });
+      if (!response.ok) return;
+      const state = await response.json();
+      if (state.status === "succeeded" || state.status === "failed") {
+        // Link/error comes from an authoritative server-rendered page,
+        // not a guessed slug or speculative client-side active project.
+        window.location.reload();
+      } else {
+        label.textContent = state.status;
+      }
+    } catch (_) { /* Keep the last confirmed status. */ }
+    finally { outstanding = false; }
+  }
+  window.setInterval(refreshImport, 2500);
+  document.addEventListener("visibilitychange", refreshImport);
+}
