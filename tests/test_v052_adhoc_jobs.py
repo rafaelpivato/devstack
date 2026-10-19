@@ -182,6 +182,26 @@ class JobTests(unittest.TestCase):
         self.assertEqual(total, 2097152)
         self.assertEqual(self.controller.jobs.logs(self.a, job_id, offset)["text"], "")
 
+    def test_global_admission_rejects_second_job_until_first_finishes(self):
+        first = self._submit(script="import time;time.sleep(60)")
+        self._wait(first, "running")
+        with self.assertRaises(JobError):
+            self._submit(kind="run")
+        self.assertEqual(len(self.controller.jobs.list(self.a)["jobs"]), 1)
+        self.controller.jobs.cancel(self.a, first)
+        self.controller.coordinator.activate(self.a)
+        second = self._submit(kind="run")
+        self.assertEqual(self._wait(second)["status"], "succeeded")
+        self.assertNotEqual(first, second)
+
+    def test_cancel_completed_job_does_not_stop_runtime(self):
+        job_id = self._submit()
+        self.assertEqual(self._wait(job_id)["status"], "succeeded")
+        self.assertEqual(self.controller.jobs.cancel(self.a, job_id)["status"],
+                         "succeeded")
+        self.assertEqual(self.controller.coordinator.status()["phase"], "active")
+        self.assertTrue(self.backend.owned())
+
     def test_cancel_running_adhoc_fences_all_execution_and_deactivates(self):
         job_id = self._submit(script="import time; time.sleep(60)")
         self._wait(job_id, "running")
