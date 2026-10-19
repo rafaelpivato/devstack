@@ -23,6 +23,7 @@ from devstack.storage.projects import ProjectRegistry
 from .coordinator import Coordinator
 from .docker import DockerBackend
 from .jobs import JobSupervisor
+from .imports import ImportSupervisor
 
 _MAX_MESSAGE = 64 * 1024
 
@@ -38,6 +39,7 @@ class Controller:
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
+        self.imports = ImportSupervisor(database, self.registry, self.provisioner)
 
     def handle(self, request: dict) -> dict:
         if not isinstance(request, dict) or not isinstance(request.get("op"), str):
@@ -50,7 +52,8 @@ class Controller:
             "project_detail": {"op", "project_id"},
             "project_rename": {"op", "project_id", "name"},
             "project_create": {"op", "slug", "name"},
-            "project_import": {"op", "url", "slug", "name"},
+            "import_submit": {"op", "url", "slug", "name", "request_key"},
+            "import_status": {"op", "id"},
             "activate": {"op", "project_id"},
             "switch": {"op", "project_id"},
             "deactivate": {"op"},
@@ -98,11 +101,13 @@ class Controller:
         if operation == "project_create":
             entry = self.provisioner.create_empty(request["slug"], request["name"])
             return {"id": entry.id, "name": entry.name}
-        if operation == "project_import":
-            entry = self.provisioner.import_github(
+        if operation == "import_submit":
+            return self.imports.submit(
                 request["url"], request["slug"], request["name"],
+                request["request_key"],
             )
-            return {"id": entry.id, "name": entry.name}
+        if operation == "import_status":
+            return self.imports.get(request["id"])
         if operation == "activate":
             # Resolve explicit identity even when another project is active.
             # Unknown project IDs are never silently interpreted as the active one.
@@ -237,6 +242,12 @@ def main():
         database = Database(args.state / "control.sqlite3")
         workspaces = WorkspaceStore(args.state / "projects")
         controller = Controller(database, workspaces)
+        try:
+            controller.imports.reconcile()
+        except Exception:
+            # An ambiguous partially published import must remain explicit.
+            # An operator can inspect the pending state; never auto-delete data.
+            pass
         try:
             controller.coordinator.reconcile()
         except Exception:
