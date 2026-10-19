@@ -30,7 +30,7 @@ python3 -m venv "$root/venv"
 groupadd --system "$ipc"
 useradd --system --no-create-home --gid "$ipc" \
   --shell /usr/sbin/nologin "$web"
-useradd --system --no-create-home --gid "$ipc" \
+useradd --system --no-create-home --user-group \
   --shell /usr/sbin/nologin "$controller"
 usermod -aG docker "$controller"
 if id -nG "$web" | tr ' ' '\n' | grep -qx docker; then
