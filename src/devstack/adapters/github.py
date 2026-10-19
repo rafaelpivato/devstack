@@ -130,6 +130,47 @@ def discover_manifest(checkout: Path, selected: Path, *, explicit: bool) -> Path
 
 
 class GitHubSource:
+    def clone_repository(self, url: str, destination: Path, branch: str = "") -> str:
+        """Clone an ordinary GitHub repository without requiring a template.
+
+        The caller supplies only a validated GitHub URL and optional branch,
+        not a command, checkout path from HTTP, or Git environment overrides.
+        """
+        location = parse_github_url(url)
+        if location.tree is not None:
+            raise GitHubSourceError("Use a repository URL, not a GitHub tree URL")
+        if (not isinstance(branch, str) or len(branch) > 240
+                or (branch and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", branch)
+                                or ".." in branch or "//" in branch
+                                or branch.endswith(("/", ".", ".lock"))
+                                or "@{" in branch))):
+            raise GitHubSourceError("Invalid Git branch")
+        if destination.exists() or destination.is_symlink():
+            raise GitHubSourceError("Clone destination already exists")
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_ASKPASS"] = "/bin/false"
+        ssh = location.clone_url.startswith("git@github.com:")
+        if ssh:
+            try:
+                env.update(git_environment())
+                command = ssh_command()
+            except GitHubSSHError as exc:
+                raise GitHubSourceError("GitHub SSH identity is not configured") from exc
+        args = ["git", "-c", "core.hooksPath=/dev/null", "clone",
+                "--no-tags"]
+        if branch:
+            args.extend(["--branch", branch])
+        args.extend(["--", location.clone_url, str(destination)])
+        _git(args, env=env)
+        if ssh:
+            _git(["git", "-C", str(destination), "config",
+                  "--local", "core.sshCommand", command])
+        head = _git(["git", "-C", str(destination), "rev-parse", "--verify", "HEAD"])
+        if not re.fullmatch(r"[a-f0-9]{40,64}", head):
+            raise GitHubSourceError("Cloned repository has no valid HEAD")
+        return head
+
     def clone_and_resolve(self, url: str, destination: Path) -> GitHubCheckout:
         location = parse_github_url(url)
         if destination.exists() or destination.is_symlink():

@@ -27,6 +27,8 @@ from .coordinator import Coordinator
 from .docker import DockerBackend
 from .jobs import JobSupervisor
 from .imports import ImportSupervisor
+from .repository_add import RepositoryAddSupervisor
+from devstack.github_ssh import public_key, generate_key, test_connection
 from .ingress import WebhookIngress, WebhookServer
 
 _MAX_MESSAGE = 64 * 1024
@@ -46,6 +48,7 @@ class Controller:
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
         self.repositories = RepositoryGitService(self.registry, workspaces, self.coordinator)
+        self.repository_add = RepositoryAddSupervisor(database, self.registry, workspaces, self.coordinator)
         self.source_review = SourceReviewService(self.registry, workspaces, self.provisioner, self.configuration)
         self.ingress = WebhookIngress(self.coordinator, self.registry, self.backend)
         self.coordinator.ingress = self.ingress
@@ -64,6 +67,11 @@ class Controller:
             "source_apply": {"op", "project_id", "revision", "selected", "overwrites"},
             "repository_status": {"op", "project_id", "repository_id"},
             "repository_update": {"op", "project_id", "repository_id", "expected_head"},
+            "repository_add_submit": {"op", "project_id", "url", "name", "branch", "request_key"},
+            "repository_add_status": {"op", "project_id", "id"},
+            "github_ssh_status": {"op"},
+            "github_ssh_generate": {"op"},
+            "github_ssh_test": {"op"},
             "compose_read": {"op", "project_id"},
             "compose_save": {"op", "project_id", "content", "revision"},
             "settings_read": {"op", "project_id"},
@@ -140,6 +148,19 @@ class Controller:
                 request["project_id"], request["revision"],
                 request["selected"], request["overwrites"],
             )
+        if operation == "repository_add_submit":
+            return self.repository_add.submit(
+                request["project_id"], request["url"], request["name"],
+                request["branch"], request["request_key"],
+            )
+        if operation == "repository_add_status":
+            return self.repository_add.get(request["project_id"], request["id"])
+        if operation == "github_ssh_status":
+            return {"public_key": public_key()}
+        if operation == "github_ssh_generate":
+            return {"public_key": generate_key()}
+        if operation == "github_ssh_test":
+            return {"authenticated_user": test_connection()}
         if operation == "repository_status":
             return self.repositories.status(request["project_id"], request["repository_id"])
         if operation == "repository_update":
@@ -192,6 +213,7 @@ class Controller:
             # verify absence of both owned workloads and unfinished journals.
             self.coordinator.reconcile()
             self.source_review.recover_pending()
+            self.repository_add.reconcile()
             return self._public_status(self.coordinator.status())
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
@@ -335,6 +357,7 @@ def main():
         try:
             controller.coordinator.reconcile()
             controller.source_review.recover_pending()
+            controller.repository_add.reconcile()
         except Exception:
             # A pending durable journal remains as a fail-closed barrier;
             # explicit reconcile retries runtime cleanup and replay.

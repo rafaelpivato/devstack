@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -83,6 +83,22 @@ _SCHEMA = (
            project_id TEXT NOT NULL REFERENCES projects(id),
            generation TEXT NOT NULL,
            started_ns INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS repository_add_operations (
+           id TEXT PRIMARY KEY,
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+           request_key TEXT NOT NULL,
+           request_digest TEXT NOT NULL,
+           repo_id TEXT NOT NULL UNIQUE,
+           name TEXT NOT NULL,
+           clone_url TEXT NOT NULL,
+           branch TEXT NOT NULL,
+           status TEXT NOT NULL CHECK(status IN
+             ('queued','running','recovery','succeeded','failed')),
+           error_code TEXT NOT NULL DEFAULT '',
+           started_ns INTEGER NOT NULL,
+           finished_ns INTEGER,
+           UNIQUE(project_id,request_key))""",
+    "CREATE INDEX IF NOT EXISTS pending_repository_adds ON repository_add_operations(project_id,name,status)",
     """CREATE TABLE IF NOT EXISTS source_sync_pending (
            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE RESTRICT,
            payload TEXT NOT NULL,
@@ -130,7 +146,7 @@ class Database:
                 if row is None or row[0] != SCHEMA_VERSION:
                     raise StorageError("Unsupported database schema version")
                 if not {"projects", "repositories", "project_sources",
-                        "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending"}.issubset(existing):
+                        "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending", "repository_add_operations"}.issubset(existing):
                     raise StorageError("Database schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)

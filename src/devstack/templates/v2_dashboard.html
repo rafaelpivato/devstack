@@ -84,6 +84,17 @@
       <li><strong><a href="{{ url_for('repository_page', identifier=selected_id, repository_id=repo.id) }}">{{ repo.name }}</a></strong> <small>{{ repo.relative_path }}</small></li>
     {% endfor %}</ul>
     {% else %}<p>No Git repositories registered.</p>{% endif %}
+    {% if runtime.phase == 'inactive' %}
+    <form class="stacked" method="post" action="{{ url_for('add_repository_form', identifier=selected_id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <input type="hidden" name="request_key" value="{{ repository_add_key }}">
+      <label>Repository name <input name="name" maxlength="100" placeholder="backend" required></label>
+      <label>GitHub HTTPS or SSH URL <input name="url" maxlength="2048" placeholder="https://github.com/owner/repo" required></label>
+      <label>Branch (optional) <input name="branch" maxlength="240" placeholder="default branch"></label>
+      <button class="secondary">Add Git repository</button>
+    </form>
+    {% else %}<p class="hint">Deactivate the runtime before adding a repository.</p>{% endif %}
+    <p class="hint">Repositories belong to this project only. Adding one never changes managed Compose or source templates.</p>
   </section>
   <section class="details">
     <h3>Applications</h3>
@@ -189,6 +200,23 @@
   <p>Open any project above to inspect it. Selecting a project never activates its runtime.</p>
 </section>
 {% endif %}
+<section id="github-ssh" class="card">
+  <h2>Private GitHub access</h2>
+  <p class="hint">One controller-owned ED25519 SSH identity for private GitHub repositories. The private key is never shown in the browser.</p>
+  {% if ssh_identity.public_key %}
+  <label>Public key to register in GitHub</label>
+  <textarea readonly rows="3">{{ ssh_identity.public_key }}</textarea>
+  <form method="post" action="{{ url_for('github_ssh_test_form') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button class="secondary">Test GitHub SSH connection</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('github_ssh_generate_form') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button class="secondary">Generate server SSH key</button>
+  </form>
+  {% endif %}
+</section>
 <section id="add-project" class="card">
   <h2>Import a GitHub project</h2>
   <p>Works with an empty or already populated registry. Importing does not start Docker or switch the runtime.</p>

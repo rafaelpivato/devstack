@@ -21,10 +21,10 @@ from .client import ControllerRejected, ControllerUnavailable, send
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound"}
+NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
-           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid"}
-CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict"}
+           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError"}
+CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -44,7 +44,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def call(op: str, **fields):
         if transport is not None:
             return transport(op, **fields)
-        return send(Path(app.config["CONTROLLER_SOCKET"]), op, **fields)
+        return send(Path(app.config["CONTROLLER_SOCKET"]), op,
+                    timeout=60 if op == "github_ssh_test" else 30, **fields)
 
     def csrf() -> str:
         if "_csrf" not in session:
@@ -93,12 +94,14 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         compose = call("compose_read", project_id=selected_id) if selected_id else None
         definitions = call("settings_read", project_id=selected_id) if selected_id else None
         webhooks = call("webhooks", project_id=selected_id)["webhooks"] if selected_id else ()
+        ssh_identity = call("github_ssh_status")
         return render_template(
             "v2_dashboard.html", projects=overview["projects"], runtime=runtime,
             detail=details, selected_id=selected_id, csrf=csrf(),
             compose=compose, definitions=definitions, webhooks=webhooks,
             example=request.args.get("example") == "smoke",
             sample_url=SAMPLE_URL, import_key=secrets.token_hex(16),
+            repository_add_key=secrets.token_hex(16), ssh_identity=ssh_identity,
         )
 
     @app.get("/healthz")
@@ -174,6 +177,45 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             return render_template("v2_import.html", job=job)
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
+
+    @app.post("/projects/<identifier>/repositories/add")
+    def add_repository_form(identifier):
+        try:
+            result = call("repository_add_submit", project_id=identifier,
+                          url=field("url"), name=field("name"),
+                          branch=field("branch"), request_key=field("request_key"))
+            return redirect(url_for("repository_add_page", identifier=identifier,
+                                    operation_id=result["id"]), code=303)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to(identifier)
+
+    @app.get("/projects/<identifier>/repositories/adds/<operation_id>")
+    def repository_add_page(identifier, operation_id):
+        try:
+            operation = call("repository_add_status", project_id=identifier,
+                             id=operation_id)
+            return render_template("v2_repository_add.html", operation=operation)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/github/ssh/generate")
+    def github_ssh_generate_form():
+        try:
+            call("github_ssh_generate")
+            flash("GitHub SSH identity generated. Add the public key to GitHub.", "success")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect_to()
+
+    @app.post("/github/ssh/test")
+    def github_ssh_test_form():
+        try:
+            result = call("github_ssh_test")
+            flash("GitHub SSH authenticated as " + result["authenticated_user"], "success")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect_to()
 
     @app.get("/projects/<identifier>/source-review")
     def project_source_review(identifier):
@@ -427,6 +469,63 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def delete_webhook_api(identifier, route):
         try:
             return jsonify(call("webhook_remove", project_id=identifier, route=route))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/github/ssh")
+    def github_ssh_status_api():
+        try:
+            return jsonify(call("github_ssh_status"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/github/ssh/generate")
+    def github_ssh_generate_api():
+        try:
+            return jsonify(call("github_ssh_generate"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/github/ssh/test")
+    def github_ssh_test_api():
+        try:
+            return jsonify(call("github_ssh_test"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/repositories")
+    def add_repository_api(identifier):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if (not isinstance(payload, dict)
+                or set(payload) - {"url", "name", "branch"}
+                or not {"url", "name"}.issubset(payload)
+                or any(not isinstance(value, str) or len(value) > 2048
+                       for value in payload.values())
+                or not payload["url"].strip() or not payload["name"].strip()):
+            abort(400)
+        payload.setdefault("branch", "")
+        key = request.headers.get("Idempotency-Key", "")
+        if not isinstance(key, str) or len(key) != 32:
+            abort(400, description="Idempotency-Key header required")
+        try:
+            result = call("repository_add_submit", project_id=identifier,
+                          **payload, request_key=key)
+            response = jsonify({"import": result})
+            response.status_code = 202
+            response.headers["Location"] = url_for(
+                "repository_add_status_api", identifier=identifier,
+                operation_id=result["id"])
+            return response
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/repository-adds/<operation_id>")
+    def repository_add_status_api(identifier, operation_id):
+        try:
+            return jsonify(call("repository_add_status", project_id=identifier,
+                                id=operation_id))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
