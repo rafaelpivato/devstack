@@ -28,10 +28,10 @@ class ConfigurationInvalid(ValueError):
 
 
 class ConfigurationService:
-    def __init__(self, registry: ProjectRegistry, workspaces, backend, coordinator):
+    def __init__(self, registry: ProjectRegistry, workspaces, provisioner, coordinator):
         self.registry = registry
         self.workspaces = workspaces
-        self.backend = backend
+        self.provisioner = provisioner
         self.coordinator = coordinator
 
     def _managed(self, identifier: str) -> Path:
@@ -92,7 +92,7 @@ class ConfigurationService:
             # directory, before publishing any file.
             source = folder
             try:
-                source = self.backend.provisioner.source_directory(identifier)
+                source = self.provisioner.source_directory(identifier)
             except LookupError:
                 pass
             from devstack.control.docker import _execute, compose_id
@@ -143,7 +143,6 @@ class ConfigurationService:
             raise ConfigurationInvalid("Expected application and task lists")
         if len(applications) > 30 or len(tasks) > 40:
             raise ConfigurationInvalid("Too many project definitions")
-        import tomllib
         # Use the same spec validator as the GitHub importer. Validate via
         # our canonical allowlist of fields, not SQL insertion exceptions.
         for row in applications:
@@ -154,8 +153,7 @@ class ConfigurationService:
                 "name", "service", "mode", "image", "network", "command"
             }:
                 raise ConfigurationInvalid("Invalid task properties")
-        # tomllib accepts no encoding helper, so use tomli-style generated
-        # conservative TOML JSON representations only for strings/lists.
+        # Use the importer TOML validator to keep the same strict constraints.
         def q(value):
             if not isinstance(value, str):
                 raise ConfigurationInvalid("Invalid setting value")
