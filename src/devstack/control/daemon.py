@@ -47,6 +47,8 @@ class Controller:
             "health": {"op"},
             "status": {"op"},
             "projects": {"op"},
+            "project_detail": {"op", "project_id"},
+            "project_rename": {"op", "project_id", "name"},
             "project_create": {"op", "slug", "name"},
             "project_import": {"op", "url", "slug", "name"},
             "activate": {"op", "project_id"},
@@ -55,7 +57,7 @@ class Controller:
             "reconcile": {"op"},
             "task": {"op", "project_id", "name"},
             "compose": {"op", "project_id", "action"},
-            "job": {"op", "id"},
+            "job": {"op", "project_id", "id"},
         }
         if operation not in fields or set(request) != fields[operation]:
             raise ProtocolError("Unexpected or missing controller parameters")
@@ -68,6 +70,31 @@ class Controller:
                 {"id": p.id, "slug": p.slug, "name": p.name}
                 for p in self.registry.list()
             ]}
+        if operation == "project_detail":
+            identifier = request["project_id"]
+            entry = self.registry.get(identifier)
+            repositories = self.registry.repositories(identifier)
+            with self.registry.database.transaction() as con:
+                apps = con.execute(
+                    "SELECT name,service,port FROM applications WHERE project_id=? "
+                    "ORDER BY name", (identifier,)
+                ).fetchall()
+                tasks = con.execute(
+                    "SELECT name,service,mode,image,network FROM tasks WHERE project_id=? "
+                    "ORDER BY name", (identifier,)
+                ).fetchall()
+            return {
+                "project": {"id": entry.id, "slug": entry.slug, "name": entry.name},
+                "repositories": [
+                    {"id": item.id, "name": item.name, "relative_path": item.relative_path}
+                    for item in repositories
+                ],
+                "applications": [dict(row) for row in apps],
+                "tasks": [dict(row) for row in tasks],
+            }
+        if operation == "project_rename":
+            entry = self.registry.rename(request["project_id"], request["name"])
+            return {"id": entry.id, "slug": entry.slug, "name": entry.name}
         if operation == "project_create":
             entry = self.provisioner.create_empty(request["slug"], request["name"])
             return {"id": entry.id, "name": entry.name}
@@ -90,7 +117,13 @@ class Controller:
             return {"job_id": self.jobs.submit_compose(
                 request["project_id"], request["action"])}
         if operation == "job":
-            return self.jobs.get(request["id"])
+            from devstack.domain.models import project_id
+            project_id(request["project_id"])
+            self.registry.get(request["project_id"])
+            job = self.jobs.get(request["id"])
+            if job["project_id"] != request["project_id"]:
+                raise ProtocolError("Job does not belong to requested project")
+            return job
         raise ProtocolError("Unknown operation")
 
     @staticmethod
