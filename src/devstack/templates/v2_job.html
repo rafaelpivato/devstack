@@ -16,7 +16,7 @@
 {% if job.status in ("queued","running") %}
 <form method="post" action="{{ url_for('cancel_job_form', identifier=selected_id, job_id=job.id) }}">
   <input type="hidden" name="_csrf" value="{{ csrf }}">
-  <button class="danger">Cancel job</button>
+  <button class="danger">Cancel job and deactivate project</button><p class="hint">Stops the active project and verifies all managed containers are stopped. A Compose exec process cannot be safely cancelled by killing the Docker CLI alone.</p>
 </form>
 {% endif %}
 <h3>Output</h3>
