@@ -202,11 +202,10 @@ class JobSupervisor:
                 with self._guard:
                     self._running[job_id] = (threading.current_thread(), proc)
                 self._set(job_id, "running")
-            try:
-                # Commands have no default deadline. Browser disconnect is
-                # unrelated to command lifecycle; project transition cancels.
-                exit_code = proc.wait()
-                final = "succeeded" if exit_code == 0 else "failed"
+            # Commands have no default deadline. Browser disconnect is
+            # unrelated to command lifecycle; project transition cancels.
+            exit_code = proc.wait()
+            final = "succeeded" if exit_code == 0 else "failed"
             drain.join(timeout=10)
             if drain.is_alive():
                 raise JobError("Worker log stream did not finish")
