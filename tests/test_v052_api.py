@@ -6,6 +6,7 @@ accessed directly by HTTP handlers.
 """
 import re
 import shutil
+import threading
 import sys
 import tempfile
 import time
@@ -15,7 +16,7 @@ from uuid import uuid4
 
 from devstack.api.client import ControllerRejected, ControllerUnavailable
 from devstack.api.http import create_app
-from devstack.control.daemon import Controller
+from devstack.control.daemon import Controller, ControlServer
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
 
@@ -159,6 +160,7 @@ class HttpTests(unittest.TestCase):
 
     def test_import_stays_available_after_first_project(self):
         a = self.create("alpha")
+        self.api_post("/api/v2/projects/" + a + "/activate")
         before = self.controller.coordinator.status()
         sample = self.client.get("/?example=smoke")
         self.assertEqual(sample.status_code, 200)
@@ -233,6 +235,39 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/dashboard").status_code, 404)
         self.assertEqual(self.client.get("/api/v2/runtime").get_json()["project_id"],
                          None)
+
+    def test_actual_unix_socket_transport_end_to_end(self):
+        with tempfile.TemporaryDirectory() as folder:
+            socket_path = Path(folder) / "control.sock"
+            with ControlServer(socket_path, self.controller) as server:
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    app = create_app({
+                        "TESTING": True, "SECRET_KEY": "separate-web-secret",
+                        "SESSION_COOKIE_SECURE": False,
+                        "CONTROLLER_SOCKET": str(socket_path),
+                    })
+                    browser = app.test_client()
+                    self.assertEqual(browser.get("/").status_code, 200)
+                    with browser.session_transaction() as session:
+                        token = session["_csrf"]
+                    created = browser.post("/api/v2/projects", json={
+                        "slug": "socket", "name": "Created over IPC",
+                    }, headers={"X-CSRF-Token": token})
+                    self.assertEqual(created.status_code, 201, created.get_json())
+                    identifier = created.get_json()["project"]["id"]
+                    selected = browser.get("/projects/" + identifier)
+                    self.assertEqual(selected.status_code, 200)
+                    self.assertIn(b"Created over IPC", selected.data)
+                    state = browser.get("/api/v2/runtime").get_json()
+                    self.assertEqual((state["phase"], state["project_id"]),
+                                     ("inactive", None))
+                    self.assertEqual(self.backend.containers, [])
+                finally:
+                    server.shutdown()
+                    thread.join(timeout=3)
+            self.assertEqual(browser.get("/api/v2/projects").status_code, 503)
 
     def test_controller_unavailability_fails_closed(self):
         def disconnected(op, **kwargs):
