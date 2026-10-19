@@ -5,6 +5,8 @@ The browser/API identity may access only the explicitly allowlisted operations
 through a group-restricted socket; it never obtains a Docker socket or shell.
 """
 import argparse
+from contextlib import contextmanager
+import fcntl
 import grp
 import json
 import os
@@ -161,6 +163,33 @@ def request(location: Path, payload: dict, timeout: float = 20) -> dict:
     return result["result"]
 
 
+@contextmanager
+def exclusive_daemon(state: Path):
+    """Ensure one controller process owns all jobs for a persistent state DB.
+
+    Flock is held for the entire daemon lifetime; the kernel releases it on
+    crashes. A different --socket path cannot start a second supervisor.
+    """
+    root = Path(state)
+    if root.is_symlink() or any(parent.is_symlink() for parent in root.parents):
+        raise ProtocolError("Controller state path must not contain symlinks")
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    location = root / ".controller-instance.lock"
+    fd = os.open(location, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProtocolError("A control daemon already owns this state") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def main():
     parser = argparse.ArgumentParser(description="DevStack private runtime controller")
     parser.add_argument("--state", type=Path, default=Path("/var/lib/devstack"))
@@ -168,28 +197,29 @@ def main():
                         default=Path("/run/devstack-control/control.sock"))
     parser.add_argument("--socket-group", default=None)
     args = parser.parse_args()
-    database = Database(args.state / "control.sqlite3")
-    workspaces = WorkspaceStore(args.state / "projects")
-    controller = Controller(database, workspaces)
-    try:
-        controller.coordinator.reconcile()
-    except Exception:
-        # Remain available to report and explicitly recover ERROR.
-        pass
-    with ControlServer(args.socket, controller, args.socket_group) as server:
-        def stop(_signum, _frame):
-            threading.Thread(target=server.shutdown, daemon=True).start()
-
-        signal.signal(signal.SIGTERM, stop)
-        signal.signal(signal.SIGINT, stop)
+    with exclusive_daemon(args.state):
+        database = Database(args.state / "control.sqlite3")
+        workspaces = WorkspaceStore(args.state / "projects")
+        controller = Controller(database, workspaces)
         try:
-            server.serve_forever(poll_interval=0.2)
-        finally:
+            controller.coordinator.reconcile()
+        except Exception:
+            # Remain available to report and explicitly recover ERROR.
+            pass
+        with ControlServer(args.socket, controller, args.socket_group) as server:
+            def stop(_signum, _frame):
+                threading.Thread(target=server.shutdown, daemon=True).start()
+    
+            signal.signal(signal.SIGTERM, stop)
+            signal.signal(signal.SIGINT, stop)
             try:
-                controller.coordinator.reconcile()
-            except Exception:
-                pass
-
+                server.serve_forever(poll_interval=0.2)
+            finally:
+                try:
+                    controller.coordinator.reconcile()
+                except Exception:
+                    pass
+    
 
 if __name__ == "__main__":
     main()
