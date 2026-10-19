@@ -77,7 +77,14 @@ class Controller:
         if operation not in fields or set(request) != fields[operation]:
             raise ProtocolError("Unexpected or missing controller parameters")
         if operation == "health":
-            return {"alive": True, "runtime": self.coordinator.status()["phase"]}
+            state = self.coordinator.status()
+            # A successful Unix-socket ping alone is not sufficient to
+            # certify a v2 deployment: registry must open and an inactive
+            # supervisor must have no residual owned workloads.
+            self.registry.list()
+            if state["phase"] == "inactive":
+                self.coordinator._verify_clear()
+            return {"alive": True, "runtime": state["phase"]}
         if operation == "status":
             return self._public_status(self.coordinator.status())
         if operation == "projects":
