@@ -64,6 +64,7 @@ _SCHEMA = (
            url TEXT NOT NULL,
            slug TEXT NOT NULL,
            name TEXT NOT NULL,
+           target_id TEXT NOT NULL UNIQUE,
            status TEXT NOT NULL CHECK(status IN
              ('queued','running','succeeded','failed')),
            project_id TEXT REFERENCES projects(id),
