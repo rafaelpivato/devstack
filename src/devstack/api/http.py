@@ -18,6 +18,10 @@ from flask import (
 from werkzeug.exceptions import HTTPException
 
 from .client import ControllerRejected, ControllerUnavailable, send
+from devstack.update_control import (
+    UpdateControlError, installed_version, latest_version, update_state,
+    request_update,
+)
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
@@ -109,6 +113,71 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             repository_add_key=secrets.token_hex(16),
             repository_bulk_key=secrets.token_hex(16), ssh_identity=ssh_identity,
         )
+
+    def release_status(check_latest=False):
+        """Unprivileged release metadata only; no controller shell capability."""
+        installed = installed_version()
+        update = update_state()
+        latest = None
+        error = None
+        if check_latest:
+            try:
+                latest = latest_version()
+            except UpdateControlError:
+                error = "Unable to check published GitHub releases."
+        newer = (
+            latest is not None and
+            tuple(map(int, latest[1:].split("."))) >
+            tuple(map(int, installed[1:].split(".")))
+        )
+        return {"installed": installed, "latest": latest,
+                "update_available": newer, "update": update,
+                "check_error": error}
+
+    def queue_release_update():
+        # Root updater performs an independent inactive/healthy preflight.
+        state = call("status")
+        if state["phase"] != "inactive" or state["project_id"] is not None:
+            raise UpdateControlError("Deactivate the active project before updating DevStack.")
+        latest = latest_version()
+        installed = installed_version()
+        if tuple(map(int, latest[1:].split("."))) <= tuple(
+                map(int, installed[1:].split("."))):
+            raise UpdateControlError("Already on the latest published release.")
+        return request_update()
+
+    @app.get("/devstack/updates")
+    def devstack_updates():
+        return render_template("v2_updates.html", status=release_status(True),
+                               csrf=csrf())
+
+    @app.post("/devstack/update-now")
+    def devstack_update_form():
+        try:
+            message = queue_release_update()
+            flash(message, "success")
+        except UpdateControlError as exc:
+            flash(str(exc), "error")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect(url_for("devstack_updates"), code=303)
+
+    @app.get("/api/v2/devstack/update-status")
+    def devstack_update_status_api():
+        return jsonify(release_status(request.args.get("check") == "1"))
+
+    @app.post("/api/v2/devstack/update-now")
+    def devstack_update_api():
+        if request.content_length and not request.is_json:
+            abort(415)
+        if request.is_json and request.get_json(silent=True) != {}:
+            abort(400)
+        try:
+            return jsonify({"message": queue_release_update()}), 202
+        except UpdateControlError as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 409
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
 
     @app.get("/healthz")
     def healthz():

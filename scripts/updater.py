@@ -169,6 +169,11 @@ def activate(
         if not healthy(health_url, attempts=2):
             raise RuntimeError("Current v2 release is unhealthy; operator intervention required")
         return f"Already running {tag}"
+    # An update must not disrupt an active project or unhealthy supervisor.
+    if old is not None and not healthy(health_url, attempts=2):
+        raise RuntimeError(
+            "Deactivate all projects and restore v2 health before updating"
+        )
     target = prepare_release(root, tag, repo)
     point_at(current, target)
     try:

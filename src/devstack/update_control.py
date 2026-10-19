@@ -111,6 +111,9 @@ def update_state() -> dict[str, str]:
 
 def request_update() -> str:
     folder = check_request_directory()
+    phase = update_state()["phase"]
+    if phase in ("updating", "queued"):
+        return "An update is already in progress or queued."
     # The watcher only reacts to existence. Contents are never interpreted.
     path = folder / "trigger"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL

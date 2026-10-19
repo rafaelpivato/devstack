@@ -71,7 +71,7 @@ class AutoUpdateTests(unittest.TestCase):
             updater.point_at(root / "current", previous)
             with (
                 patch("scripts.updater.execute"),
-                patch("scripts.updater.healthy", return_value=False),
+                patch("scripts.updater.healthy", side_effect=[True, False]),
                 patch("scripts.updater.subprocess.run") as process,
             ):
                 with self.assertRaisesRegex(RuntimeError, "restored previous"):
