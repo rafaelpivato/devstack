@@ -42,7 +42,7 @@ def configure(disable=False):
             raise pa.PrivateAccessError("Unable to confirm Funnel was disabled")
         return "Webhook Funnel disabled; private dashboard preserved"
     if matches_funnel(current, hostname):
-        return f"Webhooks public at https://{hostname}:8443/hooks/<name>"
+        return f"Webhooks public at https://{hostname}:8443/hooks/<project-uuid>/<route>"
     if not pa.is_our_private_serve(current):
         raise pa.PrivateAccessError("Expected a private Devstack dashboard on 443 only")
     try:

@@ -16,10 +16,14 @@ KillMode=control-group
 TimeoutStopSec=180
 RuntimeDirectory=devstack-control
 RuntimeDirectoryMode=0750
-UMask=0077
+UMask=0007
+Environment=HOME=/var/lib/devstack
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/devstack /run/devstack-control
 # The controller's Docker permission is privileged: only the trusted admin
