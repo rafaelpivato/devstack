@@ -325,10 +325,13 @@ class JobSupervisor:
                 if proc is not None:
                     self._terminate(proc)
                 self.backend.stop_job(identifier, state["generation"], job_id)
-                if thread is not None and thread is not threading.current_thread():
+                if (proc is not None and thread is not None
+                        and thread is not threading.current_thread()):
                     thread.join(timeout=12)
                     if thread.is_alive():
                         raise JobError("Worker termination not confirmed")
+                # Queued workers have no process to stop. The transition lock
+                # fences their spawn, and the queued-state check drops them.
             except Exception as exc:
                 # We cannot admit new work while a previous command might
                 # still exist. Reconciliation explicitly stops owned Docker.
