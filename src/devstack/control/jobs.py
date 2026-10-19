@@ -283,15 +283,19 @@ class JobSupervisor:
                 raise JobError("Job does not belong to requested project")
             if current["status"] not in ("queued", "running"):
                 return current
-            self._set(job_id, "cancelled")
-            with self._guard:
-                thread, proc = self._running.get(job_id, (None, None))
-            if proc is not None:
-                self._terminate(proc)
-            if thread is not None and thread is not threading.current_thread():
-                thread.join(timeout=8)
-                if thread.is_alive():
-                    raise JobError("Worker could not be confirmed stopped")
+            state = self.coordinator.status()
+            with self.database.transaction() as con:
+                row = con.execute("SELECT generation FROM jobs WHERE id=?",
+                                  (job_id,)).fetchone()
+            if (state["phase"] != "active" or state["project_id"] != identifier
+                    or not row or row["generation"] != state["generation"]):
+                raise JobError("Cannot cancel work from an inactive or stale generation")
+            # Killing Docker CLI alone does NOT stop a Compose exec process
+            # running inside a container. Cancellation must drain all workers,
+            # stop the owning containers, and verify ownership is globally
+            # clear before reporting a job cancelled.
+            self.coordinator._stop(state, "deactivating")
+            self.coordinator._update("inactive", None)
             return self.get(job_id)
 
     def list(self, identifier: str) -> dict:
