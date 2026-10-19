@@ -80,7 +80,7 @@
     <h3>Repositories</h3>
     {% if detail.repositories %}
     <ul>{% for repo in detail.repositories %}
-      <li><strong>{{ repo.name }}</strong> <small>{{ repo.relative_path }}</small></li>
+      <li><strong><a href="{{ url_for('repository_page', identifier=selected_id, repository_id=repo.id) }}">{{ repo.name }}</a></strong> <small>{{ repo.relative_path }}</small></li>
     {% endfor %}</ul>
     {% else %}<p>No Git repositories registered.</p>{% endif %}
   </section>

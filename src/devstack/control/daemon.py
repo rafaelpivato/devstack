@@ -18,6 +18,7 @@ import threading
 
 from devstack.projects.service import ProjectProvisioner
 from devstack.projects.configuration import ConfigurationService
+from devstack.projects.repositories import RepositoryGitService
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
 from devstack.storage.projects import ProjectRegistry
@@ -43,6 +44,7 @@ class Controller:
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
+        self.repositories = RepositoryGitService(self.registry, workspaces, self.coordinator)
         self.ingress = WebhookIngress(self.coordinator, self.registry, self.backend)
         self.coordinator.ingress = self.ingress
 
@@ -56,6 +58,8 @@ class Controller:
             "projects": {"op"},
             "project_detail": {"op", "project_id"},
             "project_rename": {"op", "project_id", "name"},
+            "repository_status": {"op", "project_id", "repository_id"},
+            "repository_update": {"op", "project_id", "repository_id", "expected_head"},
             "compose_read": {"op", "project_id"},
             "compose_save": {"op", "project_id", "content", "revision"},
             "settings_read": {"op", "project_id"},
@@ -117,6 +121,12 @@ class Controller:
         if operation == "project_rename":
             entry = self.registry.rename(request["project_id"], request["name"])
             return {"id": entry.id, "slug": entry.slug, "name": entry.name}
+        if operation == "repository_status":
+            return self.repositories.status(request["project_id"], request["repository_id"])
+        if operation == "repository_update":
+            return self.repositories.update(
+                request["project_id"], request["repository_id"], request["expected_head"],
+            )
         if operation == "compose_read":
             return self.configuration.compose(request["project_id"])
         if operation == "compose_save":

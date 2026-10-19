@@ -21,10 +21,10 @@ from .client import ControllerRejected, ControllerUnavailable, send
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound"}
+NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
-           "ManifestError", "ProjectProvisionError", "WorkspaceError"}
-CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict"}
+           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid"}
+CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -174,6 +174,28 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             return render_template("v2_import.html", job=job)
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
+
+    @app.get("/projects/<identifier>/repositories/<repository_id>")
+    def repository_page(identifier, repository_id):
+        try:
+            repo = call("repository_status", project_id=identifier,
+                        repository_id=repository_id)
+            runtime = call("status")
+            return render_template("v2_repository.html", repo=repo,
+                                   runtime=runtime, csrf=csrf())
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/projects/<identifier>/repositories/<repository_id>/update")
+    def repository_update_form(identifier, repository_id):
+        try:
+            call("repository_update", project_id=identifier,
+                 repository_id=repository_id, expected_head=field("expected_head"))
+            flash("Repository fast-forward completed.", "success")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect(url_for("repository_page", identifier=identifier,
+                                repository_id=repository_id), code=303)
 
     @app.post("/projects/<identifier>/rename")
     def rename_project(identifier):
@@ -382,6 +404,23 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def delete_webhook_api(identifier, route):
         try:
             return jsonify(call("webhook_remove", project_id=identifier, route=route))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/repositories/<repository_id>")
+    def repository_status_api(identifier, repository_id):
+        try:
+            return jsonify(call("repository_status", project_id=identifier,
+                                repository_id=repository_id))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/repositories/<repository_id>/update")
+    def repository_update_api(identifier, repository_id):
+        payload = json_input({"expected_head"})
+        try:
+            return jsonify(call("repository_update", project_id=identifier,
+                                repository_id=repository_id, **payload))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
