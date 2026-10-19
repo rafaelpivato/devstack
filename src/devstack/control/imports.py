@@ -57,7 +57,7 @@ class ImportSupervisor:
     def submit(self, url: str, project_slug: str, name: str, request_key: str) -> dict:
         # Validate before reserving the operation. Do not accept GitHub
         # credentials or untrusted hostnames as repository sources.
-        location = parse_github_url(url)
+        parse_github_url(url)
         slug(project_slug)
         display_name(name)
         if not isinstance(request_key, str) or not _KEY.fullmatch(request_key):
@@ -81,12 +81,13 @@ class ImportSupervisor:
                     if busy:
                         raise ImportConflict("Another GitHub import is in progress")
                     identifier = str(uuid4())
+                    target = str(uuid4())
                     con.execute(
                         "INSERT INTO import_operations"
-                        "(id,request_key,request_digest,url,slug,name,status,started_ns)"
-                        " VALUES(?,?,?,?,?,?,'queued',?)",
+                        "(id,request_key,request_digest,url,slug,name,target_id,status,started_ns)"
+                        " VALUES(?,?,?,?,?,?,?,'queued',?)",
                         (identifier, request_key, digest, url, project_slug, name,
-                         time.time_ns()),
+                         target, time.time_ns()),
                     )
                     create = True
             if create:
@@ -121,12 +122,15 @@ class ImportSupervisor:
                 if changed != 1:
                     return
                 row = con.execute(
-                    "SELECT url,slug,name FROM import_operations WHERE id=?",
+                    "SELECT url,slug,name,target_id FROM import_operations WHERE id=?",
                     (identifier,),
                 ).fetchone()
-                url, project_slug, name = row["url"], row["slug"], row["name"]
+                url, project_slug, name, target = (row["url"], row["slug"],
+                                                   row["name"], row["target_id"])
             try:
-                entry = self.provisioner.import_github(url, project_slug, name)
+                entry = self.provisioner.import_github(
+                    url, project_slug, name, identifier=target,
+                )
             except Exception as exc:
                 # Never persist arbitrary command output, repository URLs,
                 # exception descriptions or credential material in public status.
@@ -153,7 +157,7 @@ class ImportSupervisor:
         recovered = []
         with self.database.transaction(write=True) as con:
             rows = con.execute(
-                "SELECT id,url,slug FROM import_operations "
+                "SELECT id,target_id,url,slug FROM import_operations "
                 "WHERE status IN ('queued','running')",
             ).fetchall()
             for row in rows:
@@ -162,8 +166,8 @@ class ImportSupervisor:
                     "SELECT p.id FROM projects AS p "
                     "JOIN project_sources AS ps ON ps.project_id=p.id "
                     "JOIN repositories AS r ON r.id=ps.repository_id "
-                    "WHERE p.slug=? AND p.status='ready' AND r.clone_url=?",
-                    (row["slug"], location.clone_url),
+                    "WHERE p.id=? AND p.slug=? AND p.status='ready' AND r.clone_url=?",
+                    (row["target_id"], row["slug"], location.clone_url),
                 ).fetchone()
                 if project:
                     con.execute(
