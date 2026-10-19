@@ -21,10 +21,10 @@ from .client import ControllerRejected, ControllerUnavailable, send
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound"}
+NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound", "BulkRepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError", "JobInvalid"}
-CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict"}
+CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict", "BulkRepositoryConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -106,7 +106,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             job_history=job_history,
             example=request.args.get("example") == "smoke",
             sample_url=SAMPLE_URL, import_key=secrets.token_hex(16),
-            repository_add_key=secrets.token_hex(16), ssh_identity=ssh_identity,
+            repository_add_key=secrets.token_hex(16),
+            repository_bulk_key=secrets.token_hex(16), ssh_identity=ssh_identity,
         )
 
     @app.get("/healthz")
@@ -271,6 +272,28 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         except (ControllerUnavailable, ControllerRejected) as exc:
             flash(problem(exc)[1], "error")
             return redirect_to(identifier)
+
+    @app.post("/projects/<identifier>/repositories/update-all")
+    def repository_bulk_form(identifier):
+        try:
+            result = call("repository_bulk_submit", project_id=identifier,
+                          request_key=field("request_key"))
+            return redirect(url_for(
+                "repository_bulk_page", identifier=identifier,
+                operation_id=result["id"],
+            ), code=303)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to(identifier)
+
+    @app.get("/projects/<identifier>/repository-updates/<operation_id>")
+    def repository_bulk_page(identifier, operation_id):
+        try:
+            result = call("repository_bulk_status", project_id=identifier,
+                          id=operation_id)
+            return render_template("v2_bulk_repositories.html", result=result)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
 
     @app.get("/projects/<identifier>/repositories/<repository_id>")
     def repository_page(identifier, repository_id):
@@ -644,6 +667,38 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(400)
         try:
             return jsonify(call("branch_apply", project_id=identifier, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/repositories/update-all")
+    def repository_bulk_api(identifier):
+        key = request.headers.get("Idempotency-Key", "")
+        if not isinstance(key, str) or len(key) != 32:
+            abort(400)
+        if request.is_json:
+            payload = request.get_json(silent=True)
+            if payload != {}:
+                abort(400)
+        elif request.content_length:
+            abort(415)
+        try:
+            result = call("repository_bulk_submit", project_id=identifier,
+                          request_key=key)
+            response = jsonify(result)
+            response.status_code = 202
+            response.headers["Location"] = url_for(
+                "repository_bulk_status_api", identifier=identifier,
+                operation_id=result["id"],
+            )
+            return response
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/repository-updates/<operation_id>")
+    def repository_bulk_status_api(identifier, operation_id):
+        try:
+            return jsonify(call("repository_bulk_status", project_id=identifier,
+                                id=operation_id))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 

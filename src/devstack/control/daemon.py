@@ -30,6 +30,7 @@ from .observability import ContainerObservability
 from .private_ports import PrivateApplicationPorts
 from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
+from .bulk_repositories import BulkRepositoryUpdater
 from devstack.github_ssh import public_key, generate_key, test_connection
 from .ingress import WebhookIngress, WebhookServer
 
@@ -53,6 +54,9 @@ class Controller:
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
         self.repositories = RepositoryGitService(self.registry, workspaces, self.coordinator)
         self.repository_add = RepositoryAddSupervisor(database, self.registry, workspaces, self.coordinator)
+        self.bulk_repositories = BulkRepositoryUpdater(
+            database, self.registry, self.coordinator, self.repositories,
+        )
         self.source_review = SourceReviewService(self.registry, workspaces, self.provisioner, self.configuration)
         self.ingress = WebhookIngress(self.coordinator, self.registry, self.backend)
         self.coordinator.ingress = self.ingress
@@ -71,6 +75,8 @@ class Controller:
             "source_apply": {"op", "project_id", "revision", "selected", "overwrites"},
             "repository_status": {"op", "project_id", "repository_id"},
             "repository_update": {"op", "project_id", "repository_id", "expected_head"},
+            "repository_bulk_submit": {"op", "project_id", "request_key"},
+            "repository_bulk_status": {"op", "project_id", "id"},
             "branch_preview": {"op", "project_id", "branch", "repository_id"},
             "branch_apply": {"op", "project_id", "branch", "repository_id", "revision"},
             "repository_add_submit": {"op", "project_id", "url", "name", "branch", "request_key"},
@@ -148,6 +154,7 @@ class Controller:
                     for item in repositories
                 ],
                 "linked_source": self._has_linked_source(identifier),
+                "last_repository_update": self._last_repository_update(identifier),
                 "applications": [dict(row) for row in apps],
                 "tasks": [dict(row) for row in tasks],
             }
@@ -183,6 +190,12 @@ class Controller:
                 request["project_id"], request["branch"],
                 request["repository_id"], request["revision"],
             )
+        if operation == "repository_bulk_submit":
+            return self.bulk_repositories.submit(
+                request["project_id"], request["request_key"],
+            )
+        if operation == "repository_bulk_status":
+            return self.bulk_repositories.get(request["project_id"], request["id"])
         if operation == "repository_status":
             return self.repositories.status(request["project_id"], request["repository_id"])
         if operation == "repository_update":
@@ -236,6 +249,7 @@ class Controller:
             self.coordinator.reconcile()
             self.source_review.recover_pending()
             self.repository_add.reconcile()
+            self.bulk_repositories.recover()
             return self._public_status(self.coordinator.status())
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
@@ -272,6 +286,15 @@ class Controller:
                 raise ProtocolError("Job does not belong to requested project")
             return job
         raise ProtocolError("Unknown operation")
+
+    def _last_repository_update(self, identifier: str) -> dict | None:
+        with self.registry.database.transaction() as con:
+            row = con.execute(
+                "SELECT id,status FROM repository_bulk_updates "
+                "WHERE project_id=? ORDER BY started_ns DESC,id DESC LIMIT 1",
+                (identifier,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def _has_linked_source(self, identifier: str) -> bool:
         with self.registry.database.transaction() as con:
@@ -404,6 +427,12 @@ def main():
         except Exception:
             # A pending durable journal remains as a fail-closed barrier;
             # explicit reconcile retries runtime cleanup and replay.
+            pass
+        try:
+            # Unlike Docker/source publication, unfinished Git batches are
+            # never resumed after restart, even if runtime recovery failed.
+            controller.bulk_repositories.recover()
+        except Exception:
             pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
             with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
