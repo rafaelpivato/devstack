@@ -205,7 +205,10 @@ class SourceReviewService:
             state = self.configuration.coordinator.status()
             if state["phase"] != "inactive" or state["project_id"] is not None:
                 raise SourceSyncConflict("Cannot replay source changes during runtime execution")
-            self.configuration.coordinator._inspect()
+            # Verify real Docker ownership before replaying any files.
+            # This bypasses *only* the pending-journal admission barrier,
+            # never Docker/resource cleanup verification.
+            self.configuration.coordinator._verify_clear(allow_pending_sync=True)
             with self.registry.database.transaction() as con:
                 pending = con.execute(
                     "SELECT project_id,payload FROM source_sync_pending "
