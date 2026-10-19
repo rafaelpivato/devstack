@@ -370,8 +370,9 @@ jobs:
           from devstack.storage.database import Database
           from devstack.storage.projects import ProjectRegistry
           from devstack.control.docker import DockerBackend, compose_id
-          from devstack.control.coordinator import Coordinator
+          from devstack.control.coordinator import Coordinator, ControlError
           from devstack.control.jobs import JobSupervisor
+          from devstack.control.observability import ContainerObservability
           from devstack.control.ingress import WebhookIngress, WebhookServer
           from http.client import HTTPConnection
           from uuid import uuid4
@@ -415,6 +416,32 @@ jobs:
                       for x in backend.owned()
                   ), backend.owned()
                   assert webhook(a.id) == (200, b'{"hello":"webhook"}')
+                  # Read-only v2 Compose observability must never switch
+                  # projects or disclose another project's containers.
+                  observer = ContainerObservability(engine, backend)
+                  services_a = observer.services(a.id)
+                  assert services_a["active"], services_a
+                  assert services_a["services"], services_a
+                  postgres = next(
+                      x for x in services_a["services"] if x["name"] == "postgres"
+                  )
+                  assert postgres["status"] == "running", postgres
+                  assert len(postgres["containers"]) == 1, postgres
+                  container_id = postgres["containers"][0]["id"]
+                  assert len(container_id) == 64
+                  assert postgres["containers"][0]["state"] == "running"
+                  log_preview = observer.logs(a.id, container_id, 20)
+                  assert log_preview["service"] == "postgres", log_preview
+                  assert log_preview["tail"] == 20, log_preview
+                  assert len(log_preview["text"].encode("utf-8")) <= 65536
+                  assert observer.services(b.id) == {
+                      "project_id": b.id, "active": False, "services": []
+                  }
+                  try:
+                      observer.logs(b.id, container_id, 20)
+                      raise AssertionError("inactive project read Docker logs")
+                  except ControlError:
+                      pass
                   assert webhook(b.id)[0] == 503
                   assert webhook(str(uuid4()))[0] == 404
                   compose_a = backend.command(a.id)

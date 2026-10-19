@@ -98,3 +98,67 @@ if (imported) {
   window.setInterval(refreshImport, 2500);
   document.addEventListener("visibilitychange", refreshImport);
 }
+
+
+const servicesPanel = document.querySelector("[data-services-project]");
+if (servicesPanel && servicesPanel.dataset.servicesActive === "true") {
+  const id = servicesPanel.dataset.servicesProject;
+  const list = document.getElementById("services-list");
+  const status = document.getElementById("services-status");
+  const button = document.getElementById("refresh-services");
+  let pending = false;
+  async function refreshServices() {
+    if (document.hidden || pending) return;
+    pending = true;
+    try {
+      const response = await fetch(
+        `/api/v2/projects/${encodeURIComponent(id)}/services`,
+        {credentials: "same-origin", cache: "no-store"}
+      );
+      if (!response.ok) {
+        status.textContent = "Service status unavailable; refresh to retry.";
+        return;
+      }
+      const result = await response.json();
+      if (!result.active) {
+        status.textContent = "Project is no longer active.";
+        list.replaceChildren();
+        return;
+      }
+      list.replaceChildren();
+      status.textContent = result.services.length ?
+        "Current Compose service state" : "No Compose services configured.";
+      for (const service of result.services) {
+        const item = document.createElement("li");
+        const title = document.createElement("strong");
+        title.textContent = service.name + " · " + service.status;
+        item.appendChild(title);
+        if (!service.containers.length) {
+          const note = document.createElement("small");
+          note.textContent = " · no container";
+          item.appendChild(note);
+        }
+        for (const container of service.containers) {
+          const detail = document.createElement("div");
+          const health = container.health ? " · health: " + container.health : "";
+          detail.textContent = container.name + " · " + container.state +
+            health + " · restarts: " + container.restart_count + " ";
+          const link = document.createElement("a");
+          link.href = `/projects/${encodeURIComponent(id)}/services/${encodeURIComponent(container.id)}/logs`;
+          link.textContent = "View logs";
+          detail.appendChild(link);
+          item.appendChild(detail);
+        }
+        list.appendChild(item);
+      }
+    } catch (_) {
+      status.textContent = "Service status unavailable; refresh to retry.";
+    } finally {
+      pending = false;
+    }
+  }
+  button?.addEventListener("click", refreshServices);
+  document.addEventListener("visibilitychange", refreshServices);
+  window.setInterval(refreshServices, 8000);
+  refreshServices();
+}
