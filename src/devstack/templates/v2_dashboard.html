@@ -109,6 +109,22 @@
     <p class="hint">Services are not running for this project. Selecting it never activates Docker.</p>
     {% endif %}
   </section>
+  <section class="details" id="private-application-ports"
+           data-private-ports-project="{{ selected_id }}"
+           data-private-ports-active="{{ 'true' if active else 'false' }}">
+    <div class="heading">
+      <h3>Private application access</h3>
+      {% if active %}<button type="button" class="secondary" id="refresh-private-ports">Refresh</button>{% endif %}
+    </div>
+    <p class="hint">Direct Docker-published TCP ports bound to this server's Tailscale IP.
+      No proxy or automatic port publication. Links work from devices connected to your tailnet.</p>
+    {% if active %}
+      <p id="private-ports-status" class="hint" aria-live="polite">Checking private published ports…</p>
+      <ul id="private-ports-list"></ul>
+    {% else %}
+      <p class="hint">Activate this project to view its private application links.</p>
+    {% endif %}
+  </section>
   <section class="details">
     <h3>Applications</h3>
     {% if detail.applications %}

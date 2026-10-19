@@ -452,6 +452,71 @@ class DockerBackend:
                 "service": record["Config"]["Labels"]["com.docker.compose.service"],
                 **result}
 
+    def private_published_ports(self, identifier: str, generation: str,
+                                host: str) -> list[dict]:
+        """Read exact Tailscale-bound TCP mappings of running Compose services.
+
+        Docker is authoritative. Wildcard, loopback, public/non-tailnet IPs
+        and disposable one-off containers never produce private URLs.
+        """
+        import ipaddress
+        project_id(identifier)
+        try:
+            address = ipaddress.ip_address(host)
+            if (address.version != 4 or
+                    address not in ipaddress.ip_network("100.64.0.0/10")):
+                raise ValueError("Not a Tailscale IPv4 address")
+        except (ValueError, TypeError) as exc:
+            raise DockerControlError("Invalid private Tailscale binding address") from exc
+
+        snapshot = self.service_snapshot(identifier, generation)
+        published = set()
+        for service in snapshot["services"]:
+            for item in service["containers"]:
+                if item["state"] != "running":
+                    continue
+                record = self._checked_service_container(
+                    identifier, generation, item["id"],
+                )
+                if (record["Config"]["Labels"]["com.docker.compose.service"]
+                        != service["name"]):
+                    raise DockerControlError("Inconsistent Compose service ownership")
+                if not record.get("State", {}).get("Running"):
+                    continue
+                mappings = record.get("NetworkSettings", {}).get("Ports") or {}
+                if not isinstance(mappings, dict):
+                    raise DockerControlError("Invalid Docker port metadata")
+                for target, hosts in mappings.items():
+                    if not isinstance(target, str) or not target.endswith("/tcp"):
+                        continue
+                    try:
+                        container_port = int(target[:-4])
+                    except ValueError:
+                        continue
+                    if not 1 <= container_port <= 65535:
+                        continue
+                    if not isinstance(hosts, list):
+                        continue
+                    for mapping in hosts:
+                        if not isinstance(mapping, dict):
+                            continue
+                        if mapping.get("HostIp") != host:
+                            continue
+                        try:
+                            host_port = int(mapping.get("HostPort"))
+                        except (ValueError, TypeError):
+                            continue
+                        if not 1 <= host_port <= 65535:
+                            continue
+                        published.add((
+                            service["name"], container_port, host_port,
+                        ))
+        return [
+            {"service": service, "container_port": container_port,
+             "host_port": host_port, "url": f"http://{host}:{host_port}/"}
+            for service, container_port, host_port in sorted(published)
+        ]
+
     def webhook_target(self, identifier: str, generation: str,
                        service: str) -> str:
         """Return verified private IPv4 of exactly one active Compose service.
