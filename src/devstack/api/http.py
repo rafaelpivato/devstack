@@ -499,11 +499,13 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(415)
         payload = request.get_json(silent=True)
         if (not isinstance(payload, dict)
-                or set(payload) != {"url", "name", "branch"}
+                or set(payload) - {"url", "name", "branch"}
+                or not {"url", "name"}.issubset(payload)
                 or any(not isinstance(value, str) or len(value) > 2048
                        for value in payload.values())
                 or not payload["url"].strip() or not payload["name"].strip()):
             abort(400)
+        payload.setdefault("branch", "")
         key = request.headers.get("Idempotency-Key", "")
         if not isinstance(key, str) or len(key) != 32:
             abort(400, description="Idempotency-Key header required")
