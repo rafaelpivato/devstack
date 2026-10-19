@@ -84,7 +84,10 @@ class ProjectProvisionTests(unittest.TestCase):
             names = {row[0] for row in con.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
-        self.assertNotIn("runtime_state", names)
+        self.assertIn("runtime_state", names)
+        with service.registry.database.transaction() as con:
+            state = con.execute("SELECT phase,project_id FROM runtime_state").fetchone()
+        self.assertEqual(tuple(state), ("inactive", None))
 
     def test_empty_project_and_imported_project_coexist(self):
         a = self.service.create_empty("blank", "Blank project")
