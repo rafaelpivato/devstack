@@ -28,6 +28,22 @@ class AutoUpdateTests(unittest.TestCase):
                 self.assertIn("Already running", message)
                 prepare.assert_not_called()
 
+    def test_same_version_with_active_project_does_not_report_update_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            current = root / "releases" / "v0.5.7"
+            current.mkdir(parents=True)
+            (current / ".ready").write_text("v0.5.7\n")
+            updater.point_at(root / "current", current)
+            with (patch("scripts.updater.prepare_release") as prepare,
+                  patch("scripts.updater.healthy", return_value=False) as health):
+                self.assertIn("Already running", updater.activate(
+                    "v0.5.7", "rafaelpivato/devstack",
+                    root, Path(directory) / "state",
+                ))
+                prepare.assert_not_called()
+                health.assert_not_called()
+
     def test_new_minor_release_is_automatically_applied(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "app"

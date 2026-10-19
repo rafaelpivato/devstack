@@ -166,8 +166,8 @@ def activate(
     old = current_release(current)
     target = root / "releases" / tag
     if old == target and (target / ".ready").exists():
-        if not healthy(health_url, attempts=2):
-            raise RuntimeError("Current v2 release is unhealthy; operator intervention required")
+        # No service restart is needed; an actively running project is not
+        # a failed update. A health gate is required only before a change.
         return f"Already running {tag}"
     # An update must not disrupt an active project or unhealthy supervisor.
     if old is not None and not healthy(health_url, attempts=2):
