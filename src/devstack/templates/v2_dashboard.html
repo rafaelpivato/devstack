@@ -85,6 +85,12 @@
     {% endfor %}</ul>
     {% else %}<p>No Git repositories registered.</p>{% endif %}
     {% if runtime.phase == 'inactive' and detail.repositories %}
+    <form method="post" action="{{ url_for('repository_bulk_form', identifier=selected_id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <input type="hidden" name="request_key" value="{{ repository_bulk_key }}">
+      <button class="secondary">Update all repositories</button>
+    </form>
+    <p class="hint">Fetch and fast-forward safe tracking branches. Modified, detached, divergent or unsupported repositories are skipped and reported separately. No templates are applied.</p>
     <form method="get" action="{{ url_for('branch_preview_page', identifier=selected_id) }}">
       <label>Switch project repositories to branch
         <input name="branch" maxlength="200" placeholder="feature/my-work" required></label>
