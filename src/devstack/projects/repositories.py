@@ -279,32 +279,34 @@ class RepositoryGitService:
                     and all(row["status"] == "succeeded" for row in results)}
 
     def update(self, identifier: str, repository_id: str, expected_head: str) -> dict:
+        # This public operation preserves the one-project global source-write
+        # boundary. Bulk updates share one coordinator lock across all repos.
+        with self.coordinator.locked():
+            return self.update_locked(identifier, repository_id, expected_head)
+
+    def update_locked(self, identifier: str, repository_id: str,
+                      expected_head: str) -> dict:
+        """Fast-forward while the caller owns the global coordinator lock."""
         if not isinstance(expected_head, str) or not _HEAD.fullmatch(expected_head):
             raise RepositoryGitInvalid("Expected a Git commit hash")
-        # Serializing the full operation with activation and configuration
-        # writers prevents source changes during an executing project.
-        with self.coordinator.locked():
-            state = self.coordinator.status()
-            if state["phase"] != "inactive" or state["project_id"] is not None:
-                raise RepositoryGitError("Deactivate before updating repository source")
-            self.coordinator._verify_clear()
-            current = self.status(identifier, repository_id)
-            if current["head"] != expected_head:
-                raise RepositoryGitError("Repository changed since inspection")
-            if current["dirty"] or not current["branch"]:
-                raise RepositoryGitError("Repository must be clean and on a branch")
-            upstream = current["upstream"]
-            if not upstream or not upstream.startswith("origin/"):
-                raise RepositoryGitError("Git branch must track origin")
-            _, checkout = self._checkout(identifier, repository_id)
-            self._git(checkout, "fetch", "--no-tags", "origin")
-            refreshed = self.status(identifier, repository_id)
-            if (refreshed["head"] != expected_head or refreshed["dirty"]
-                    or refreshed["branch"] != current["branch"]
-                    or refreshed["upstream"] != upstream):
-                raise RepositoryGitError("Repository changed during fetch")
-            if refreshed["ahead"] and refreshed["behind"]:
-                raise RepositoryGitError("Diverged history requires manual resolution")
-            if refreshed["behind"]:
-                self._git(checkout, "merge", "--ff-only", "@{upstream}")
-            return self.status(identifier, repository_id)
+        self._source_editable()
+        current = self.status(identifier, repository_id)
+        if current["head"] != expected_head:
+            raise RepositoryGitError("Repository changed since inspection")
+        if current["dirty"] or not current["branch"]:
+            raise RepositoryGitError("Repository must be clean and on a branch")
+        upstream = current["upstream"]
+        if not upstream or not upstream.startswith("origin/"):
+            raise RepositoryGitError("Git branch must track origin")
+        _, checkout = self._checkout(identifier, repository_id)
+        self._git(checkout, "fetch", "--no-tags", "origin")
+        refreshed = self.status(identifier, repository_id)
+        if (refreshed["head"] != expected_head or refreshed["dirty"]
+                or refreshed["branch"] != current["branch"]
+                or refreshed["upstream"] != upstream):
+            raise RepositoryGitError("Repository changed during fetch")
+        if refreshed["ahead"] and refreshed["behind"]:
+            raise RepositoryGitError("Diverged history requires manual resolution")
+        if refreshed["behind"]:
+            self._git(checkout, "merge", "--ff-only", "@{upstream}")
+        return self.status(identifier, repository_id)
