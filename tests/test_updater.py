@@ -61,7 +61,7 @@ class DeploymentTests(unittest.TestCase):
 
     @patch("scripts.updater.subprocess.run")
     @patch("scripts.updater.execute")
-    @patch("scripts.updater.healthy", return_value=False)
+    @patch("scripts.updater.healthy", side_effect=[True, False])
     def test_failed_update_restores_previous(self, healthy, execute, process):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "app"

@@ -1,11 +1,10 @@
 [Unit]
-Description=Dispatch a Devstack manual update request without granting app privileges
-After=devstack.service
+Description=Forward private DevStack manual update marker to trusted updater
 
 [Service]
 Type=oneshot
 User=root
+# Consume the marker first to avoid re-triggering the path unit.
+# There is no user-supplied command or update tag.
 ExecStartPre=/usr/bin/rm -f /run/devstack-update-request/trigger
 ExecStart=/usr/bin/systemctl --no-block start devstack-update.service
-NoNewPrivileges=true
-PrivateTmp=true

@@ -87,7 +87,7 @@ install -d -o "$web_user" -g "$web_user" -m 0700 /var/lib/devstack-bootstrap
 install -d -o root -g "$socket_group" -m 0750 /etc/devstack
 
 secret="$(python3 -c 'import secrets;print(secrets.token_hex(32))')"
-printf 'DEVSTACK_SECRET_KEY=%s\nDEVSTACK_SECURE_COOKIES=1\nDEVSTACK_CONTROL_SOCKET=/run/devstack-control/control.sock\n' "$secret" > /etc/devstack/app.env
+printf 'DEVSTACK_SECRET_KEY=%s\nDEVSTACK_SECURE_COOKIES=1\nDEVSTACK_CONTROL_SOCKET=/run/devstack-control/control.sock\nDEVSTACK_RELEASE_REPO=%s\n' "$secret" "$repo" > /etc/devstack/app.env
 chown root:"$socket_group" /etc/devstack/app.env
 chmod 0640 /etc/devstack/app.env
 printf 'DEVSTACK_ROOT=/opt/devstack\nDEVSTACK_STATE=/var/lib/devstack\nDEVSTACK_REPO=%s\n' "$repo" > /etc/devstack/update.env
@@ -102,6 +102,7 @@ for path in \
   scripts/enable-tailscale.sh scripts/bootstrap.py \
   deploy/devstack-control.service deploy/devstack-web-v2.service \
   deploy/devstack-update.service deploy/devstack-update.timer \
+  deploy/devstack-update-request.service deploy/devstack-update-request.path \
   deploy/devstack-tailscale-finish.service deploy/devstack-tailscale-finish.timer \
   deploy/devstack-bootstrap.service
 do
@@ -122,6 +123,7 @@ sed -e "s|@DEVSTACK_WEB_USER@|$web_user|g" \
 sed -e "s|@DEVSTACK_WEB_USER@|$web_user|g" \
     "$tmpdir/devstack-bootstrap.service" > /etc/systemd/system/devstack-bootstrap.service
 for file in devstack-update.service devstack-update.timer \
+  devstack-update-request.service devstack-update-request.path \
   devstack-tailscale-finish.service devstack-tailscale-finish.timer
 do
   install -m 0644 "$tmpdir/$file" "/etc/systemd/system/$file"
@@ -133,6 +135,7 @@ if ! python3 /usr/local/lib/devstack/updater.py --tag "$release_tag"; then
   exit 1
 fi
 systemctl enable --now devstack-update.timer
+systemctl enable --now devstack-update-request.path
 echo "DevStack $release_tag ready; dashboard is private at http://127.0.0.1:8765."
 echo "For private HTTPS, run: sudo /usr/local/lib/devstack/enable-tailscale.sh"
 echo "Do not expose ports 8765 or 8767 publicly."

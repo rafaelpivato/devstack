@@ -32,6 +32,14 @@
   </form>
 </section>
 {% endif %}
+<section class="card">
+  <div class="heading">
+    <h2>DevStack updates</h2>
+    <a href="{{ url_for('devstack_updates') }}">Check for updates / Update now</a>
+  </div>
+  <p class="hint">Only published releases. Deactivate the project before updating;
+    the independent updater verifies health and supports rollback.</p>
+</section>
 <nav class="card projects-nav" aria-label="Registered projects">
   <div class="heading"><h2>Projects</h2><a href="{{ url_for('index') }}#add-project">Add project</a></div>
   {% if projects %}

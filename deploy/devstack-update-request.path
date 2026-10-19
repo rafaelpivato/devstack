@@ -1,6 +1,6 @@
 [Unit]
-Description=Watch for a Devstack dashboard update request
-After=devstack.service
+Description=Watch private manual DevStack update requests
+After=devstack-web-v2.service
 
 [Path]
 PathExists=/run/devstack-update-request/trigger
