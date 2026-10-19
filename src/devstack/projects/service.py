@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from devstack.adapters.github import GitHubSource
-from devstack.domain.models import display_name, slug
+from devstack.domain.models import display_name, slug, repo_path
 from devstack.storage.projects import ProjectConflict, ProjectRegistry
 from .manifest import parse_template
 from .workspaces import WorkspaceError, WorkspaceStore
@@ -106,19 +106,38 @@ class ProjectProvisioner:
                 path = root / name
                 if not path.is_dir() or path.is_symlink():
                     raise ProjectProvisionError("Incomplete published project workspace")
-            # Empty projects have no template; imports must retain their
-            # validated source snapshot and linked repository.
+            # Empty projects have no source record. For imported projects,
+            # verify the exact linked repository and source before enabling it.
             try:
                 with self.registry.database.transaction() as con:
                     source = con.execute(
-                        "SELECT repository_id FROM project_sources WHERE project_id=?",
-                        (entry.id,),
+                        "SELECT r.relative_path,s.subdirectory "
+                        "FROM project_sources AS s "
+                        "JOIN repositories AS r ON r.id=s.repository_id "
+                        "WHERE s.project_id=?", (entry.id,),
                     ).fetchone()
                 if source is not None:
-                    if not (root / "managed" / "project.toml").is_file():
-                        raise ProjectProvisionError("Missing imported project manifest")
-                    if not any((root / "repos").iterdir()):
-                        raise ProjectProvisionError("Missing imported repository")
+                    relative = repo_path(source["relative_path"])
+                    checkout = root.joinpath(*relative.split("/"))
+                    if checkout.is_symlink() or not checkout.is_dir():
+                        raise ProjectProvisionError("Missing linked repository checkout")
+                    selected = checkout
+                    if source["subdirectory"]:
+                        for part in repo_path(source["subdirectory"]).split("/"):
+                            selected = selected / part
+                            if selected.is_symlink():
+                                raise ProjectProvisionError("Symlinked source template")
+                    config = selected / ".devstack"
+                    if (not config.is_dir() or config.is_symlink()
+                            or not config.resolve().is_relative_to(checkout.resolve())):
+                        raise ProjectProvisionError("Linked source template unavailable")
+                    for filename in ("project.toml",):
+                        for directory in ("managed", "baseline"):
+                            candidate = root / directory / filename
+                            if candidate.is_symlink() or not candidate.is_file():
+                                raise ProjectProvisionError("Missing managed import baseline")
+                    if not (config / "project.toml").is_file():
+                        raise ProjectProvisionError("Linked source manifest unavailable")
             except OSError as exc:
                 raise ProjectProvisionError("Unable to verify published workspace") from exc
             self.registry.finalize_import(entry.id)
