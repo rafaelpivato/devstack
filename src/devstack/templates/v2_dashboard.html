@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="devstack-csrf" content="{{ csrf }}">
+<title>DevStack · Projects</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css') }}">
+<script type="module" src="{{ url_for('static', filename='js/v2_dashboard.js') }}"></script>
+</head>
+<body>
+<header class="top">
+  <div><h1><a href="{{ url_for('index') }}">DevStack</a></h1>
+  <p class="subhead">Multi-project development control</p></div>
+  <div class="phase"><span id="runtime-phase" data-active-project="{{ runtime.project_id or '' }}" aria-live="polite">
+    Runtime: <strong>{{ runtime.phase }}</strong>
+  </span>
+  {% if runtime.project_id %}
+    <small>Active: {{ (projects | selectattr('id','equalto',runtime.project_id) | map(attribute='name') | list | first) | default('Unknown project',true) }}</small>
+  {% endif %}
+  </div>
+</header>
+{% for category,message in get_flashed_messages(with_categories=true) %}
+<p class="notice {{ category }}" role="status">{{ message }}</p>
+{% endfor %}
+{% if runtime.phase == 'error' %}
+<section class="card warning" role="alert">
+  <h2>Runtime requires recovery</h2>
+  <p>The controller cannot verify that execution is stopped. New activations are blocked until recovery completes.</p>
+  <form method="post" action="{{ url_for('reconcile') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button class="danger">Retry recovery</button>
+  </form>
+</section>
+{% endif %}
+<nav class="card projects-nav" aria-label="Registered projects">
+  <div class="heading"><h2>Projects</h2><a href="{{ url_for('index') }}#add-project">Add project</a></div>
+  {% if projects %}
+  <ul>
+    {% for project in projects %}
+    <li>
+      <a {% if project.id == selected_id %}aria-current="page"{% endif %}
+         href="{{ url_for('selected_project', identifier=project.id) }}">{{ project.name }}</a>
+      {% if project.id == runtime.project_id %}<span class="pill active">Active</span>{% else %}<span class="pill">Inactive</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p>No projects yet. Import a GitHub example or create an empty workspace below.</p>{% endif %}
+</nav>
+{% if detail %}
+<main class="card" id="project-detail">
+  {% set project = detail.project %}
+  {% set active = runtime.phase == 'active' and runtime.project_id == selected_id %}
+  <div class="heading"><div>
+    <h2>{{ project.name }}</h2>
+    <p class="subhead">{{ project.slug }}</p>
+  </div><span class="pill {{ 'active' if active else '' }}">
+    {{ 'Active' if active else 'Inactive' }}
+  </span></div>
+  <p class="hint">Viewing this project does not activate it or stop other projects.</p>
+  {% if runtime.phase == 'inactive' %}
+  <form action="{{ url_for('activate', identifier=selected_id) }}" method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button>Activate this project</button>
+  </form>
+  {% elif runtime.phase == 'active' and not active %}
+  <form action="{{ url_for('switch', identifier=selected_id) }}" method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <p class="hint">Switching stops the active project's commands and containers before starting this one. Data volumes are preserved.</p>
+    <button>Switch runtime to this project</button>
+  </form>
+  {% elif active %}
+  <form action="{{ url_for('deactivate') }}" method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <button class="danger">Deactivate runtime</button>
+  </form>
+  {% else %}
+  <p class="hint">Runtime is transitioning or recovering; activation is unavailable.</p>
+  {% endif %}
+  <section class="details">
+    <h3>Repositories</h3>
+    {% if detail.repositories %}
+    <ul>{% for repo in detail.repositories %}
+      <li><strong>{{ repo.name }}</strong> <small>{{ repo.relative_path }}</small></li>
+    {% endfor %}</ul>
+    {% else %}<p>No Git repositories registered.</p>{% endif %}
+  </section>
+  <section class="details">
+    <h3>Applications</h3>
+    {% if detail.applications %}
+    <ul>{% for app in detail.applications %}
+      <li><strong>{{ app.name }}</strong> · {{ app.service }}
+        {% if app.port %}<small>Container port {{ app.port }}</small>{% endif %}
+      </li>
+    {% endfor %}</ul>
+    {% else %}<p>No applications registered.</p>{% endif %}
+  </section>
+  <section class="details">
+    <h3>Saved tasks</h3>
+    {% if detail.tasks %}
+    <ul>{% for task in detail.tasks %}
+      <li><span><strong>{{ task.name }}</strong>
+        <small>{{ task.service if task.service else task.image }} · {{ task.mode }}</small></span>
+      {% if active %}
+        <form method="post" action="{{ url_for('run_task', identifier=selected_id, task_name=task.name) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf }}"><button class="secondary">Run</button></form>
+      {% else %}<small>Inactive · cannot run</small>{% endif %}
+      </li>
+    {% endfor %}</ul>
+    {% else %}<p>No tasks registered.</p>{% endif %}
+  </section>
+  {% if active %}
+  <section class="details">
+    <h3>Docker Compose</h3>
+    {% for action in ['build','restart'] %}
+      <form method="post" action="{{ url_for('run_compose', identifier=selected_id, action=action) }}">
+        <input type="hidden" name="_csrf" value="{{ csrf }}">
+        <button class="secondary">{{ action | capitalize }}</button>
+      </form>
+    {% endfor %}
+  </section>
+  {% endif %}
+  <section class="details">
+    <h3>Project settings</h3>
+    <form method="post" action="{{ url_for('rename_project', identifier=selected_id) }}" class="stacked">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <label for="display-name">Display name (does not change project identity)</label>
+      <input id="display-name" name="name" maxlength="120" value="{{ project.name }}" required>
+      <button class="secondary">Save name</button>
+    </form>
+  </section>
+</main>
+{% elif projects %}
+<section class="card">
+  <h2>Choose a project</h2>
+  <p>Open any project above to inspect it. Selecting a project never activates its runtime.</p>
+</section>
+{% endif %}
+<section id="add-project" class="card">
+  <h2>Import a GitHub project</h2>
+  <p>Works with an empty or already populated registry. Importing does not start Docker or switch the runtime.</p>
+  <p><a class="example-link" href="{{ url_for('index', example='smoke') }}#add-project">Use Smoke Test example</a></p>
+  <form class="stacked" method="post" action="{{ url_for('import_project') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <label for="import-url">GitHub repository or tree URL</label>
+    <input type="url" id="import-url" name="url" maxlength="2048" required
+           placeholder="https://github.com/owner/repository/tree/main/path"
+           value="{{ sample_url if example else '' }}">
+    <label for="import-slug">Project slug</label>
+    <input id="import-slug" name="slug" pattern="[a-z][a-z0-9-]*" maxlength="63"
+           value="{{ 'smoke' if example else '' }}" required>
+    <label for="import-name">Display name</label>
+    <input id="import-name" name="name" maxlength="120"
+           value="{{ 'Smoke Test' if example else '' }}" required>
+    <button>Import project</button>
+  </form>
+  <p class="hint">You may import the same repository again using a different project slug. Public HTTPS imports require no GitHub SSH setup.</p>
+</section>
+<section class="card">
+  <h2>Create an empty project</h2>
+  <form class="stacked" method="post" action="{{ url_for('create_project') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf }}">
+    <label for="new-slug">Project slug</label>
+    <input id="new-slug" name="slug" maxlength="63" pattern="[a-z][a-z0-9-]*" required>
+    <label for="new-name">Display name</label>
+    <input id="new-name" name="name" maxlength="120" required>
+    <button class="secondary">Create project</button>
+  </form>
+</section>
+<footer>Private DevStack dashboard · One active project per server · All projects persist</footer>
+</body></html>

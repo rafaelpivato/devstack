@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DevStack · Job {{ job.id }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css') }}">
+<script type="module" src="{{ url_for('static', filename='js/v2_dashboard.js') }}"></script>
+</head><body>
+<header class="top"><div><h1><a href="{{ url_for('index') }}">DevStack</a></h1>
+<p class="subhead">Supervised job</p></div></header>
+<main class="card" data-job-project="{{ selected_id }}" data-job-id="{{ job.id }}">
+<h2>{{ job.action }}</h2>
+<p><span class="pill" id="job-status">{{ job.status }}</span></p>
+<p>Type: {{ job.kind }} · Project: {{ selected_id }}</p>
+{% if job.exit_code is not none %}<p>Exit code: <strong>{{ job.exit_code }}</strong></p>{% endif %}
+<p class="hint">Jobs continue independently of this browser tab. Logs remain private on the server.</p>
+<a href="{{ url_for('selected_project', identifier=selected_id) }}">Back to project</a>
+</main></body></html>

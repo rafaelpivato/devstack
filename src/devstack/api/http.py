@@ -1,0 +1,336 @@
+"""DevStack v2: project-scoped owner dashboard and HTTP API.
+
+This process owns neither Docker nor the SQLite registry. Every operation
+goes over the controller's restricted Unix socket; selecting a project in
+one browser tab does not mutate the global active runtime.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import secrets
+
+from flask import (
+    Flask, abort, flash, jsonify, redirect, render_template, request,
+    session, url_for,
+)
+from werkzeug.exceptions import HTTPException
+
+from .client import ControllerRejected, ControllerUnavailable, send
+
+SAFE_READ = {"GET", "HEAD", "OPTIONS"}
+SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+NOT_FOUND = {"ProjectNotFound"}
+INVALID = {"DomainError", "ProtocolError", "GitHubSourceError",
+           "ManifestError", "ProjectProvisionError", "WorkspaceError"}
+CONFLICT = {"ControlError", "ProjectConflict", "JobError", "DockerControlError"}
+
+
+def create_app(config: dict | None = None, *, transport=None) -> Flask:
+    app = Flask(__name__, template_folder="../templates", static_folder="../static")
+    app.config.update(
+        SECRET_KEY=os.environ.get("DEVSTACK_SECRET_KEY") or secrets.token_hex(32),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Strict",
+        SESSION_COOKIE_SECURE=os.environ.get("DEVSTACK_SECURE_COOKIES", "1") == "1",
+        MAX_CONTENT_LENGTH=64 * 1024,
+        CONTROLLER_SOCKET=os.environ.get(
+            "DEVSTACK_CONTROL_SOCKET", "/run/devstack-control/control.sock"),
+    )
+    if config:
+        app.config.update(config)
+
+    def call(op: str, **fields):
+        if transport is not None:
+            return transport(op, **fields)
+        return send(Path(app.config["CONTROLLER_SOCKET"]), op, **fields)
+
+    def csrf() -> str:
+        if "_csrf" not in session:
+            session["_csrf"] = secrets.token_urlsafe(32)
+        return session["_csrf"]
+
+    @app.before_request
+    def guard_writes():
+        if request.method in SAFE_READ:
+            return
+        supplied = request.headers.get("X-CSRF-Token")
+        if not supplied:
+            supplied = request.form.get("_csrf", "")
+        expected = session.get("_csrf")
+        if (not expected or not supplied
+                or not secrets.compare_digest(expected, supplied)):
+            abort(403)
+        if request.is_json and request.content_length and request.content_length > 8192:
+            abort(413)
+
+    def problem(exc):
+        if isinstance(exc, ControllerUnavailable):
+            return 503, "DevStack controller is unavailable. Try again shortly."
+        if isinstance(exc, ControllerRejected):
+            if exc.code in NOT_FOUND:
+                return 404, "The requested project does not exist."
+            if exc.code in INVALID:
+                return 422, "Invalid project configuration or request."
+            if exc.code in CONFLICT:
+                return 409, "The requested operation is not currently permitted."
+        return 503, "The controller could not complete the operation."
+
+    def json_error(exc):
+        status, message = problem(exc)
+        return jsonify({"ok": False, "message": message}), status
+
+    def project_data(identifier):
+        detail = call("project_detail", project_id=identifier)
+        return detail
+
+    def page(identifier=None):
+        overview = call("projects")
+        runtime = call("status")
+        details = project_data(identifier) if identifier else None
+        selected_id = details["project"]["id"] if details else None
+        return render_template(
+            "v2_dashboard.html", projects=overview["projects"], runtime=runtime,
+            detail=details, selected_id=selected_id, csrf=csrf(),
+            example=request.args.get("example") == "smoke",
+            sample_url=SAMPLE_URL,
+        )
+
+    @app.get("/healthz")
+    def healthz():
+        try:
+            result = call("health")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+        if result.get("runtime") == "error":
+            return jsonify({"ok": False, "controller": "recovery_required"}), 503
+        return jsonify({"ok": True, "controller": "connected"})
+
+    @app.get("/")
+    def index():
+        try:
+            return page()
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/projects/<identifier>")
+    def selected_project(identifier):
+        try:
+            return page(identifier)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    def redirect_to(identifier=None):
+        return redirect(
+            url_for("selected_project", identifier=identifier) if identifier
+            else url_for("index"), code=303,
+        )
+
+    def perform(op, *, target=None, **fields):
+        try:
+            call(op, **fields)
+            flash("Operation completed.", "success")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect_to(target)
+
+    def field(name):
+        value = request.form.get(name, "")
+        if not isinstance(value, str) or len(value) > 2048:
+            abort(400)
+        return value.strip()
+
+    @app.post("/projects")
+    def create_project():
+        try:
+            created = call("project_create", slug=field("slug"), name=field("name"))
+            return redirect_to(created["id"])
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to()
+
+    @app.post("/projects/import")
+    def import_project():
+        try:
+            created = call(
+                "project_import", url=field("url"),
+                slug=field("slug"), name=field("name"),
+            )
+            return redirect_to(created["id"])
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to()
+
+    @app.post("/projects/<identifier>/rename")
+    def rename_project(identifier):
+        return perform("project_rename", target=identifier,
+                       project_id=identifier, name=field("name"))
+
+    @app.post("/projects/<identifier>/activate")
+    def activate(identifier):
+        return perform("activate", target=identifier, project_id=identifier)
+
+    @app.post("/projects/<identifier>/switch")
+    def switch(identifier):
+        return perform("switch", target=identifier, project_id=identifier)
+
+    @app.post("/runtime/deactivate")
+    def deactivate():
+        return perform("deactivate")
+
+    @app.post("/runtime/reconcile")
+    def reconcile():
+        return perform("reconcile")
+
+    @app.post("/projects/<identifier>/tasks/<task_name>/run")
+    def run_task(identifier, task_name):
+        try:
+            result = call("task", project_id=identifier, name=task_name)
+            return redirect(url_for("job_page", identifier=identifier,
+                                    job_id=result["job_id"]), code=303)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to(identifier)
+
+    @app.post("/projects/<identifier>/compose/<action>")
+    def run_compose(identifier, action):
+        if action not in {"build", "restart"}:
+            abort(404)
+        try:
+            result = call("compose", project_id=identifier, action=action)
+            return redirect(url_for("job_page", identifier=identifier,
+                                    job_id=result["job_id"]), code=303)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+            return redirect_to(identifier)
+
+    @app.get("/projects/<identifier>/jobs/<job_id>")
+    def job_page(identifier, job_id):
+        try:
+            job = call("job", project_id=identifier, id=job_id)
+            current = call("status")
+            return render_template("v2_job.html", job=job, runtime=current,
+                                   selected_id=identifier, csrf=csrf())
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects")
+    def list_projects():
+        try:
+            return jsonify(call("projects"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects")
+    def create_project_api():
+        payload = json_input({"slug", "name"})
+        try:
+            result = call("project_create", **payload)
+            return jsonify({"project": result}), 201
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/import")
+    def import_project_api():
+        payload = json_input({"url", "slug", "name"})
+        try:
+            result = call("project_import", **payload)
+            return jsonify({"project": result}), 201
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>")
+    def get_project_api(identifier):
+        try:
+            return jsonify(project_data(identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.patch("/api/v2/projects/<identifier>")
+    def rename_project_api(identifier):
+        payload = json_input({"name"})
+        try:
+            return jsonify({"project": call(
+                "project_rename", project_id=identifier, name=payload["name"],
+            )})
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/runtime")
+    def runtime_api():
+        try:
+            return jsonify(call("status"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/activate")
+    def activate_api(identifier):
+        try:
+            return jsonify({"runtime": call("activate", project_id=identifier)})
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/runtime/switch")
+    def switch_api():
+        payload = json_input({"project_id"})
+        try:
+            return jsonify({"runtime": call("switch", **payload)})
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/runtime/deactivate")
+    def deactivate_api():
+        try:
+            return jsonify({"runtime": call("deactivate")})
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/runtime/reconcile")
+    def reconcile_api():
+        try:
+            return jsonify({"runtime": call("reconcile")})
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/tasks/<task_name>/run")
+    def run_task_api(identifier, task_name):
+        try:
+            return jsonify(call("task", project_id=identifier, name=task_name)), 202
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/compose/<action>")
+    def run_compose_api(identifier, action):
+        if action not in {"build", "restart"}:
+            abort(404)
+        try:
+            return jsonify(call("compose", project_id=identifier, action=action)), 202
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/jobs/<job_id>")
+    def job_api(identifier, job_id):
+        try:
+            return jsonify(call("job", project_id=identifier, id=job_id))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    def json_input(keys):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if (not isinstance(payload, dict) or set(payload) != keys or
+                any(not isinstance(value, str) or not value.strip()
+                    or len(value) > 2048 for value in payload.values())):
+            abort(400)
+        return payload
+
+    return app
+
+
+def main():
+    from gunicorn.app.wsgiapp import run
+    os.environ.setdefault("GUNICORN_CMD_ARGS", "--bind 127.0.0.1:8765 --workers 2")
+    import sys
+    sys.argv = [sys.argv[0], "devstack.api.http:create_app()"]
+    run()

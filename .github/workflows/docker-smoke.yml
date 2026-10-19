@@ -75,6 +75,10 @@ jobs:
                   "devstack/static/js/dashboard.js",
                   "devstack/static/css/dashboard.css",
                   "devstack/templates/dashboard.html",
+                  "devstack/templates/v2_dashboard.html",
+                  "devstack/templates/v2_job.html",
+                  "devstack/static/css/v2.css",
+                  "devstack/static/js/v2_dashboard.js",
               ):
                   assert path in names, f"Missing packaged asset: {path}"
           PY
