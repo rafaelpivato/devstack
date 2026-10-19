@@ -222,7 +222,10 @@ class _WebhookHandler(BaseHTTPRequestHandler):
         self.close_connection = True
 
     def do_GET(self):
-        self.respond(404)
+        if self.path == "/healthz":
+            self.respond(200, b'{"scope":"webhook-only"}', "application/json")
+        else:
+            self.respond(404)
 
     def do_POST(self):
         if not self.server.slots.acquire(blocking=False):
