@@ -54,7 +54,7 @@ _SCHEMA = (
            status TEXT NOT NULL CHECK(status IN
              ('queued','running','cancelling','succeeded','failed','cancelled')),
            action TEXT NOT NULL,
-           cancel_policy TEXT NOT NULL CHECK(cancel_policy IN ('independent','project')),
+           cancel_policy TEXT NOT NULL DEFAULT 'project' CHECK(cancel_policy IN ('independent','project')),
            started_ns INTEGER NOT NULL,
            finished_ns INTEGER,
            exit_code INTEGER)""",
