@@ -32,7 +32,8 @@ class JobSupervisor:
         self._running: dict[str, tuple[threading.Thread, subprocess.Popen | None]] = {}
         coordinator.jobs = self
 
-    def _task(self, identifier: str, task_name: str) -> list[str]:
+    def _task(self, identifier: str, task_name: str, generation: str,
+              job_id: str) -> list[str]:
         with self.database.transaction() as con:
             row = con.execute(
                 "SELECT service,mode,image,network,argv_json FROM tasks "
@@ -43,7 +44,7 @@ class JobSupervisor:
             raise JobError("Unknown saved task")
         data = dict(row)
         data["argv"] = json.loads(data.pop("argv_json"))
-        return self.backend.task_command(identifier, data)
+        return self.backend.task_command(identifier, data, generation, job_id)
 
     def submit_task(self, identifier: str, task_name: str) -> str:
         return self._submit(identifier, "task", task_name)
@@ -58,7 +59,9 @@ class JobSupervisor:
         with self.coordinator.locked():
             state = self.coordinator.status()
             self.coordinator.admit(identifier, state["generation"] or "")
-            argv = (self._task(identifier, action) if kind == "task"
+            job_id = str(uuid4())
+            argv = (self._task(identifier, action, state["generation"], job_id)
+                    if kind == "task"
                     else self.backend.command(identifier) + [action])
             if not all(isinstance(arg, str) and arg for arg in argv):
                 raise JobError("Invalid worker command")
@@ -68,7 +71,6 @@ class JobSupervisor:
                 ).fetchone()
             if existing:
                 raise JobError("A project command is already in progress")
-            job_id = str(uuid4())
             with self.database.transaction(write=True) as con:
                 con.execute(
                     "INSERT INTO jobs(id,project_id,generation,kind,status,"
