@@ -220,7 +220,8 @@ class MultiRepositoryTests(unittest.TestCase):
                          headers={"Idempotency-Key":headers["Idempotency-Key"]}).status_code,403)
         self.assertEqual(browser.post(path,json={"name":"backend"},
                          headers=headers).status_code,400)
-        result = browser.post(path,json=payload,headers=headers)
+        result = browser.post(path,json={"name":"backend", "url":self.url},
+                              headers=headers)
         self.assertEqual(result.status_code, 202, result.get_json())
         job = self.wait(self.a.id, result.get_json()["import"])
         self.assertEqual(job["status"], "succeeded")
