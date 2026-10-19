@@ -41,7 +41,7 @@ class ImportOperationTests(unittest.TestCase):
     def test_same_idempotency_key_never_clones_twice(self):
         waiting = threading.Event()
         done = threading.Event()
-        def clone(*_args):
+        def clone(*_args, **_kwargs):
             waiting.set()
             done.wait(4)
             return self.registry.create("actual", "Imported")
@@ -81,10 +81,10 @@ class ImportOperationTests(unittest.TestCase):
         with self.db.transaction(write=True) as con:
             con.execute(
                 "INSERT INTO import_operations"
-                "(id,request_key,request_digest,url,slug,name,status,started_ns)"
-                " VALUES(?,?,?,?,? ,?,'running',?)",
+                "(id,request_key,request_digest,url,slug,name,target_id,status,started_ns)"
+                " VALUES(?,?,?,?,?,?,?,'running',?)",
                 (identifier, uuid4().hex, "digest", URL, "smoke", "Smoke",
-                 time.time_ns()),
+                 str(uuid4()), time.time_ns()),
             )
         self.provisioner.import_github = Mock(side_effect=AssertionError("must not rerun"))
         self.provisioner.recover_published_imports = Mock(return_value=())
@@ -113,9 +113,9 @@ class ImportOperationTests(unittest.TestCase):
             con.execute(
                 "INSERT INTO import_operations"
                 "(id,request_key,request_digest,url,slug,name,status,started_ns)"
-                " VALUES(?,?,?,?,?,?,'running',?)",
+                " VALUES(?,?,?,?,?,?,?,'running',?)",
                 (identifier, uuid4().hex, "digest", URL, "smoke", "Smoke",
-                 time.time_ns()),
+                 entry.id, time.time_ns()),
             )
         self.provisioner.recover_published_imports = Mock(return_value=())
         self.assertEqual(self.imports.reconcile(), (identifier,))
