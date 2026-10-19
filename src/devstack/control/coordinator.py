@@ -83,6 +83,12 @@ class Coordinator:
             raise ControlError("Cannot inspect Docker ownership") from exc
 
     def _verify_clear(self) -> None:
+        with self.database.transaction() as con:
+            pending = con.execute(
+                "SELECT 1 FROM source_sync_pending LIMIT 1"
+            ).fetchone()
+        if pending is not None:
+            raise ControlError("Source sync publication must recover before activation")
         owned = self._inspect()
         if owned:
             raise ControlError("Unverified or remaining DevStack-owned containers prevent activation")

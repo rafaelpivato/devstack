@@ -24,7 +24,7 @@ SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
 NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid"}
-CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError"}
+CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -179,9 +179,24 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def project_source_review(identifier):
         try:
             review = call("source_review", project_id=identifier)
-            return render_template("v2_source_review.html", review=review)
+            runtime = call("status")
+            return render_template("v2_source_review.html", review=review,
+                                   runtime=runtime, csrf=csrf())
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
+
+    @app.post("/projects/<identifier>/source-review/apply")
+    def project_source_apply_form(identifier):
+        revision = field("revision")
+        selected = request.form.getlist("selected")
+        overwrites = request.form.getlist("overwrites")
+        try:
+            call("source_apply", project_id=identifier,
+                 revision=revision, selected=selected, overwrites=overwrites)
+            flash("Selected Git template changes applied.", "success")
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            flash(problem(exc)[1], "error")
+        return redirect(url_for("project_source_review", identifier=identifier), code=303)
 
     @app.get("/projects/<identifier>/repositories/<repository_id>")
     def repository_page(identifier, repository_id):
@@ -419,6 +434,14 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def project_source_review_api(identifier):
         try:
             return jsonify(call("source_review", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/source-review/apply")
+    def project_source_apply_api(identifier):
+        payload = json_input({"revision", "selected", "overwrites"})
+        try:
+            return jsonify(call("source_apply", project_id=identifier, **payload))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
