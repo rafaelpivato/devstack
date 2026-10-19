@@ -44,14 +44,17 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual((renamed.id, renamed.slug), (a.id, "smoke"))
         self.assertEqual(self.registry.repositories(a.id), (ar,))
 
-    def test_creating_projects_does_not_create_runtime_state(self):
+    def test_project_registration_does_not_change_global_runtime_state(self):
         self.registry.create("smoke", "Smoke")
         self.registry.create("beacon", "Beacon")
         with self.registry.database.transaction() as con:
             tables = {row[0] for row in con.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
-        self.assertNotIn("runtime_state", tables)
+        self.assertIn("runtime_state", tables)
+        with self.registry.database.transaction() as con:
+            row = con.execute("SELECT phase,project_id FROM runtime_state").fetchone()
+        self.assertEqual(tuple(row), ("inactive", None))
 
     def test_duplicate_and_unknown_references_do_not_mutate_other_projects(self):
         a = self.registry.create("smoke", "Smoke")

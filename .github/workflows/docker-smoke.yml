@@ -355,3 +355,82 @@ jobs:
       - name: Clean up containers and volumes
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke down --volumes --remove-orphans
+      - name: Verify v0.5.2 real Docker A-to-B-to-A switching
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
+          from pathlib import Path
+          import subprocess, tempfile
+          from devstack.projects.workspaces import WorkspaceStore
+          from devstack.projects.service import ProjectProvisioner
+          from devstack.storage.database import Database
+          from devstack.storage.projects import ProjectRegistry
+          from devstack.control.docker import DockerBackend, compose_id
+          from devstack.control.coordinator import Coordinator
+          from devstack.control.jobs import JobSupervisor
+          import time
+
+          url = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+          with tempfile.TemporaryDirectory() as location:
+              home = Path(location)
+              db = Database(home / "state" / "control.sqlite3")
+              registry = ProjectRegistry(db)
+              workspaces = WorkspaceStore(home / "workspaces")
+              service = ProjectProvisioner(registry, workspaces)
+              a = service.import_github(url, "smoke-a", "Smoke A")
+              b = service.import_github(url, "smoke-b", "Smoke B")
+              backend = DockerBackend(service, workspaces)
+              engine = Coordinator(db, registry, backend)
+              jobs = JobSupervisor(engine, backend, workspaces)
+              try:
+                  assert engine.reconcile()["phase"] == "inactive"
+                  first = engine.activate(a.id)
+                  assert backend.owned() and all(
+                      x["project"] == a.id and x["generation"] == first["generation"]
+                      for x in backend.owned()
+                  ), backend.owned()
+                  compose_a = backend.command(a.id)
+                  subprocess.run(
+                      compose_a + ["exec", "-T", "postgres", "sh", "-c",
+                                   "echo persistent > /var/lib/postgresql/data/devstack-check"],
+                      check=True, timeout=30,
+                  )
+                  # Supervise an actual long-lived disposable Docker image task.
+                  with db.transaction(write=True) as con:
+                      con.execute(
+                          "INSERT INTO tasks(project_id,name,service,mode,image,network,argv_json)"
+                          " VALUES (?,'wait','', 'run','python:3.12-alpine','none',?)",
+                          (a.id, '["python","-c","import time;time.sleep(120)"]'),
+                      )
+                  job_id = jobs.submit_task(a.id, "wait")
+                  deadline = time.monotonic() + 20
+                  while jobs.get(job_id)["status"] == "queued" and time.monotonic() < deadline:
+                      time.sleep(.1)
+                  assert jobs.get(job_id)["status"] == "running", jobs.get(job_id)
+                  second = engine.switch(b.id)
+                  assert jobs.get(job_id)["status"] == "cancelled", jobs.get(job_id)
+                  assert second["project_id"] == b.id
+                  assert all(x["project"] == b.id for x in backend.owned())
+                  assert not engine.authorized(a.id, first["generation"])
+                  third = engine.switch(a.id)
+                  assert third["project_id"] == a.id
+                  assert third["generation"] != first["generation"]
+                  assert all(x["project"] == a.id for x in backend.owned())
+                  output = subprocess.run(
+                      backend.command(a.id) + ["exec", "-T", "postgres", "cat",
+                                             "/var/lib/postgresql/data/devstack-check"],
+                      check=True, text=True, capture_output=True, timeout=30,
+                  ).stdout.strip()
+                  assert output == "persistent", output
+                  assert engine.deactivate()["phase"] == "inactive"
+                  assert not backend.owned()
+                  assert len(registry.list()) == 2
+                  print("Two GitHub projects switched A-B-A, no overlap, volume persisted")
+              finally:
+                  for p in (a, b):
+                      try:
+                          backend.stop(p.id)
+                      except Exception as exc:
+                          print("Cleanup failure:", exc)
+                          raise
+          PY
