@@ -119,6 +119,32 @@
     {% endfor %}
   </section>
   {% endif %}
+  <section class="details" id="compose-editor">
+    <h3>Managed Docker Compose</h3>
+    <p class="hint">This configuration belongs only to this project; it never overwrites its Git checkout or its original import baseline. Deactivate the runtime before editing.</p>
+    <form class="stacked" method="post" action="{{ url_for('save_compose_form', identifier=selected_id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <input type="hidden" name="revision" value="{{ compose.revision }}">
+      <label for="compose-content">compose.yaml</label>
+      <textarea id="compose-content" name="content" rows="14" spellcheck="false" maxlength="49152"
+        {% if runtime.phase != 'inactive' %}disabled{% endif %}>{{ compose.content }}</textarea>
+      {% if runtime.phase == 'inactive' %}
+      <button class="secondary">Validate and save Compose</button>
+      {% else %}<p class="hint">Stop the runtime to enable editing.</p>{% endif %}
+    </form>
+  </section>
+  <section class="details" id="project-definitions">
+    <h3>Applications and saved tasks</h3>
+    <p class="hint">Project-local JSON definitions; changes remain independent of other projects.</p>
+    <form class="stacked" method="post" action="{{ url_for('save_settings_form', identifier=selected_id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <label for="project-settings-json">Project settings JSON</label>
+      <textarea id="project-settings-json" name="definitions" rows="14" spellcheck="false"
+        {% if runtime.phase != 'inactive' %}disabled{% endif %}>{{ definitions | tojson(indent=2) }}</textarea>
+      {% if runtime.phase == 'inactive' %}<button class="secondary">Save applications and tasks</button>
+      {% else %}<p class="hint">Stop the runtime to enable editing.</p>{% endif %}
+    </form>
+  </section>
   <section class="details">
     <h3>Project settings</h3>
     <form method="post" action="{{ url_for('rename_project', identifier=selected_id) }}" class="stacked">
