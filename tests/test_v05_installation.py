@@ -21,7 +21,8 @@ class AutoUpdateTests(unittest.TestCase):
             current.mkdir(parents=True)
             (current / ".ready").write_text("v0.5.7\n")
             updater.point_at(root / "current", current)
-            with patch("scripts.updater.prepare_release") as prepare:
+            with (patch("scripts.updater.prepare_release") as prepare,
+                  patch("scripts.updater.healthy", return_value=True)):
                 message = updater.activate("v0.5.7", "rafaelpivato/devstack",
                                            root, Path(directory) / "state")
                 self.assertIn("Already running", message)
@@ -78,7 +79,7 @@ class AutoUpdateTests(unittest.TestCase):
                                      root, Path(directory) / "state")
             self.assertEqual(updater.current_release(root / "current"), previous)
             self.assertTrue((Path(directory) / "state" / "failed-v0.6.0").exists())
-            process.assert_called_once()
+            process.assert_not_called()
 
     def test_installer_fetches_latest_once_but_not_a_permanent_pin(self):
         script = (ROOT / "scripts" / "install.sh").read_text()
@@ -97,10 +98,10 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertNotIn("def _series(", script)
         self.assertNotIn("Skipping incompatible automatic release", script)
         self.assertFalse((ROOT / "src" / "devstack" / "compat_guard.py").exists())
-        for unit in ("devstack.service", "devstack-webhooks.service"):
+        for unit in ("devstack-control.service", "devstack-web-v2.service"):
             self.assertNotIn("devstack.compat_guard",
                              (ROOT / "deploy" / unit).read_text())
-        for module in ("web.py", "webhooks.py"):
+        for module in ("api/http.py", "control/daemon.py"):
             self.assertNotIn("check_installation(",
                              (ROOT / "src" / "devstack" / module).read_text())
 
