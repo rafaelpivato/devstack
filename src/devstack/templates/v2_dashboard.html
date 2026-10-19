@@ -133,11 +133,11 @@
   {% endif %}
   <section class="details" id="adhoc">
     <h3>Ad-hoc container command</h3>
-    <p class="hint">Runs only inside the active project's Compose service or an isolated standalone image. Enter a JSON argv array (no implicit host shell).</p>
+    <p class="hint">Commands run concurrently in disposable containers belonging to the active project. No default timeout, no implicit host shell. Closing the browser does not stop them; deactivating the project does.</p>
     <form class="stacked" method="post" action="{{ url_for('submit_adhoc_form', identifier=selected_id) }}">
       <input type="hidden" name="_csrf" value="{{ csrf }}">
       <label>Mode
-        <select name="kind"><option value="exec">Compose exec</option><option value="run">Compose run --rm</option><option value="image">Standalone image</option></select>
+        <select name="kind"><option value="run">Compose run --rm (isolated command)</option><option value="image">Standalone image</option></select>
       </label>
       <label>Compose service (leave empty for image)
         <input name="service" maxlength="80" placeholder="web"></label>

@@ -1,7 +1,8 @@
 """Bounded command supervision within the controller's process/cgroup.
 
-Web/API clients request only allowlisted saved tasks or Compose actions.
-No raw argv, Docker socket or host shell is available over controller IPC.
+Web/API clients request constrained container commands or saved tasks.
+One active project admits concurrent, generation-fenced jobs. No host shell
+or arbitrary Docker/host argv is available over controller IPC.
 """
 import json
 import os
@@ -20,6 +21,7 @@ from .coordinator import ControlError
 _ALLOWED_COMPOSE = {"build", "restart"}
 _LOG_LIMIT = 2 * 1024 * 1024
 _LOG_CHUNK = 16 * 1024
+_MAX_CONCURRENT = 16
 
 
 class JobError(RuntimeError):
@@ -41,7 +43,7 @@ class JobSupervisor:
         coordinator.jobs = self
 
     def _task(self, identifier: str, task_name: str, generation: str,
-              job_id: str) -> list[str]:
+              job_id: str) -> tuple[list[str], bool]:
         with self.database.transaction() as con:
             row = con.execute(
                 "SELECT service,mode,image,network,argv_json FROM tasks "
@@ -52,7 +54,10 @@ class JobSupervisor:
             raise JobError("Unknown saved task")
         data = dict(row)
         data["argv"] = json.loads(data.pop("argv_json"))
-        return self.backend.task_command(identifier, data, generation, job_id)
+        command = self.backend.task_command(identifier, data, generation, job_id)
+        # Existing-service exec is not independently cancellable. Run/image
+        # tasks have their own named Docker container and can be stopped alone.
+        return command, data["mode"] == "run"
 
     def submit_task(self, identifier: str, task_name: str) -> str:
         return self._submit(identifier, "task", task_name)
@@ -65,8 +70,8 @@ class JobSupervisor:
     @staticmethod
     def _adhoc_spec(kind: str, service: str, image: str,
                     network: str, command: list) -> dict:
-        if kind not in ("exec", "run", "image"):
-            raise JobInvalid("Invalid ad-hoc execution mode")
+        if kind not in ("run", "image"):
+            raise JobInvalid("Use a disposable Compose run or standalone image")
         if not all(isinstance(value, str) for value in (service, image, network)):
             raise JobInvalid("Invalid container target")
         if kind == "image" and (not image or service or "://" in image):
@@ -109,27 +114,35 @@ class JobSupervisor:
             self.coordinator.admit(identifier, state["generation"] or "")
             job_id = str(uuid4())
             if kind == "task":
-                argv = self._task(identifier, action, state["generation"], job_id)
+                argv, independent = self._task(
+                    identifier, action, state["generation"], job_id,
+                )
             elif kind == "adhoc":
                 argv = self.backend.task_command(
                     identifier, adhoc, state["generation"], job_id,
                 )
+                independent = True
             else:
                 argv = self.backend.command(identifier) + [action]
+                independent = False
             if not all(isinstance(arg, str) and arg for arg in argv):
                 raise JobError("Invalid worker command")
             with self.database.transaction() as con:
-                existing = con.execute(
-                    "SELECT 1 FROM jobs WHERE status IN ('queued','running')"
-                ).fetchone()
-            if existing:
-                raise JobError("A project command is already in progress")
+                busy = con.execute(
+                    "SELECT kind FROM jobs WHERE status IN "
+                    "('queued','running','cancelling')"
+                ).fetchall()
+            if (len(busy) >= _MAX_CONCURRENT or
+                    (kind == "compose" and busy) or
+                    (kind != "compose" and any(x["kind"] == "compose" for x in busy))):
+                raise JobError("Job admission limit or Compose maintenance in progress")
             with self.database.transaction(write=True) as con:
                 con.execute(
                     "INSERT INTO jobs(id,project_id,generation,kind,status,"
-                    "action,started_ns) VALUES (?,?,?,?,?,?,?)",
+                    "action,cancel_policy,started_ns) VALUES (?,?,?,?,?,?,?,?)",
                     (job_id, identifier, state["generation"], kind, "queued",
-                     action, time.time_ns()),
+                     action, "independent" if independent else "project",
+                     time.time_ns()),
                 )
             thread = threading.Thread(
                 target=self._worker, args=(job_id, identifier, state["generation"],
@@ -190,20 +203,19 @@ class JobSupervisor:
                     self._running[job_id] = (threading.current_thread(), proc)
                 self._set(job_id, "running")
             try:
-                exit_code = proc.wait(timeout=900)
+                # Commands have no default deadline. Browser disconnect is
+                # unrelated to command lifecycle; project transition cancels.
+                exit_code = proc.wait()
                 final = "succeeded" if exit_code == 0 else "failed"
-            except subprocess.TimeoutExpired:
-                self._terminate(proc)
-                final, exit_code = "failed", None
             drain.join(timeout=10)
             if drain.is_alive():
                 raise JobError("Worker log stream did not finish")
-            if self._state(job_id) != "cancelled":
+            if self._state(job_id) in ("queued", "running"):
                 self._set(job_id, final, exit_code)
         except Exception:
             if proc is not None and proc.poll() is None:
                 self._terminate(proc)
-            if self._state(job_id) != "cancelled":
+            if self._state(job_id) in ("queued", "running"):
                 self._set(job_id, "failed")
         finally:
             with self._guard:
@@ -250,13 +262,13 @@ class JobSupervisor:
             if identifier is None:
                 con.execute(
                     "UPDATE jobs SET status='cancelled',finished_ns=? "
-                    "WHERE status IN ('queued','running')",
+                    "WHERE status IN ('queued','running','cancelling')",
                     (time.time_ns(),),
                 )
             else:
                 con.execute(
                     "UPDATE jobs SET status='cancelled',finished_ns=? "
-                    "WHERE project_id=? AND status IN ('queued','running')",
+                    "WHERE project_id=? AND status IN ('queued','running','cancelling')",
                     (time.time_ns(), identifier),
                 )
         with self._guard:
@@ -277,27 +289,55 @@ class JobSupervisor:
                 raise JobError("Worker thread did not stop")
 
     def cancel(self, identifier: str, job_id: str) -> dict:
+        """Cancel exactly one disposable command, without stopping services."""
         project_id(identifier)
         project_id(job_id)
         with self.coordinator.locked():
             current = self.get(job_id)
             if current["project_id"] != identifier:
                 raise JobError("Job does not belong to requested project")
-            if current["status"] not in ("queued", "running"):
+            if current["status"] not in ("queued", "running", "cancelling"):
                 return current
+            if current["cancel_policy"] != "independent":
+                raise JobError(
+                    "This job executes inside shared infrastructure; "
+                    "deactivate the project to stop it safely"
+                )
             state = self.coordinator.status()
             with self.database.transaction() as con:
-                row = con.execute("SELECT generation FROM jobs WHERE id=?",
-                                  (job_id,)).fetchone()
+                row = con.execute(
+                    "SELECT generation FROM jobs WHERE id=?", (job_id,),
+                ).fetchone()
             if (state["phase"] != "active" or state["project_id"] != identifier
                     or not row or row["generation"] != state["generation"]):
-                raise JobError("Cannot cancel work from an inactive or stale generation")
-            # Killing Docker CLI alone does NOT stop a Compose exec process
-            # running inside a container. Cancellation must drain all workers,
-            # stop the owning containers, and verify ownership is globally
-            # clear before reporting a job cancelled.
-            self.coordinator._stop(state, "deactivating")
-            self.coordinator._update("inactive", None)
+                raise JobError("Cannot cancel stale or inactive project work")
+            # Stop the named Docker container independently. A killed Docker
+            # CLI alone does not prove the container stopped.
+            with self.database.transaction(write=True) as con:
+                con.execute(
+                    "UPDATE jobs SET status='cancelling' WHERE id=? "
+                    "AND status IN ('queued','running')",
+                    (job_id,),
+                )
+            with self._guard:
+                thread, proc = self._running.get(job_id, (None, None))
+            try:
+                if proc is not None:
+                    self._terminate(proc)
+                self.backend.stop_job(identifier, state["generation"], job_id)
+                if thread is not None and thread is not threading.current_thread():
+                    thread.join(timeout=12)
+                    if thread.is_alive():
+                        raise JobError("Worker termination not confirmed")
+            except Exception as exc:
+                # We cannot admit new work while a previous command might
+                # still exist. Reconciliation explicitly stops owned Docker.
+                self.coordinator._update(
+                    "error", identifier, None,
+                    "Independent command cancellation could not be verified",
+                )
+                raise JobError("Job cancellation failed closed") from exc
+            self._set(job_id, "cancelled")
             return self.get(job_id)
 
     def list(self, identifier: str) -> dict:
@@ -305,7 +345,7 @@ class JobSupervisor:
         self.coordinator.registry.get(identifier)
         with self.database.transaction() as con:
             rows = con.execute(
-                "SELECT id,project_id,kind,status,action,started_ns,"
+                "SELECT id,project_id,kind,status,action,cancel_policy,started_ns,"
                 "finished_ns,exit_code FROM jobs WHERE project_id=? "
                 "ORDER BY started_ns DESC,id DESC LIMIT 40",
                 (identifier,),
@@ -325,7 +365,7 @@ class JobSupervisor:
             fd = os.open(file, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         except FileNotFoundError:
             return {"text": "", "offset": offset, "next_offset": offset,
-                    "complete": current["status"] not in ("queued", "running")}
+                    "complete": current["status"] not in ("queued", "running", "cancelling")}
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_size > _LOG_LIMIT:
@@ -335,12 +375,12 @@ class JobSupervisor:
             os.close(fd)
         return {"text": data.decode("utf-8", errors="replace"),
                 "offset": offset, "next_offset": offset + len(data),
-                "complete": current["status"] not in ("queued", "running")}
+                "complete": current["status"] not in ("queued", "running", "cancelling")}
 
     def get(self, job_id: str) -> dict:
         with self.database.transaction() as con:
             row = con.execute(
-                "SELECT id,project_id,kind,status,action,started_ns,"
+                "SELECT id,project_id,kind,status,action,cancel_policy,started_ns,"
                 "finished_ns,exit_code FROM jobs WHERE id=?", (job_id,),
             ).fetchone()
         if row is None:
