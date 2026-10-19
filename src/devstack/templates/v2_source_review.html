@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DevStack · Source change review</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css') }}">
+</head>
+<body>
+<header>
+  <h1>Git template changes</h1>
+  <a href="{{ url_for('selected_project', identifier=review.project_id) }}">Back to project</a>
+</header>
+<main class="card">
+  <p>Compare the registered Git source with the original import baseline and
+     this project's current managed applications, tasks, and Compose settings.</p>
+  <p class="hint">Review-only in this stage: no source code, managed configuration,
+  containers or other projects are modified. Applying changes will be added
+  separately with explicit selection and revision checks.</p>
+  {% if review.changes %}
+  <ul>
+    {% for change in review.changes %}
+    <li>
+      <strong>{{ change.kind }} · {{ change.name }}</strong>
+      <span>{{ change.action.replace('_',' ') }}</span>
+      {% if change.locally_modified %}<strong>Local customization detected</strong>{% endif %}
+      {% if not change.selectable %}<small>No automatic deletion</small>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No source configuration changes pending.</p>
+  {% endif %}
+</main>
+</body>
+</html>
