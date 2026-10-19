@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+{% if operation.status in ('queued','running') %}<meta http-equiv="refresh" content="5">{% endif %}
+<title>DevStack · Repository clone</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css') }}">
+</head><body><header><h1>Repository import · {{ operation.name }}</h1></header>
+<main class="card">
+<p>Status: <strong>{{ operation.status }}</strong></p>
+{% if operation.status == "succeeded" %}
+<p><a href="{{ url_for('repository_page', identifier=operation.project_id, repository_id=operation.repo_id) }}">Open repository</a></p>
+{% elif operation.status in ('failed','recovery') %}
+<p role="alert">Import requires attention ({{ operation.error_code }}). Existing project data has not been removed.</p>
+{% else %}
+<p>Clone is continuing on the server. This page refreshes automatically.</p>
+{% endif %}
+<p><a href="{{ url_for('selected_project', identifier=operation.project_id) }}">Back to project</a></p>
+</main></body></html>
