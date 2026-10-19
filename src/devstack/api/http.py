@@ -20,10 +20,10 @@ from .client import ControllerRejected, ControllerUnavailable, send
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"ProjectNotFound"}
+NOT_FOUND = {"ProjectNotFound", "ImportNotFound"}
 INVALID = {"DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError"}
-CONFLICT = {"ControlError", "ProjectConflict", "JobError", "DockerControlError"}
+CONFLICT = {"ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -93,7 +93,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             "v2_dashboard.html", projects=overview["projects"], runtime=runtime,
             detail=details, selected_id=selected_id, csrf=csrf(),
             example=request.args.get("example") == "smoke",
-            sample_url=SAMPLE_URL,
+            sample_url=SAMPLE_URL, import_key=secrets.token_hex(16),
         )
 
     @app.get("/healthz")
@@ -153,13 +153,22 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def import_project():
         try:
             created = call(
-                "project_import", url=field("url"),
+                "import_submit", url=field("url"),
                 slug=field("slug"), name=field("name"),
+                request_key=field("request_key"),
             )
-            return redirect_to(created["id"])
+            return redirect(url_for("import_page", identifier=created["id"]), code=303)
         except (ControllerUnavailable, ControllerRejected) as exc:
             flash(problem(exc)[1], "error")
             return redirect_to()
+
+    @app.get("/imports/<identifier>")
+    def import_page(identifier):
+        try:
+            job = call("import_status", id=identifier)
+            return render_template("v2_import.html", job=job)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
 
     @app.post("/projects/<identifier>/rename")
     def rename_project(identifier):
@@ -233,9 +242,22 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     @app.post("/api/v2/projects/import")
     def import_project_api():
         payload = json_input({"url", "slug", "name"})
+        key = request.headers.get("Idempotency-Key", "")
+        if not isinstance(key, str) or len(key) != 32:
+            abort(400, description="Idempotency-Key header required")
         try:
-            result = call("project_import", **payload)
-            return jsonify({"project": result}), 201
+            result = call("import_submit", **payload, request_key=key)
+            response = jsonify({"import": result})
+            response.status_code = 202
+            response.headers["Location"] = url_for("import_status_api", identifier=result["id"])
+            return response
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/imports/<identifier>")
+    def import_status_api(identifier):
+        try:
+            return jsonify(call("import_status", id=identifier))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 

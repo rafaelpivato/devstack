@@ -103,6 +103,34 @@ class HttpTests(unittest.TestCase):
         return self.client.post(path, json=body or {},
                                 headers={"X-CSRF-Token": self.csrf} if csrf else {})
 
+    def submit_import(self, project_slug, *, key=None):
+        key = key or uuid4().hex
+        response = self.client.post(
+            "/api/v2/projects/import", json={
+                "url": URL, "slug": project_slug, "name": "Smoke Test",
+            }, headers={
+                "X-CSRF-Token": self.csrf, "Idempotency-Key": key,
+            },
+        )
+        self.assertEqual(response.status_code, 202, response.get_json())
+        operation = response.get_json()["import"]["id"]
+        self.assertEqual(
+            response.headers["Location"], "/api/v2/imports/" + operation,
+        )
+        return operation
+
+    def await_import(self, identifier, timeout=8):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            response = self.client.get("/api/v2/imports/" + identifier)
+            self.assertEqual(response.status_code, 200)
+            state = response.get_json()
+            if state["status"] in ("succeeded", "failed"):
+                self.assertEqual(state["status"], "succeeded", state)
+                return state["project_id"]
+            time.sleep(.02)
+        self.fail("Timed out waiting for durable GitHub import")
+
     def create(self, slug):
         result = self.api_post("/api/v2/projects", {
             "slug": slug, "name": slug.upper(),
@@ -166,11 +194,8 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(sample.status_code, 200)
         self.assertIn(URL, sample.get_data(as_text=True))
         self.assertEqual(len(self.controller.registry.list()), 1)
-        imported = self.api_post("/api/v2/projects/import", {
-            "url": URL, "slug": "smoke", "name": "Smoke Test",
-        })
-        self.assertEqual(imported.status_code, 201, imported.get_json())
-        b = imported.get_json()["project"]["id"]
+        operation = self.submit_import("smoke")
+        b = self.await_import(operation)
         self.assertNotEqual(a, b)
         self.assertEqual(len(self.controller.registry.list()), 2)
         self.assertEqual(self.controller.coordinator.status(), before)
@@ -179,12 +204,35 @@ class HttpTests(unittest.TestCase):
         self.assertIn("tests", [t["name"] for t in detail["tasks"]])
         self.assertEqual(self.client.get("/projects/" + b).status_code, 200)
 
+    def test_import_idempotency_and_browser_reconnect(self):
+        key = uuid4().hex
+        first = self.submit_import("smoke", key=key)
+        repeated = self.submit_import("smoke", key=key)
+        self.assertEqual(first, repeated)
+        self.assertEqual(
+            self.client.get("/imports/" + first).status_code, 200,
+        )
+        result = self.await_import(first)
+        self.assertEqual(self.controller.registry.get(result).slug, "smoke")
+        self.assertEqual(len(self.controller.registry.list()), 1)
+        self.assertEqual(
+            self.client.get("/imports/" + first).status_code, 200,
+        )
+        self.assertEqual(
+            self.client.get("/api/v2/imports/" + str(uuid4())).status_code, 404,
+        )
+
+    def test_import_requires_idempotency_key_without_starting_any_work(self):
+        response = self.api_post("/api/v2/projects/import", {
+            "url": URL, "slug": "smoke", "name": "Smoke",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.controller.registry.list())
+        self.assertEqual(self.controller.coordinator.status()["phase"], "inactive")
+
     def test_inactive_task_rejected_and_run_control_absent(self):
         a = self.create("alpha")
-        imported = self.api_post("/api/v2/projects/import", {
-            "url": URL, "slug": "smoke", "name": "Smoke Test",
-        })
-        b = imported.get_json()["project"]["id"]
+        b = self.await_import(self.submit_import("smoke"))
         self.api_post("/api/v2/projects/" + a + "/activate")
         page = self.client.get("/projects/" + b).get_data(as_text=True)
         self.assertIn("Inactive · cannot run", page)

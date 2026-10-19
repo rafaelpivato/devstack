@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DevStack · GitHub import</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css') }}">
+<script type="module" src="{{ url_for('static', filename='js/v2_dashboard.js') }}"></script>
+</head><body>
+<header class="top"><div><h1><a href="{{ url_for('index') }}">DevStack</a></h1>
+<p class="subhead">GitHub project import</p></div></header>
+<main class="card" data-import-id="{{ job.id }}">
+<h2>{{ job.name }}</h2>
+<p>Import: <strong id="import-status" aria-live="polite">{{ job.status }}</strong></p>
+<p class="hint">This import continues on the server even when you close this tab. You may return to this address to check its progress.</p>
+{% if job.status == 'succeeded' and job.project_id %}
+<p><a id="import-project-link" href="{{ url_for('selected_project', identifier=job.project_id) }}">Open imported project</a></p>
+{% elif job.status == 'failed' %}
+<p role="alert">Import failed: {{ job.error_code }}. Check the repository URL and use a new request to retry. Your existing projects were not affected.</p>
+{% else %}
+<p id="import-feedback">Cloning and validating the GitHub repository…</p>
+<p id="import-result"></p>
+{% endif %}
+<p><a href="{{ url_for('index') }}">Back to projects</a></p>
+</main></body></html>
