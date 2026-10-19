@@ -8,7 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from devstack.adapters.github import GitHubSource
-from devstack.domain.models import display_name, slug, repo_path
+from devstack.domain.models import display_name, slug, repo_path, project_id
 from devstack.storage.projects import ProjectConflict, ProjectRegistry
 from .manifest import parse_template
 from .workspaces import WorkspaceError, WorkspaceStore
@@ -50,11 +50,16 @@ class ProjectProvisioner:
                 self.workspaces.discard_pending(identifier)
             raise
 
-    def import_github(self, url: str, project_slug: str, name: str):
-        """Stage clone/metadata before registering; import never starts Docker."""
+    def import_github(self, url: str, project_slug: str, name: str,
+                      *, identifier: str | None = None):
+        """Stage clone/metadata before registering; import never starts Docker.
+
+        A durable import job may reserve the UUID before this process launches.
+        All staging and eventual publication must use precisely that identity.
+        """
         slug(project_slug)
         display_name(name)
-        identifier = str(uuid4())
+        identifier = project_id(identifier) if identifier is not None else str(uuid4())
         staging = self.workspaces.prepare(identifier)
         reserved = False
         try:
