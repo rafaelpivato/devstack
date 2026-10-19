@@ -82,13 +82,14 @@ class Coordinator:
         except Exception as exc:
             raise ControlError("Cannot inspect Docker ownership") from exc
 
-    def _verify_clear(self) -> None:
-        with self.database.transaction() as con:
-            pending = con.execute(
-                "SELECT 1 FROM source_sync_pending LIMIT 1"
-            ).fetchone()
-        if pending is not None:
-            raise ControlError("Source sync publication must recover before activation")
+    def _verify_clear(self, *, allow_pending_sync: bool = False) -> None:
+        if not allow_pending_sync:
+            with self.database.transaction() as con:
+                pending = con.execute(
+                    "SELECT 1 FROM source_sync_pending LIMIT 1"
+                ).fetchone()
+            if pending is not None:
+                raise ControlError("Source sync publication must recover before activation")
         owned = self._inspect()
         if owned:
             raise ControlError("Unverified or remaining DevStack-owned containers prevent activation")
@@ -205,7 +206,10 @@ class Coordinator:
                     raise ControlError("Unknown DevStack-owned Docker resources")
                 for identifier in sorted({item["project"] for item in owned}):
                     self.backend.stop(identifier)
-                self._verify_clear()
+                # Reconciliation must be able to clear stale runtime resources
+                # even with a pending source journal. Activation remains blocked
+                # until the journal has been safely replayed.
+                self._verify_clear(allow_pending_sync=True)
             except Exception as exc:
                 self._update("error", previous["project_id"], None,
                              "Runtime recovery blocked: Docker ownership not proven clean")

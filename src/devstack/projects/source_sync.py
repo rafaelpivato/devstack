@@ -298,6 +298,11 @@ class SourceReviewService:
             if changed["tasks"]:
                 files["managed/tasks.toml"] = self._render("tasks", tasks)
                 files["baseline/tasks.toml"] = self._render("tasks", baseline_tasks)
+            # Re-read the complete review just before committing SQLite.
+            # Concurrent edits to the source checkout or managed definition
+            # cannot silently change the approved operation.
+            if self.review(identifier)["revision"] != revision:
+                raise SourceSyncConflict("Source or managed configuration changed during apply")
             payload = json.dumps({"files": {
                 name: base64.b64encode(data).decode("ascii")
                 for name, data in files.items()

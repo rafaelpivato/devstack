@@ -188,8 +188,11 @@ class Controller:
         if operation == "deactivate":
             return self._public_status(self.coordinator.deactivate())
         if operation == "reconcile":
+            # Reconcile actual execution before replaying file snapshots, then
+            # verify absence of both owned workloads and unfinished journals.
+            self.coordinator.reconcile()
             self.source_review.recover_pending()
-            return self._public_status(self.coordinator.reconcile())
+            return self._public_status(self.coordinator.status())
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
         if operation == "compose":
@@ -330,15 +333,11 @@ def main():
             # A partially published source remains explicit; never delete it.
             pass
         try:
+            controller.coordinator.reconcile()
             controller.source_review.recover_pending()
         except Exception:
-            # A pending durable journal remains visible as a fail-closed
-            # barrier; explicit reconcile retries replay after repair.
-            pass
-        try:
-            controller.coordinator.reconcile()
-        except Exception:
-            # Keep the API available in ERROR so an operator can recover.
+            # A pending durable journal remains as a fail-closed barrier;
+            # explicit reconcile retries runtime cleanup and replay.
             pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
             with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
