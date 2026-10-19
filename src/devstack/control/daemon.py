@@ -25,6 +25,7 @@ from .coordinator import Coordinator
 from .docker import DockerBackend
 from .jobs import JobSupervisor
 from .imports import ImportSupervisor
+from .ingress import WebhookIngress, WebhookServer
 
 _MAX_MESSAGE = 64 * 1024
 
@@ -42,6 +43,8 @@ class Controller:
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
+        self.ingress = WebhookIngress(self.coordinator, self.registry, self.backend)
+        self.coordinator.ingress = self.ingress
 
     def handle(self, request: dict) -> dict:
         if not isinstance(request, dict) or not isinstance(request.get("op"), str):
@@ -57,6 +60,9 @@ class Controller:
             "compose_save": {"op", "project_id", "content", "revision"},
             "settings_read": {"op", "project_id"},
             "settings_replace": {"op", "project_id", "applications", "tasks"},
+            "webhooks": {"op", "project_id"},
+            "webhook_upsert": {"op", "project_id", "route", "service", "port", "destination"},
+            "webhook_remove": {"op", "project_id", "route"},
             "project_create": {"op", "slug", "name"},
             "import_submit": {"op", "url", "slug", "name", "request_key"},
             "import_status": {"op", "id"},
@@ -116,6 +122,16 @@ class Controller:
             return self.configuration.replace_settings(
                 request["project_id"], request["applications"], request["tasks"],
             )
+        if operation == "webhooks":
+            return {"webhooks": self.ingress.list(request["project_id"])}
+        if operation == "webhook_upsert":
+            return self.ingress.configure(
+                request["project_id"], request["route"], request["service"],
+                request["port"], request["destination"],
+            )
+        if operation == "webhook_remove":
+            self.ingress.remove(request["project_id"], request["route"])
+            return {"removed": True}
         if operation == "project_create":
             entry = self.provisioner.create_empty(request["slug"], request["name"])
             return {"id": entry.id, "name": entry.name}
@@ -255,36 +271,48 @@ def main():
     parser.add_argument("--socket", type=Path,
                         default=Path("/run/devstack-control/control.sock"))
     parser.add_argument("--socket-group", default=None)
+    parser.add_argument("--webhook-port", type=int, default=8767)
     args = parser.parse_args()
     with exclusive_daemon(args.state):
         database = Database(args.state / "control.sqlite3")
         workspaces = WorkspaceStore(args.state / "projects")
         controller = Controller(database, workspaces)
+        # Exclusive daemon lifetime lock guarantees that all handlers from an
+        # earlier supervisor are gone. Their leases cannot be active now.
+        with controller.coordinator.locked():
+            controller.ingress.clear_after_daemon_restart()
         try:
             controller.imports.reconcile()
         except Exception:
-            # An ambiguous partially published import must remain explicit.
-            # An operator can inspect the pending state; never auto-delete data.
+            # A partially published source remains explicit; never delete it.
             pass
         try:
             controller.coordinator.reconcile()
         except Exception:
-            # Remain available to report and explicitly recover ERROR.
+            # Keep the API available in ERROR so an operator can recover.
             pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
-            def stop(_signum, _frame):
-                threading.Thread(target=server.shutdown, daemon=True).start()
-    
-            signal.signal(signal.SIGTERM, stop)
-            signal.signal(signal.SIGINT, stop)
-            try:
-                server.serve_forever(poll_interval=0.2)
-            finally:
+            with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
+                webhook_thread = threading.Thread(
+                    target=public_ingress.serve_forever,
+                    name="devstack-webhook-ingress", daemon=True,
+                )
+                webhook_thread.start()
+                def stop(_signum, _frame):
+                    threading.Thread(target=server.shutdown, daemon=True).start()
+
+                signal.signal(signal.SIGTERM, stop)
+                signal.signal(signal.SIGINT, stop)
                 try:
-                    controller.coordinator.reconcile()
-                except Exception:
-                    pass
-    
+                    server.serve_forever(poll_interval=0.2)
+                finally:
+                    public_ingress.shutdown()
+                    webhook_thread.join(timeout=10)
+                    try:
+                        controller.coordinator.reconcile()
+                    except Exception:
+                        pass
+
 
 if __name__ == "__main__":
     main()
