@@ -84,6 +84,14 @@
       <li><strong><a href="{{ url_for('repository_page', identifier=selected_id, repository_id=repo.id) }}">{{ repo.name }}</a></strong> <small>{{ repo.relative_path }}</small></li>
     {% endfor %}</ul>
     {% else %}<p>No Git repositories registered.</p>{% endif %}
+    {% if runtime.phase == 'inactive' and detail.repositories %}
+    <form method="get" action="{{ url_for('branch_preview_page', identifier=selected_id) }}">
+      <label>Switch project repositories to branch
+        <input name="branch" maxlength="200" placeholder="feature/my-work" required></label>
+      <button class="secondary">Preview branch switching</button>
+    </form>
+    <p class="hint">Repos without that branch use their verified origin default. Nothing changes until you confirm.</p>
+    {% endif %}
     {% if runtime.phase == 'inactive' %}
     <form class="stacked" method="post" action="{{ url_for('add_repository_form', identifier=selected_id) }}">
       <input type="hidden" name="_csrf" value="{{ csrf }}">
