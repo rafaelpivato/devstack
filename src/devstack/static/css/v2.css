@@ -26,3 +26,7 @@ label{font-weight:550}input{font:inherit;color:#fff;background:#111a24;border:1p
 .notice{padding:12px 14px;border-radius:9px;background:#33475c}.notice.error,.warning{border-color:#8f4f57;background:#482d37}
 footer{text-align:center;color:#9daec1;margin-top:35px;font-size:.85rem}
 @media(max-width:600px){header.top{align-items:flex-start}body{padding:12px}h1{font-size:1.45rem}.card{padding:14px}button{width:auto}.heading{align-items:flex-start}}
+
+textarea{font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;background:#111a24;color:#eaf0f5;border:1px solid #5b6b7d;border-radius:8px;padding:12px;width:100%;resize:vertical;min-width:0;min-height:120px}
+textarea:disabled{opacity:.75;cursor:not-allowed}
+textarea:focus-visible{outline:2px solid #83b9ff;outline-offset:2px}
