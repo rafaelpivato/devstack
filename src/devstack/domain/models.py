@@ -44,7 +44,7 @@ def repo_name(value: str) -> str:
 
 def repo_path(value: str) -> str:
     if (not isinstance(value, str) or not value or len(value) > 512
-            or "\" in value or PurePosixPath(value).is_absolute()
+            or "\\" in value or PurePosixPath(value).is_absolute()
             or any(part in ("", ".", "..") for part in value.split("/"))
             or any(ord(c) < 32 or ord(c) == 127 for c in value)):
         raise DomainError("Repository path must be relative and traversal-free")
