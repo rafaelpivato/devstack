@@ -93,8 +93,16 @@ class ReleaseAcceptanceGateTests(unittest.TestCase):
         evidence = (ROOT / "docs" / "v0.5.2-acceptance-evidence.md").read_text()
         for label in SCENARIOS:
             self.assertIn("| " + label + " |", evidence)
-        self.assertIn("PENDING — real published-release clean-host installation", evidence)
-        self.assertIn("PENDING — private Tailscale device-to-service connectivity", evidence)
+        self.assertIn("DEFERRED TO 0.5.3 — real published-release clean-host installation", evidence)
+        self.assertIn("DEFERRED TO 0.5.3 — private Tailscale device-to-service connectivity", evidence)
+        plan = (ROOT / "docs" / "v0.5.2-acceptance-plan.md").read_text()
+        adr = (ROOT / "docs" / "adr" / "0002-v052-release-gate-and-v053-validation.md").read_text()
+        self.assertIn("ADR-0002", plan)
+        self.assertIn("v0.5.3", plan)
+        for label in SCENARIOS:
+            self.assertIn(label, plan)
+        self.assertIn("NOT considered passed", adr)
+        self.assertIn("human merge", adr.lower())
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ Check for published stable DevStack releases or request **Update now** through a
 
 The v0.5.2 cutover **requires a clean Ubuntu host**. No automatic v0.5.1 migration or old singleton daemon is supported. The trusted `scripts/install.sh` installs the latest **published v0.5.2-or-later release**, and refuses a pre-v0.5.2 release. Do not deploy an unverified feature or integration branch as a production release.
 
-For the breaking changes and installation notes, see [v0.5.2 release notes](docs/releases/v0.5.2.md) and [acceptance evidence](docs/v0.5.2-acceptance-evidence.md).
+For the breaking changes and installation notes, see [v0.5.2 release notes](docs/releases/v0.5.2.md), [acceptance evidence](docs/v0.5.2-acceptance-evidence.md), and [ADR-0002](docs/adr/0002-v052-release-gate-and-v053-validation.md). Real-host validation is deferred to v0.5.3; passing CI does not prove every live deployment path.
 
 Architecture and acceptance requirements: [ADR-0001](docs/adr/0001-multiple-projects-single-runtime.md) and [v0.5.2 acceptance plan](docs/v0.5.2-acceptance-plan.md).
 
@@ -40,4 +40,4 @@ Docker smoke integration and fresh Ubuntu systemd permission tests run in GitHub
 
 ## Deferred beyond v0.5.2
 
-Interactive terminal/SSH CLI, richer monitoring, automated routing/proxy services, advanced Git-management workflows and external GPT observability. Individual application and saved-task visual CRUD are deferred; managed JSON editing remains available.
+Native SSH/CLI operations and post-publication deployment fixes are targeted for **v0.5.3**. Interactive browser terminal/TTY, richer monitoring, automated routing/proxy services, advanced Git-management workflows and external GPT observability. Individual application and saved-task visual CRUD are deferred; managed JSON editing remains available.

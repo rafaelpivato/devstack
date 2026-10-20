@@ -23,13 +23,13 @@ class V052ReleaseCandidateTests(unittest.TestCase):
         self.assertIn("python -m unittest discover -s tests -v", workflow)
         self.assertIn("gh release create", workflow)
 
-    def test_no_legacy_migration_and_manual_host_gate_is_explicit(self):
+    def test_no_legacy_migration_and_deferred_host_gate_is_explicit(self):
         installer = (ROOT / "scripts" / "install.sh").read_text()
         checklist = (ROOT / "docs" / "v0.5.2-release-checklist.md").read_text()
         self.assertIn('if numbers < (0, 5, 2):', installer)
         self.assertIn("An existing DevStack installation/state was detected", installer)
         for phrase in ("External acceptance", "second device",
-                       "Crash/reboot", "Do not merge"):
+                       "Crash/reboot", "Do not merge", "deferred to v0.5.3"):
             self.assertIn(phrase, checklist)
 
 
