@@ -138,7 +138,7 @@ Packages are ownership boundaries, not a mandate for one class per file. Avoid c
 
 ## Architecture enforcement
 
-The [acceptance contract](../v0.5.2-acceptance-plan.md) defines release-blocking end-to-end scenarios. Every implementation PR must identify which `INV-xx` and `AC-xx` it implements/tests, and add a regression test before an invariant can be marked complete. A PR may not redefine a normative invariant without an explicit follow-up ADR reviewed **before** implementation.
+The [acceptance contract](../v0.5.2-acceptance-plan.md) defines release-blocking automated end-to-end scenarios; [ADR-0002](0002-v052-release-gate-and-v053-validation.md) explicitly amends only the timing of physical-host operational verification, moving it to v0.5.3. Every implementation PR must identify which `INV-xx` and `AC-xx` it implements/tests, and add a regression test before an invariant can be marked complete. A PR may not redefine a normative invariant without an explicit follow-up ADR reviewed **before** implementation.
 
 A docs-only ADR does **not** enforce runtime behavior by itself. The CI release gate must be extended to run the multi-project integration suite, and the redesigned release must not be merged/published before that gate is green.
 
