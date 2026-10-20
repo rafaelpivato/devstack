@@ -1,0 +1,31 @@
+[Unit]
+Description=DevStack v0.5.2 unprivileged web API (project-scoped)
+After=network.target devstack-control.service
+Requires=devstack-control.service
+
+[Service]
+Type=simple
+User=@DEVSTACK_WEB_USER@
+Group=@DEVSTACK_SOCKET_GROUP@
+EnvironmentFile=/etc/devstack/app.env
+WorkingDirectory=/
+ExecStart=/opt/devstack/current/venv/bin/gunicorn --bind 127.0.0.1:8765 --workers 2 --threads 4 --timeout 30 devstack.api.http:create_app()
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RuntimeDirectory=devstack-update-request
+RuntimeDirectoryMode=0700
+UMask=0077
+# This account must NOT be in the docker group. The only privileged
+# interface it can reach is the group-restricted controller Unix socket.
+
+[Install]
+WantedBy=multi-user.target

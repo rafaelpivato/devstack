@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{% if status.update.phase in ("updating", "queued") %}<meta http-equiv="refresh" content="6">{% endif %}
+<title>DevStack · Updates</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/v2.css') }}"></head>
+<body><header><h1>DevStack updates</h1><a href="{{ url_for('index') }}">Back to projects</a></header>
+<main class="card">
+{% for category, message in get_flashed_messages(with_categories=true) %}
+<p class="notice {{ category }}" role="status">{{ message }}</p>
+{% endfor %}
+<p>Installed version: <strong>{{ status.installed }}</strong></p>
+<p>Latest published release: <strong>{{ status.latest or 'unavailable' }}</strong></p>
+<p>Updater status: <strong>{{ status.update.phase }}</strong></p>
+{% if status.check_error %}<p role="alert">{{ status.check_error }}</p>{% endif %}
+{% if status.update.phase == "failed" %}
+<p role="alert">The updater reported a failure. Check systemd logs before retrying.</p>
+{% endif %}
+<p><a href="{{ url_for('devstack_updates') }}">Check for updates</a></p>
+{% if status.update_available and status.update.phase not in ("queued", "updating") %}
+<form method="post" action="{{ url_for('devstack_update_form') }}">
+<input type="hidden" name="_csrf" value="{{ csrf }}">
+<button>Update now</button>
+</form>
+{% elif status.update.phase in ("queued", "updating") %}
+<p>Update queued or in progress; the page may disconnect during controller restart.</p>
+{% else %}
+<p>No newer published release is currently available.</p>
+{% endif %}
+<p class="hint">DevStack updates require all projects deactivated. Only published stable releases
+are considered; this action cannot install branches, arbitrary tags, or run commands.
+The independent root updater checks controller health and rolls back if verification fails.</p>
+</main></body></html>

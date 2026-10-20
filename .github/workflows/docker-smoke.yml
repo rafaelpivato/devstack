@@ -55,7 +55,7 @@ jobs:
           test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
           docker run --rm --network "$network" --security-opt no-new-privileges \
             --cap-drop ALL redis:7-alpine redis-cli -h redis ping
-      - name: Verify fresh-install packaged WSGI and static assets
+      - name: Verify packaged v2 WSGI and static assets
         run: |
           set -euo pipefail
           venv="$RUNNER_TEMP/devstack-fresh-v05"
@@ -70,238 +70,72 @@ jobs:
           with zipfile.ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
               for path in (
-                  "devstack/static/js/api.js",
-                  "devstack/static/js/polling.js",
-                  "devstack/static/js/dashboard.js",
-                  "devstack/static/css/dashboard.css",
+                  "devstack/templates/v2_dashboard.html",
+                  "devstack/templates/v2_job.html",
+                  "devstack/templates/v2_updates.html",
+                  "devstack/static/css/v2.css",
+                  "devstack/static/js/v2_dashboard.js",
+              ):
+                  assert path in names, f"Missing packaged v2 asset: {path}"
+              for legacy in (
                   "devstack/templates/dashboard.html",
+                  "devstack/static/css/dashboard.css",
+                  "devstack/static/js/api.js",
               ):
-                  assert path in names, f"Missing packaged asset: {path}"
+                  assert legacy not in names, f"Legacy asset still packaged: {legacy}"
+          from devstack.api.http import create_app
+          app = create_app({"TESTING": True, "SESSION_COOKIE_SECURE": False})
+          with app.test_client() as client:
+              assert client.get("/static/css/v2.css").status_code == 200
+              assert client.get("/static/js/v2_dashboard.js").status_code == 200
+              # The web process fails closed without its separate controller.
+              assert client.get("/healthz").status_code == 503
           PY
-          homedir="$(mktemp -d)"
-          mkdir -p "$homedir/.config/devstack"
-          : > "$homedir/.config/devstack/workspace.toml"
-          export HOME="$homedir"
-          export DEVSTACK_CONFIG="$homedir/.config/devstack/workspace.toml"
-          port="$("$venv/bin/python" - <<'PY'
-          import socket
-          with socket.socket() as sock:
-              sock.bind(("127.0.0.1", 0))
-              print(sock.getsockname()[1])
-          PY
-          )"
-          "$venv/bin/gunicorn" --bind "127.0.0.1:$port" --workers 1 --timeout 25 \
-            'devstack.web:create_app()' > "$RUNNER_TEMP/devstack-wsgi.log" 2>&1 &
-          worker=$!
-          trap 'kill "$worker" 2>/dev/null || true; wait "$worker" 2>/dev/null || true; rm -rf "$homedir"' EXIT
-          ready=0
-          for attempt in $(seq 1 30); do
-              if curl -fsS "http://127.0.0.1:$port/healthz" > "$RUNNER_TEMP/devstack-health.json"; then
-                  ready=1; break
-              fi
-              sleep .3
-          done
-          if [[ "$ready" != 1 ]]; then cat "$RUNNER_TEMP/devstack-wsgi.log"; exit 1; fi
-          curl -fsS "http://127.0.0.1:$port/api/v1/dashboard" > "$RUNNER_TEMP/devstack-dashboard.json"
-          curl -fsS "http://127.0.0.1:$port/static/js/dashboard.js" > /dev/null
-          curl -fsS "http://127.0.0.1:$port/static/css/dashboard.css" > /dev/null
-          "$venv/bin/python" - <<'PY'
-          import json, os
-          from pathlib import Path
-          directory = Path(os.environ["RUNNER_TEMP"])
-          health = json.loads((directory/"devstack-health.json").read_text())
-          overview = json.loads((directory/"devstack-dashboard.json").read_text())
-          assert health["status"] == "ok"
-          assert overview["schema_version"] == 1
-          assert overview["project"] is None
-          assert overview["runtime"]["phase"] == "inactive"
-          PY
-          kill "$worker"; wait "$worker" || true
-          # All fresh-install checks use the packaged wheel and an empty home.
-          # There is intentionally no release-series or v0.4 legacy guard.
-      - name: Verify real public GitHub Smoke Test project import
+      - name: Verify two independent v0.5.2 GitHub project imports
         run: |
           set -euo pipefail
-          workspace="$(mktemp -d)"
-          trap 'rm -rf "$workspace"' EXIT
-          mkdir -p "$workspace/.config/devstack"
-          export HOME="$workspace"
-          export DEVSTACK_CONFIG="$workspace/.config/devstack/workspace.toml"
           "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
           from pathlib import Path
-          from devstack.template_import import import_github_project
-          from devstack.workspace import load_project
-          from devstack.applications import load_applications
-          from devstack.command_runner import load_tasks
-          from devstack.project_sync import source_directory
-          from devstack.docker_stacks import compose_command
-
-          project, branch = import_github_project(
-              "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke",
-              "smoke",
-          )
-          assert (project, branch) == ("smoke", "main")
-          data = load_project()
-          assert data.name == "smoke"
-          assert [repo.name for repo in data.repos] == ["devstack"]
-          assert data.repos[0].path.is_dir()
-          assert [app.name for app in load_applications("smoke")] == ["Web"]
-          assert load_tasks("smoke"), "Smoke Test tasks not imported"
-          assert source_directory("smoke").is_dir(), "Git sync source not recorded"
-          args = compose_command("smoke")
-          assert "--project-directory" in args
-          assert Path(args[args.index("--project-directory") + 1]).is_dir()
-          assert Path(args[args.index("-f") + 1]).is_file()
-          print("Smoke Test imported from public HTTPS GitHub without SSH identity")
-          PY
-      - name: Verify explicit webhook forwarding to actual Compose container
-        run: |
-          set -euo pipefail
-          python3 -m venv /tmp/devstack-webhook-ci
-          /tmp/devstack-webhook-ci/bin/pip install -q -e .
-          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
-          from pathlib import Path
+          import json
+          import subprocess
           import tempfile
-          from unittest.mock import patch
-          from devstack.applications import Application
-          from devstack.core import Project
-          from devstack import runtime
-          from devstack.webhooks import Webhook, create_webhook_app
+          from devstack.storage.database import Database
+          from devstack.storage.projects import ProjectRegistry
+          from devstack.projects.workspaces import WorkspaceStore
+          from devstack.projects.service import ProjectProvisioner
 
-          compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
-          with tempfile.TemporaryDirectory() as temporary:
-           root = Path(temporary)
-           with (
-              patch("devstack.runtime._folder", return_value=root),
-              patch("devstack.webhooks.load_projects",
-                    return_value={"smoke": Project("smoke", (), ())}),
-              patch("devstack.webhooks.load_webhooks", return_value=(
-                  Webhook("test", "Web", "/webhooks/smoke"),
-              )),
-              patch("devstack.webhooks.load_applications", return_value=(
-                  Application("Web", "web", 8000),
-              )),
-              patch("devstack.webhooks.compose_name", return_value="devstack-smoke"),
-              patch("devstack.webhooks.compose_path", return_value=compose),
-              patch("devstack.webhooks.project_root", return_value=Path.cwd()),
-              patch("devstack.webhooks.compose_command", return_value=[
-                  "docker", "compose", "-p", "devstack-smoke",
-                  "-f", str(compose),
-              ]),
-           ):
-              client = create_webhook_app({"TESTING": True}).test_client()
-              body = b'{"test":"webhook"}'
-              assert client.post("/hooks/test", data=body).status_code == 503
-              runtime._write({"phase": "active", "project": "smoke"})
-              response = client.post("/hooks/test", data=body,
-                  headers={"Content-Type": "application/json",
-                           "X-Signature-Test": "signed"})
-              assert response.status_code == 200, response.data
-              assert response.data == body, response.data
-              assert client.post("/hooks/not-allowed", data=body).status_code == 404
-              assert client.post("/hooks/smoke/test", data=body).status_code == 404
-              assert client.get("/hooks/test").status_code == 405
-              runtime._write({"phase": "deactivating", "project": "smoke"})
-              assert client.post("/hooks/test", data=body).status_code == 503
-          PY
-      - name: Verify actual activation and deactivation lifecycle
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
-          import secrets
-          import tempfile
-          from pathlib import Path
-          from unittest.mock import patch
-          from devstack import runtime
-          from devstack import docker_stacks
-          from devstack.workspace import Project
-
-          compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
-          cmd = ["docker", "compose", "-p", "devstack-smoke", "-f", str(compose)]
-          with tempfile.TemporaryDirectory() as directory:
-              root = Path(directory)
-              with (
-                  patch("devstack.runtime._folder", return_value=root),
-                  patch("devstack.runtime.load_project", return_value=Project("smoke", ())),
-                  patch.object(docker_stacks, "compose_path", return_value=compose),
-                  patch.object(docker_stacks, "compose_command", return_value=cmd),
-                  patch.object(docker_stacks, "compose_name", return_value="devstack-smoke"),
-                  patch.object(docker_stacks, "project_root", return_value=Path.cwd()),
-              ):
-                  activate = secrets.token_hex(12)
-                  runtime._write({"phase": "activating", "project": "smoke", "token": activate})
-                  assert runtime.perform("activate", "smoke", activate) == 0, runtime.status()
-                  assert runtime.status()["phase"] == "active"
-                  deactivate = secrets.token_hex(12)
-                  runtime._write({"phase": "deactivating", "project": "smoke", "token": deactivate})
-                  assert runtime.perform("deactivate", "smoke", deactivate) == 0, runtime.status()
-                  assert runtime.status()["phase"] == "inactive"
-                  assert not runtime._owned_ids("smoke"), "Inactive project retains containers"
-                  volumes = __import__("subprocess").run([
-                      "docker", "volume", "ls", "--quiet",
-                      "--filter", "label=com.docker.compose.project=devstack-smoke",
-                  ], check=True, capture_output=True, text=True)
-                  assert volumes.stdout.strip(), "Deactivate unexpectedly removed named volumes"
-          PY
-      - name: Verify running image worker is stopped by deactivation
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
-          import json, subprocess, tempfile, threading, time
-          from pathlib import Path
-          from unittest.mock import patch
-          from devstack import command_runner, docker_stacks, runtime
-          from devstack.workspace import Project
-
-          name = "smoke"
-          compose = Path.cwd() / "examples/smoke/.devstack/compose.yaml"
-          cmd = ["docker", "compose", "-p", "devstack-smoke", "-f", str(compose)]
-          with tempfile.TemporaryDirectory() as directory:
-              folder = Path(directory)
-              with (
-                  patch("devstack.runtime._folder", return_value=folder),
-                  patch("devstack.runtime.load_project", return_value=Project(name, ())),
-                  patch.object(docker_stacks, "compose_path", return_value=compose),
-                  patch.object(docker_stacks, "compose_command", return_value=cmd),
-                  patch.object(docker_stacks, "compose_name", return_value="devstack-smoke"),
-                  patch.object(command_runner, "compose_name", return_value="devstack-smoke"),
-                  patch.object(command_runner, "project_root", return_value=Path.cwd()),
-                  patch.object(docker_stacks, "project_root", return_value=Path.cwd()),
-              ):
-                  runtime._write({"phase": "active", "project": name})
-                  identifier = "b" * 20
-                  meta, log, marker = command_runner._paths(name, identifier)
-                  command_runner._atomic_write(meta, json.dumps({
-                      "id": identifier, "state": "queued", "started": time.time(),
-                      "service": "", "mode": "run",
-                      "image": "python:3.12-alpine", "network": "none",
-                      "argv": ["python", "-c", "import time;time.sleep(120)"],
-                  }))
-                  log.touch()
-                  worker = threading.Thread(target=command_runner.work,
-                                            args=(name, identifier), daemon=True)
-                  worker.start()
-                  deadline = time.monotonic() + 30
-                  while time.monotonic() < deadline:
-                      containers = subprocess.run(
-                          ["docker", "ps", "-q", "--filter",
-                           "label=devstack.project=devstack-smoke"],
-                          check=True, capture_output=True, text=True,
-                      ).stdout.strip()
-                      if containers:
-                          break
-                      time.sleep(.2)
-                  else:
-                      raise AssertionError("Task container did not start: " +
-                                           command_runner.job_output(name, identifier))
-                  runtime._write({"phase": "deactivating", "project": name,
-                                  "token": "c" * 24})
-                  assert runtime.perform("deactivate", name, "c" * 24) == 0, runtime.status()
-                  worker.join(timeout=15)
-                  assert not worker.is_alive(), "Task worker survived deactivation"
-                  assert runtime.status()["phase"] == "inactive"
-                  assert command_runner.get_job(name, identifier)["state"] == "cancelled"
-                  assert not runtime._owned_ids(name), "Task container survived deactivation"
+          url = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+          with tempfile.TemporaryDirectory() as folder:
+              root = Path(folder)
+              registry = ProjectRegistry(Database(root / "state" / "control.sqlite3"))
+              store = WorkspaceStore(root / "workspaces")
+              provisioner = ProjectProvisioner(registry, store)
+              a = provisioner.import_github(url, "smoke-a", "Smoke A")
+              b = provisioner.import_github(url, "smoke-b", "Smoke B")
+              assert {p.id for p in registry.list()} == {a.id, b.id}
+              assert a.id != b.id
+              for project in (a, b):
+                  meta = registry.import_metadata(project.id)
+                  assert meta["branch"] == "main"
+                  assert meta["subdirectory"] == "examples/smoke"
+                  assert [app["name"] for app in meta["applications"]] == ["Web"]
+                  assert any(task["name"] == "tests" for task in meta["tasks"])
+                  template = provisioner.source_directory(project.id)
+                  compose = store.path(project.id) / "managed" / "compose.yaml"
+                  result = subprocess.run(
+                      ["docker", "compose", "-p", "devstack-" + project.id,
+                       "--project-directory", str(template),
+                       "-f", str(compose), "config", "--format", "json"],
+                      text=True, capture_output=True, check=True, timeout=40,
+                  )
+                  actual = Path(json.loads(result.stdout)["services"]["web"]["build"]["context"])
+                  assert actual == template.parent / "app", (actual, template)
+              assert not list(store.base.glob(".pending-*"))
+              assert not list(subprocess.run(
+                  ["docker", "ps", "--all", "--filter", "name=devstack-v052-",
+                   "--format", "{{.ID}}"], check=True, text=True, capture_output=True
+              ).stdout.splitlines()), "Import must not start runtime containers"
+              print("Two independent v0.5.2 project imports completed without activation.")
           PY
       - name: Inspect service logs
         if: always()
@@ -309,3 +143,222 @@ jobs:
       - name: Clean up containers and volumes
         if: always()
         run: docker compose -f examples/smoke/.devstack/compose.yaml -p devstack-smoke down --volumes --remove-orphans
+      - name: Verify v0.5.2 real Docker A-to-B-to-A switching
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/devstack-fresh-v05/bin/python" - <<'PY'
+          from pathlib import Path
+          import subprocess, tempfile
+          from devstack.projects.workspaces import WorkspaceStore
+          from devstack.projects.service import ProjectProvisioner
+          from devstack.storage.database import Database
+          from devstack.storage.projects import ProjectRegistry
+          from devstack.control.docker import DockerBackend, compose_id
+          from devstack.control.coordinator import Coordinator, ControlError
+          from devstack.control.jobs import JobSupervisor
+          from devstack.control.observability import ContainerObservability
+          from devstack.control.private_ports import PrivateApplicationPorts
+          from unittest.mock import patch
+          from devstack.control.ingress import WebhookIngress, WebhookServer
+          from http.client import HTTPConnection
+          from uuid import uuid4
+          import threading, time
+
+          url = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
+          with tempfile.TemporaryDirectory() as location:
+              home = Path(location)
+              db = Database(home / "state" / "control.sqlite3")
+              registry = ProjectRegistry(db)
+              workspaces = WorkspaceStore(home / "workspaces")
+              service = ProjectProvisioner(registry, workspaces)
+              a = service.import_github(url, "smoke-a", "Smoke A")
+              b = service.import_github(url, "smoke-b", "Smoke B")
+              backend = DockerBackend(service, workspaces)
+              engine = Coordinator(db, registry, backend)
+              jobs = JobSupervisor(engine, backend, workspaces)
+              ingress = WebhookIngress(engine, registry, backend)
+              engine.ingress = ingress
+              for project in (a, b):
+                  ingress.configure(project.id, "smoke", "web", 8000, "/webhooks/smoke")
+              hook_server = WebhookServer(ingress, 0)
+              hook_thread = threading.Thread(target=hook_server.serve_forever, daemon=True)
+              hook_thread.start()
+              def webhook(project_id, route="smoke"):
+                  conn = HTTPConnection("127.0.0.1", hook_server.server_address[1], timeout=8)
+                  try:
+                      content = b'{"hello":"webhook"}'
+                      conn.request("POST", "/hooks/" + project_id + "/" + route, content,
+                                   headers={"Content-Type": "application/json",
+                                            "Stripe-Signature": "signature-fixture"})
+                      response = conn.getresponse()
+                      return response.status, response.read()
+                  finally:
+                      conn.close()
+              try:
+                  assert engine.reconcile()["phase"] == "inactive"
+                  first = engine.activate(a.id)
+                  assert backend.owned() and all(
+                      x["project"] == a.id and x["generation"] == first["generation"]
+                      for x in backend.owned()
+                  ), backend.owned()
+                  assert webhook(a.id) == (200, b'{"hello":"webhook"}')
+                  # Read-only v2 Compose observability must never switch
+                  # projects or disclose another project's containers.
+                  observer = ContainerObservability(engine, backend)
+                  services_a = observer.services(a.id)
+                  assert services_a["active"], services_a
+                  assert services_a["services"], services_a
+                  postgres = next(
+                      x for x in services_a["services"] if x["name"] == "postgres"
+                  )
+                  assert postgres["status"] == "running", postgres
+                  assert len(postgres["containers"]) == 1, postgres
+                  container_id = postgres["containers"][0]["id"]
+                  assert len(container_id) == 64
+                  assert postgres["containers"][0]["state"] == "running"
+                  log_preview = observer.logs(a.id, container_id, 20)
+                  assert log_preview["service"] == "postgres", log_preview
+                  assert log_preview["tail"] == 20, log_preview
+                  assert len(log_preview["text"].encode("utf-8")) <= 65536
+                  assert observer.services(b.id) == {
+                      "project_id": b.id, "active": False, "services": []
+                  }
+                  # This fixture deliberately exposes web on 127.0.0.1 only.
+                  # Even with a working Tailscale IPv4, that loopback port
+                  # must NOT be mistaken for a tailnet-private published URL.
+                  private_ports = PrivateApplicationPorts(engine, backend)
+                  with patch("devstack.control.private_ports.tailscale_ipv4",
+                             return_value="100.98.76.54"):
+                      assert private_ports.list(a.id) == {
+                          "project_id": a.id, "active": True,
+                          "tailscale_available": True, "ports": [],
+                          "applications": [],
+                      }
+                      assert private_ports.list(b.id) == {
+                          "project_id": b.id, "active": False,
+                          "tailscale_available": False, "ports": [],
+                          "applications": [],
+                      }
+
+                  try:
+                      observer.logs(b.id, container_id, 20)
+                      raise AssertionError("inactive project read Docker logs")
+                  except ControlError:
+                      pass
+                  assert webhook(b.id)[0] == 503
+                  assert webhook(str(uuid4()))[0] == 404
+                  compose_a = backend.command(a.id)
+                  subprocess.run(
+                      compose_a + ["exec", "-T", "postgres", "sh", "-c",
+                                   "echo persistent > /var/lib/postgresql/data/devstack-check"],
+                      check=True, timeout=30,
+                  )
+                  # AC-17: multiple long-running commands do not block each other.
+                  # Independent cancellation must preserve other jobs and Compose services.
+                  def running_container(job_id):
+                      inspection = subprocess.run(
+                          ["docker", "inspect", "--type", "container", "--",
+                           "devstack-task-" + job_id],
+                          text=True, capture_output=True, timeout=20,
+                      )
+                      return inspection.returncode == 0
+
+                  first_long = jobs.submit_adhoc(
+                      a.id, "image", "", "python:3.12-alpine", "none",
+                      ["python", "-c", "import time;time.sleep(120)"],
+                  )
+                  second_long = jobs.submit_adhoc(
+                      a.id, "image", "", "python:3.12-alpine", "none",
+                      ["python", "-c", "import time;time.sleep(120)"],
+                  )
+                  deadline = time.monotonic() + 70
+                  while time.monotonic() < deadline:
+                      if (jobs.get(first_long)["status"] == "running"
+                              and jobs.get(second_long)["status"] == "running"
+                              and running_container(first_long)
+                              and running_container(second_long)):
+                          break
+                      time.sleep(.4)
+                  assert running_container(first_long) and running_container(second_long), (
+                      jobs.get(first_long), jobs.get(second_long)
+                  )
+                  fast = jobs.submit_adhoc(
+                      a.id, "image", "", "python:3.12-alpine", "none",
+                      ["python", "-c", "print('third job completed')"],
+                  )
+                  deadline = time.monotonic() + 30
+                  while time.monotonic() < deadline and jobs.get(fast)["status"] in ("queued","running"):
+                      time.sleep(.2)
+                  assert jobs.get(fast)["status"] == "succeeded", jobs.get(fast)
+                  assert jobs.get(first_long)["status"] == "running"
+                  assert jobs.cancel(a.id, second_long)["status"] == "cancelled"
+                  assert not running_container(second_long)
+                  assert jobs.get(first_long)["status"] == "running"
+                  assert engine.status()["phase"] == "active"
+                  assert webhook(a.id) == (200, b'{"hello":"webhook"}')
+                  assert jobs.cancel(a.id, first_long)["status"] == "cancelled"
+                  assert not running_container(first_long)
+                  assert backend.verify(a.id, first["generation"]) is None
+
+                  # Supervise an actual long-lived disposable Docker image task.
+                  with db.transaction(write=True) as con:
+                      con.execute(
+                          "INSERT INTO tasks(project_id,name,service,mode,image,network,argv_json)"
+                          " VALUES (?,'wait','', 'run','python:3.12-alpine','none',?)",
+                          (a.id, '["python","-c","import time;time.sleep(120)"]'),
+                      )
+                  job_id = jobs.submit_task(a.id, "wait")
+                  deadline = time.monotonic() + 20
+                  while jobs.get(job_id)["status"] == "queued" and time.monotonic() < deadline:
+                      time.sleep(.1)
+                  assert jobs.get(job_id)["status"] == "running", jobs.get(job_id)
+                  second = engine.switch(b.id)
+                  assert jobs.get(job_id)["status"] == "cancelled", jobs.get(job_id)
+                  assert second["project_id"] == b.id
+                  assert webhook(b.id) == (200, b'{"hello":"webhook"}')
+                  assert webhook(a.id)[0] == 503
+                  assert all(x["project"] == b.id for x in backend.owned())
+                  assert not engine.authorized(a.id, first["generation"])
+                  third = engine.switch(a.id)
+                  assert third["project_id"] == a.id
+                  assert webhook(a.id) == (200, b'{"hello":"webhook"}')
+                  assert third["generation"] != first["generation"]
+                  assert all(x["project"] == a.id for x in backend.owned())
+                  output = subprocess.run(
+                      backend.command(a.id) + ["exec", "-T", "postgres", "cat",
+                                             "/var/lib/postgresql/data/devstack-check"],
+                      check=True, text=True, capture_output=True, timeout=30,
+                  ).stdout.strip()
+                  assert output == "persistent", output
+                  assert engine.deactivate()["phase"] == "inactive"
+                  assert not backend.owned()
+                  assert len(registry.list()) == 2
+                  print("Two GitHub projects switched A-B-A, no overlap, volume persisted")
+              finally:
+                  hook_server.shutdown()
+                  hook_thread.join(timeout=8)
+                  hook_server.server_close()
+                  for p in (a, b):
+                      try:
+                          backend.stop(p.id)
+                      except Exception as exc:
+                          print("Cleanup failure:", exc)
+                          raise
+          PY
+
+  systemd-privilege-boundary:
+    name: Fresh Ubuntu systemd and Unix-socket permissions
+    needs: compose-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify actual web/controller Linux identities and restart
+        env:
+          DEVSTACK_EPHEMERAL_CI: "1"
+        run: sudo --preserve-env=DEVSTACK_EPHEMERAL_CI bash scripts/verify-systemd-ci.sh
+      - name: Inspect systemd diagnostics on failure
+        if: failure()
+        run: |
+          sudo systemctl status devstack-ci-control.service devstack-ci-web.service --no-pager || true
+          sudo journalctl -u devstack-ci-control.service -u devstack-ci-web.service --no-pager -n 160 || true

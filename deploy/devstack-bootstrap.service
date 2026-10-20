@@ -6,8 +6,8 @@ ConditionPathExists=/etc/devstack/bootstrap.env
 
 [Service]
 Type=simple
-User=devstack
-Group=devstack
+User=@DEVSTACK_WEB_USER@
+Group=@DEVSTACK_WEB_USER@
 EnvironmentFile=/etc/devstack/bootstrap.env
 ExecStart=/usr/bin/python3 /opt/devstack/current/source/scripts/bootstrap.py
 AmbientCapabilities=CAP_NET_BIND_SERVICE

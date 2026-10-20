@@ -1,0 +1,33 @@
+[Unit]
+Description=DevStack v0.5.2 runtime supervisor (single execution authority)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=@DEVSTACK_CONTROL_USER@
+Group=@DEVSTACK_SOCKET_GROUP@
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/devstack
+ExecStart=/opt/devstack/current/venv/bin/devstack-control --state /var/lib/devstack --socket /run/devstack-control/control.sock --socket-group @DEVSTACK_SOCKET_GROUP@
+Restart=always
+RestartSec=2
+KillMode=control-group
+TimeoutStopSec=180
+RuntimeDirectory=devstack-control
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=HOME=/var/lib/devstack
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/devstack /run/devstack-control
+# The controller's Docker permission is privileged: only the trusted admin
+# should control this service. The HTTP service must not be in docker group.
+
+[Install]
+WantedBy=multi-user.target

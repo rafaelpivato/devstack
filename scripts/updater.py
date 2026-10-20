@@ -109,13 +109,30 @@ def point_at(current: Path, target: Path | None) -> None:
         temp.unlink(missing_ok=True)
 
 
-def healthy(url: str, attempts: int = 30) -> bool:
+def healthy(url: str, attempts: int = 90) -> bool:
+    """Require the new web API, registry-backed controller and inactive runtime.
+
+    An HTTP 200 from an old singleton web process cannot satisfy this gate.
+    No DevStack-managed runtime may auto-start after a release activation.
+    """
+    if url != "http://127.0.0.1:8765/healthz":
+        raise ValueError("Only the local DevStack v2 health endpoint is accepted")
+    runtime_url = "http://127.0.0.1:8765/api/v2/runtime"
     for attempt in range(attempts):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=2) as response:
-                if response.status == 200 and json.load(response).get("status") == "ok":
-                    return True
+            health_request = urllib.request.Request(
+                url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(health_request, timeout=2) as response:
+                health = json.load(response)
+            status_request = urllib.request.Request(
+                runtime_url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(status_request, timeout=2) as response:
+                runtime = json.load(response)
+            if (health == {"ok": True, "controller": "connected"}
+                    and runtime.get("phase") == "inactive"
+                    and runtime.get("project_id") is None
+                    and runtime.get("generation") is None):
+                return True
         except (OSError, ValueError, urllib.error.URLError):
             pass
         if attempt != attempts - 1:
@@ -123,15 +140,23 @@ def healthy(url: str, attempts: int = 30) -> bool:
     return False
 
 
+def restart_services() -> None:
+    """Web has no Docker access. Restart sole Docker owner before the web API."""
+    execute("systemctl", "stop", "devstack-web-v2.service", timeout=45)
+    execute("systemctl", "restart", "devstack-control.service", timeout=240)
+    execute("systemctl", "start", "devstack-web-v2.service", timeout=45)
+    execute("systemctl", "is-active", "--quiet", "devstack-control.service", timeout=10)
+    execute("systemctl", "is-active", "--quiet", "devstack-web-v2.service", timeout=10)
+
+
 def activate(
     tag: str, repo: str, root: Path, state: Path,
-    service: str = "devstack.service",
     health_url: str = "http://127.0.0.1:8765/healthz",
 ) -> str:
     tag = checked_tag(tag)
+    if tuple(map(int, tag[1:].split("."))) < (0, 5, 2):
+        raise ValueError("v0.5.1 or earlier cannot run on the clean-break v2 installer")
     repo = checked_repo(repo)
-    if service != "devstack.service":
-        raise ValueError("Service must be devstack.service")
     root.mkdir(parents=True, exist_ok=True)
     state.mkdir(parents=True, exist_ok=True)
     current = root / "current"
@@ -141,29 +166,43 @@ def activate(
     old = current_release(current)
     target = root / "releases" / tag
     if old == target and (target / ".ready").exists():
+        # No service restart is needed; an actively running project is not
+        # a failed update. A health gate is required only before a change.
         return f"Already running {tag}"
+    # An update must not disrupt an active project or unhealthy supervisor.
+    if old is not None and not healthy(health_url, attempts=2):
+        raise RuntimeError(
+            "Deactivate all projects and restore v2 health before updating"
+        )
     target = prepare_release(root, tag, repo)
     point_at(current, target)
     try:
-        execute("systemctl", "restart", service, timeout=30)
+        restart_services()
         if not healthy(health_url):
-            raise RuntimeError(f"Health check failed for {tag}")
+            raise RuntimeError(f"Controller+web reconciliation health check failed for {tag}")
     except Exception as exc:
-        # Updater runs outside the versioned application. Rollback is independent.
+        # The updater remains outside the versioned application and uses only
+        # the trusted prior v2 release. Never roll back to singleton v0.5.1.
         point_at(current, old)
-        subprocess.run(
-            ["systemctl", "restart" if old else "stop", service],
-            check=False, timeout=30,
-        )
-        failed.write_text(str(exc)[:1000] + "\n", encoding="utf-8")
-        raise RuntimeError(f"Update to {tag} failed, restored previous release: {exc}") from exc
-    # The public first-use portal is independent from the Flask app. If it is
-    # running, reload it from the same reviewed release as the main service.
-    # The unit points at /opt/devstack/current/source/scripts/bootstrap.py.
+        if old:
+            try:
+                restart_services()
+            except Exception:
+                pass
+        else:
+            subprocess.run(["systemctl", "stop", "devstack-web-v2.service"],
+                           check=False, timeout=45)
+            subprocess.run(["systemctl", "stop", "devstack-control.service"],
+                           check=False, timeout=180)
+        failed.write_text(type(exc).__name__ + "\n", encoding="utf-8")
+        raise RuntimeError(
+            f"Update to {tag} failed, restored previous release pointer; check logs"
+        ) from exc
     try:
         execute("systemctl", "try-restart", "devstack-bootstrap.service", timeout=30)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        print(f"Devstack bootstrap reload warning: {exc}", file=sys.stderr, flush=True)
+        print(f"DevStack bootstrap reload warning: {type(exc).__name__}",
+              file=sys.stderr, flush=True)
     return f"Activated {tag}"
 
 
