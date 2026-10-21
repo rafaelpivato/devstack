@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "../../api/client";
 import { readRuntime, readTransition, readTransitions, submitTransition,
   type ProjectSummary, type RuntimeSnapshot, type TransitionAction, type TransitionReceipt,
@@ -147,7 +147,9 @@ export function RuntimeOperationDetail({id,navigation}: {id:string;navigation:Na
   const load=useCallback((signal:AbortSignal)=>readTransition(id,signal),[id]);
   const state=useResource(load,1600);
   const operation=state.kind==="ready"?state.data:null;
-  if(operation && ["succeeded","failed","interrupted"].includes(operation.status)) finishPending(id);
+  useEffect(()=>{
+    if(operation && ["succeeded","failed","interrupted"].includes(operation.status)) finishPending(id);
+  },[id,operation?.status]);
   return <Shell title="Runtime operation" navigation={navigation} back>
     {state.kind==="loading"&&<Skeleton/>}
     {state.kind==="error"&&<Notice title="Cannot retrieve receipt" role="alert">{state.error.message} The runtime outcome remains unknown.</Notice>}
