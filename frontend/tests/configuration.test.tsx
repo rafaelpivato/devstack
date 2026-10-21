@@ -29,7 +29,7 @@ describe("configuration and admin lane",()=>{
     const html=renderToStaticMarkup(<ConfigurationHome id={A} runtime={state("active",A)} navigation={nav}/>);
     expect(html).toContain("View only");
     expect(nav.navigate).not.toHaveBeenCalled();
-    expect(renderToStaticMarkup(<AdministrationHome navigation={nav}/>)).toContain("secondary");
+    expect(renderToStaticMarkup(<AdministrationHome navigation={nav}/>)).toContain("Secondary controls");
   });
   it("requires full arrays and exact properties before collection writes",()=>{
     expect(validateCollection({applications:[],tasks:[]})).toBe(true);
