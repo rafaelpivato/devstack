@@ -215,6 +215,30 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         return render_template("v06_preview.html", csrf=csrf(),
                                js_asset=js_asset, css_assets=css_assets)
 
+    @app.get("/__v06/")
+    @app.get("/__v06/<path:frontend_path>")
+    def v06_deep_link(frontend_path=""):
+        """Only known project-scoped SPA routes; no generic catch-all."""
+        import re
+        pattern = (r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+                   r"[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+        segments = frontend_path.split("/") if frontend_path else []
+        valid = (
+            not segments or
+            segments == ["projects"] or
+            (len(segments) >= 2 and segments[0] == "projects" and
+             re.fullmatch(pattern, segments[1], re.IGNORECASE) is not None and
+             (len(segments) == 2 or
+              (len(segments) == 3 and segments[2] in {
+                  "repositories", "services", "jobs", "applications", "configuration",
+              }) or
+              (len(segments) == 4 and segments[2] == "repositories" and
+               re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None)))
+        )
+        if not valid:
+            abort(404)
+        return v06_preview()
+
     @app.get("/")
     def index():
         try:
