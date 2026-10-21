@@ -1,0 +1,41 @@
+# One-time I1 asset bootstrap. Removed from this PR after creating its lockfile
+# and reproducible git-tag distribution assets.
+name: Bootstrap v0.6 frontend assets
+on:
+  push:
+    branches:
+      - feat/v060-frontend-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.repository == 'rafaelpivato/devstack'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lock and build the opt-in browser bundle
+        working-directory: frontend
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+      - name: Commit generated release bundle once
+        run: |
+          set -euo pipefail
+          git add frontend/package-lock.json
+          git add -f src/devstack/static/v06/manifest.json src/devstack/static/v06/assets
+          if git diff --cached --quiet; then
+            echo "Source, lockfile and assets already in sync."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(v0.6): lock dependencies and track deterministic frontend bundle"
+          git push origin HEAD:feat/v060-frontend-foundation
