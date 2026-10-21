@@ -7,8 +7,8 @@ import type { RuntimeSnapshot } from "../../api/runtime";
 import { readRuntime } from "../../api/runtime";
 import { useResource } from "../../hooks/useResource";
 import { ItemLink, Notice, Shell, Skeleton } from "../../components/Shell";
-import { NavLink, type Navigator } from "../../navigation/useNavigation";
-import { ADMIN_ROOT, adminUrl, GLOBAL_PROJECTS } from "../../navigation/routes";
+import { NavLink, GLOBAL_PROJECTS, type Navigator } from "../../navigation/useNavigation";
+import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
 import { Feedback, message, editable } from "./Common";
 
 export function AdministrationHome({navigation}:{navigation:Navigator}) {
