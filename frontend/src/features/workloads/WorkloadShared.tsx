@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { useState, type PropsWithChildren } from "react";
 import type { RuntimeSnapshot } from "../../api/runtime";
 import { Notice, Shell } from "../../components/Shell";
 import { laneUrl } from "../../navigation/routes";
@@ -28,6 +28,16 @@ export function TextLog({text,label}:{text:string;label:string}) {
   return <pre className="log-view" aria-label={label}>{text||"No output in this snapshot."}</pre>;
 }
 export function CopyLog({value}:{value:string}) {
-  const copy=()=>{if(navigator.clipboard?.writeText)void navigator.clipboard.writeText(value).catch(()=>{});};
-  return <button className="text-button" type="button" disabled={!value} onClick={copy}>Copy output</button>;
+  const [feedback,setFeedback]=useState<string|null>(null);
+  const copy=async()=>{
+    try{
+      if(!navigator.clipboard?.writeText) throw Error("Clipboard access unavailable");
+      await navigator.clipboard.writeText(value);
+      setFeedback("Copied to clipboard");
+    }catch{setFeedback("Clipboard unavailable; select and copy the visible output.");}
+  };
+  return <span>
+    <button className="text-button" type="button" disabled={!value} onClick={()=>void copy()}>Copy output</button>
+    {feedback&&<span className="text-muted" role="status">{feedback}</span>}
+  </span>;
 }

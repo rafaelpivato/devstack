@@ -5,7 +5,7 @@ import { useResource } from "../../hooks/useResource";
 import { isContainerId, serviceUrl } from "../../navigation/routes";
 import { ItemLink, Notice, Skeleton, Status } from "../../components/Shell";
 import type { Navigator } from "../../navigation/useNavigation";
-import { ActiveOnly, CopyLog, ReadError, TextLog, WorkloadShell, SectionLink, canOperate } from "./WorkloadShared";
+import { ActiveOnly, CopyLog, ReadError, TextLog, WorkloadShell, canOperate } from "./WorkloadShared";
 
 export function ServicesScreen({id,runtime,navigation}:{
   id:string;runtime:RuntimeSnapshot;navigation:Navigator;
@@ -30,7 +30,7 @@ export function ServicesScreen({id,runtime,navigation}:{
             href={serviceUrl(id,container.id)} navigation={navigation}/>)}</div>
       </section>)}
     </>}
-    <SectionLink id={id} lane="jobs" label="Build / restart through supervised jobs" navigation={navigation}/>
+    <p className="text-muted">Compose build and restart run as supervised jobs, managed from the Jobs section.</p>
   </WorkloadShell>;
 }
 
