@@ -5,7 +5,7 @@ import { readRuntime, readTransition, readTransitions, submitTransition,
 } from "../../api/runtime";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { useResource } from "../../hooks/useResource";
-import { actionUrl, globalActionUrl, OPERATIONS_URL, operationUrl, PREVIEW_ROOT, projectUrl } from "../../navigation/routes";
+import { actionUrl, globalActionUrl, isProjectId, OPERATIONS_URL, operationUrl, PREVIEW_ROOT } from "../../navigation/routes";
 import type { Navigator } from "../../navigation/useNavigation";
 import { NavLink } from "../../navigation/useNavigation";
 
@@ -23,7 +23,8 @@ export function readPending():PendingTransition|null {
     const p=parsed as Record<string,unknown>;
     if (!["activate","switch","deactivate","reconcile"].includes(String(p.action)) ||
         typeof p.requestKey!=="string" || !HEX.test(p.requestKey) ||
-        (p.projectId!==null && typeof p.projectId!=="string")) return null;
+        (p.projectId!==null && (typeof p.projectId!=="string" || !isProjectId(p.projectId))) ||
+        (p.receiptId!==undefined && (typeof p.receiptId!=="string" || !isProjectId(p.receiptId)))) return null;
     return p as unknown as PendingTransition;
   } catch { return null; }
 }
