@@ -29,6 +29,7 @@ from .observability import ContainerObservability
 from .private_ports import PrivateApplicationPorts
 from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
+from .transitions import TransitionSupervisor
 from .bulk_repositories import BulkRepositoryUpdater
 from devstack.github_ssh import public_key, generate_key, test_connection
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send_payload
@@ -46,6 +47,7 @@ class Controller:
         self.provisioner = ProjectProvisioner(self.registry, workspaces)
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
+        self.transitions = TransitionSupervisor(database, self.coordinator, self.registry)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.observability = ContainerObservability(self.coordinator, self.backend)
         self.private_ports = PrivateApplicationPorts(self.coordinator, self.backend)
@@ -82,6 +84,13 @@ class Controller:
             return {"alive": True, "runtime": state["phase"]}
         if operation == "status":
             return self._public_status(self.coordinator.status())
+        if operation == "transition_submit":
+            return self.transitions.submit(request["action"], request["project_id"],
+                                           request["request_key"])
+        if operation == "transition_status":
+            return self.transitions.get(request["id"])
+        if operation == "transition_list":
+            return self.transitions.list()
         if operation == "projects":
             return {"projects": [
                 {"id": p.id, "slug": p.slug, "name": p.name}
@@ -366,6 +375,7 @@ def main():
         database = Database(args.state / "control.sqlite3")
         workspaces = WorkspaceStore(args.state / "projects")
         controller = Controller(database, workspaces)
+        controller.transitions.recover_interrupted()
         # Exclusive daemon lifetime lock guarantees that all handlers from an
         # earlier supervisor are gone. Their leases cannot be active now.
         with controller.coordinator.locked():
