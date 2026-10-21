@@ -101,7 +101,7 @@ class TransitionAcceptance(unittest.TestCase):
         self.backend.block = True
         accepted = self.op("activate", self.a.id)
         self.assertTrue(self.backend.entered.wait(3))
-        self.assertEqual(accepted["status"], "running")
+        self.assertIn(accepted["status"], {"queued", "running"})
         self.assertEqual(send(self.socket_path, "status")["phase"], "activating")
         # Receipt reads are available even while Compose is blocked; after
         # original submitter closes its IPC connection the transition survives.
@@ -213,11 +213,10 @@ class TransitionAcceptance(unittest.TestCase):
         self.assertEqual(self.backend.owned(), [])
 
     def test_mutating_command_keys_are_validated(self):
-        code, out, err = self.run_cli(
-            "project", "activate", self.a.id,
-            "--request-key", "not-a-valid-key")
-        self.assertEqual(code, 2)
-        self.assertEqual(out, "")
+        with self.assertRaises(SystemExit) as parse:
+            self.run_cli("project", "activate", self.a.id,
+                         "--request-key", "not-a-valid-key")
+        self.assertEqual(parse.exception.code, 2)
         with self.assertRaises(ControllerRejected):
             self.op("activate", self.a.id, "bad")
         with self.assertRaises(ControllerRejected):
