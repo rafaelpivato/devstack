@@ -143,9 +143,26 @@ class TransitionSupervisor:
             raise TransitionConflict("Global transition must not target a project")
 
         with self._guard:
-            # The single coordinator lock also serializes ordinary web mutations.
-            # Snapshot the state at submission and fence against *any* intervening
-            # web/CLI transition, including A→B→A, before future execution.
+            # Read the single-flight ledger BEFORE waiting for the coordinator
+            # flock: that lock may be held throughout a multi-minute Docker
+            # transition. Competing submissions and same-key retries must be
+            # fast even while the original operation is running.
+            with self._transaction() as con:
+                previous = con.execute(
+                    "SELECT id,action,project_id FROM transitions WHERE request_key=?",
+                    (key,),
+                ).fetchone()
+                if previous:
+                    if previous["action"] != action or previous["project_id"] != target:
+                        raise TransitionConflict("Request key reused for another transition")
+                    return self.get(previous["id"])
+                if con.execute(
+                    "SELECT 1 FROM transitions WHERE status IN ('queued','running')"
+                ).fetchone():
+                    raise TransitionConflict("Another runtime transition is already pending")
+            # The single coordinator lock also serializes ordinary web
+            # mutations. Snapshot the state under it, then fence *any*
+            # intervening web/CLI transition before later execution.
             with self.coordinator.locked():
                 with self._transaction(write=True) as con:
                     old = con.execute(
