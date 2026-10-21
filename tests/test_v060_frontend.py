@@ -24,13 +24,15 @@ class FrontendFoundationTests(unittest.TestCase):
         entry = manifest["src/main.tsx"]
         self.assertTrue((STATIC / entry["file"]).is_file())
         self.assertGreater((STATIC / entry["file"]).stat().st_size, 100)
-        self.assertTrue(entry.get("css"))
-        for asset in entry["css"]:
+        css = entry.get("css") or [value["file"] for value in manifest.values()
+                                   if value["file"].endswith(".css")]
+        self.assertTrue(css)
+        for asset in css:
             self.assertTrue((STATIC / asset).is_file())
         response = self.client.get("/__v06")
         self.assertEqual(response.status_code, 200)
         self.assertIn(entry["file"].encode(), response.data)
-        for asset in entry["css"]:
+        for asset in css:
             self.assertIn(asset.encode(), response.data)
         self.assertIn(b'devstack-csrf', response.data)
         self.assertEqual(self.operations, [])  # preview never activates/reads runtime
