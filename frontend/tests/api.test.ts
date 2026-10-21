@@ -3,7 +3,7 @@ import { apiRequest, ApiError } from "../src/api/client";
 
 describe("typed Flask API transport", () => {
   it("uses same-origin cookies and never forwards tokens elsewhere", async () => {
-    const transport = vi.fn(async () => new Response(JSON.stringify({ phase: "inactive" }), {
+    const transport = vi.fn(async (_url: RequestInfo | URL, _options?: RequestInit) => new Response(JSON.stringify({ phase: "inactive" }), {
       status: 200, headers: { "Content-Type": "application/json" },
     }));
     const result = await apiRequest<{phase: string}>("/api/v2/runtime", {}, transport);
@@ -17,7 +17,7 @@ describe("typed Flask API transport", () => {
   });
 
   it("requires CSRF and preserves exact JSON mutation fields", async () => {
-    const transport = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {status: 200}));
+    const transport = vi.fn(async (_url: RequestInfo | URL, _options?: RequestInit) => new Response(JSON.stringify({ ok: true }), {status: 200}));
     await expect(apiRequest("/api/v2/projects", {
       method: "POST", body: {slug: "demo", name:"Demo"},
     }, transport)).rejects.toMatchObject({kind: "unauthorized"});
