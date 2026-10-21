@@ -41,7 +41,8 @@ def install_command(root: Path = DEFAULT_ROOT,
         return False
     # A different 'dev' found on PATH would be shadowed by the new shortcut.
     existing = shutil.which(COMMAND)
-    if existing and Path(existing) != destination:
+    if (existing and Path(existing) != destination
+            and Path(existing).resolve() != target.resolve()):
         raise CLIInstallError(
             f"Refusing to shadow existing command at {existing}"
         )

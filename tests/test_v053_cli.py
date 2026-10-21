@@ -130,7 +130,8 @@ class CLICommandTests(unittest.TestCase):
 
 
 class CLIInstallTests(unittest.TestCase):
-    def test_collision_protection_idempotency_and_pointer_rollback(self):
+    @patch("devstack.cli.install.shutil.which", return_value=None)
+    def test_collision_protection_idempotency_and_pointer_rollback(self, _which):
         with tempfile.TemporaryDirectory() as rootdir:
             root = Path(rootdir) / "install"
             first = root / "releases" / "v0.5.3"
@@ -192,7 +193,8 @@ class CLIInstallTests(unittest.TestCase):
             with self.assertRaises(CLIInstallError):
                 install_command(root, Path(directory) / "dev")
 
-    def test_updater_preflight_blocks_existing_dev_command(self):
+    @patch("scripts.updater.shutil.which", return_value=None)
+    def test_updater_preflight_blocks_existing_dev_command(self, _which):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "app"
             destination = Path(directory) / "dev"
@@ -225,10 +227,19 @@ class CLIInstallTests(unittest.TestCase):
             updater.point_at(root / "current", selected)
             destination = base / "updater.py"
             destination.write_bytes(initial)
-            self.assertTrue(refresh_updater(root, destination))
+            original_stat = Path.stat
+            def fake_stat(path, *args, **kwargs):
+                info = original_stat(path, *args, **kwargs)
+                if path == destination:
+                    fields = list(info)
+                    fields[4] = 0  # Fake root ownership only for this temporary fixture.
+                    return os.stat_result(fields)
+                return info
+            with patch.object(Path, "stat", fake_stat):
+                self.assertTrue(refresh_updater(root, destination))
+                self.assertFalse(refresh_updater(root, destination))
             self.assertEqual(destination.read_bytes(), changed)
             self.assertEqual((base / "updater.py.pre-cli-backup").read_bytes(), initial)
-            self.assertFalse(refresh_updater(root, destination))
             self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o644)
             collision = base / "not-devstack.py"
             collision.write_text("unrelated\n")

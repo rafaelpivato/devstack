@@ -140,11 +140,14 @@ def healthy(url: str, attempts: int = 90) -> bool:
     return False
 
 
-def cli_collision(root: Path, destination: Path = Path("/usr/local/bin/dev")) -> bool:
+def cli_collision(root: Path, destination: Path = Path("/usr/local/bin/dev"),
+                  release_cli: Path | None = None) -> bool:
     """Preflight a new versioned CLI without modifying any host commands."""
     selected = root / "current" / "venv" / "bin" / "dev"
     existing = shutil.which("dev")
-    if existing and Path(existing) != destination:
+    selected_executable = release_cli if release_cli is not None else selected
+    if (existing and Path(existing) != destination
+            and Path(existing).resolve() != selected_executable.resolve()):
         raise RuntimeError(f"Refusing to shadow existing 'dev' at {existing}")
     if not os.path.lexists(destination):
         return False
@@ -191,7 +194,7 @@ def activate(
     cli_available = (target / "venv" / "bin" / "dev").is_file()
     if cli_available:
         # Perform the collision check BEFORE activating the new release.
-        cli_collision(root)
+        cli_collision(root, release_cli=target / "venv" / "bin" / "dev")
     cli_link = Path("/usr/local/bin/dev")
     had_cli_link = os.path.lexists(cli_link)
     point_at(current, target)
