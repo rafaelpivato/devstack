@@ -240,6 +240,11 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
               (len(segments) == 4 and segments[2] == "runtime" and
                segments[3] in {"activate", "switch"}) or
               (len(segments) == 4 and segments[2] == "repositories" and
+               segments[3] in {"add", "bulk", "branch", "source"}) or
+              (len(segments) == 5 and segments[2] == "repositories" and
+               segments[3] in {"adds", "updates"} and
+               re.fullmatch(pattern, segments[4], re.IGNORECASE) is not None) or
+              (len(segments) == 4 and segments[2] == "repositories" and
                re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None)))
         )
         if not valid:

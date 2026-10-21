@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { readProject, type ProjectDetail } from "../../api/projects";
 import type { ProjectSummary, RuntimeSnapshot } from "../../api/runtime";
 import { useResource } from "../../hooks/useResource";
-import { isProjectId, laneUrl, PREVIEW_ROOT, projectUrl, repoUrl, type Lane } from "../../navigation/routes";
+import { isProjectId, laneUrl, projectUrl, type Lane } from "../../navigation/routes";
 import type { Navigator } from "../../navigation/useNavigation";
 import { GLOBAL_PROJECTS, OldDashboardLink } from "../../navigation/useNavigation";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
@@ -102,33 +102,18 @@ function ProjectSections({detail,navigation}:{detail:ProjectDetail;navigation:Na
   </div></>;
 }
 
-export function ProjectFeature({id,lane,repoId,navigation,runtime}:{
-  id:string;lane:Lane;repoId?:string;navigation:Navigator;runtime:RuntimeSnapshot;
+export function ProjectFeature({id,lane,navigation,runtime}:{
+  id:string;lane:Lane;navigation:Navigator;runtime:RuntimeSnapshot;
 }) {
   const loader=useCallback((signal:AbortSignal)=>readProject(id,signal),[id]);
   const detail=useResource(loader,20000);
   const meta=SECTIONS.find(x=>x.lane===lane)!;
-  const selected=detail.kind==="ready"&&repoId?detail.data.repositories.find(r=>r.id===repoId):undefined;
-  return <Shell title={repoId&&selected?selected.name:meta.title} navigation={navigation} back
+  return <Shell title={meta.title} navigation={navigation} back
     subtitle={detail.kind==="ready"?detail.data.project.name:undefined}
     badge={<Status text={runtime.phase==="active"&&runtime.project_id===id?"Active":"Viewing"} kind={runtime.phase==="active"&&runtime.project_id===id?"positive":"neutral"}/>}>
     {detail.kind==="loading" && <Skeleton/>}
     {detail.kind==="error" && <Notice title="Project detail unavailable" role="alert">{detail.error.message}</Notice>}
     {detail.kind==="ready" && <>
-      {repoId && !selected && <Notice title="Repository not found" role="alert">This repository is no longer registered.</Notice>}
-      {repoId && selected && <section className="card">
-        <div className="property"><span>Name</span><strong>{selected.name}</strong></div>
-        <div className="property"><span>Relative path</span><code>{selected.relative_path}</code></div>
-      </section>}
-      {lane==="repositories" && !repoId && <>
-        <div className="section-head"><span>Registered repositories</span><span className="count">{detail.data.repositories.length}</span></div>
-        <div className="item-group">
-          {detail.data.repositories.map(repo=>
-            <ItemLink key={repo.id} icon="⑂" title={repo.name} detail={repo.relative_path}
-              href={repoUrl(id,repo.id)} navigation={navigation}/>)}
-        </div>
-        {detail.data.repositories.length===0 && <Notice title="No repositories">Add a repository in the current dashboard.</Notice>}
-      </>}
       {lane==="applications" && <div className="item-group">{detail.data.applications.map(app=>
         <div key={app.name} className="item-static"><span className="item-icon" aria-hidden="true">↗</span><span className="item-text"><strong>{app.name}</strong><small>{app.service} · port {app.port}</small></span></div>)}
         {detail.data.applications.length===0 && <Notice title="No registered applications">Applications are configured per project.</Notice>}</div>}
@@ -141,6 +126,5 @@ export function ProjectFeature({id,lane,repoId,navigation,runtime}:{
         <Notice title="Detailed view coming in v0.6">{meta.description} remain available in the current dashboard. This screen does not represent a simulated service or job.</Notice>}
     </>}
     <p className="actions"><OldDashboardLink projectId={id}>Open {meta.title.toLowerCase()} in current UI ↗</OldDashboardLink></p>
-    {repoId && detail.kind==="ready" && <p className="actions"><a href={"/projects/"+id+"/repositories/"+repoId}>Open repository controls ↗</a></p>}
   </Shell>;
 }
