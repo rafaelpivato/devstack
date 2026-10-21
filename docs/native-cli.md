@@ -2,9 +2,44 @@
 
 The `dev` command is a **local unprivileged client** of the same controller
 Unix socket used by the web interface. The CLI has no Docker socket access,
-database access or host shell bridge. The current milestone implements
-`dev status` and `dev doctor`; project lifecycle, services, jobs and Git
-commands are subsequent integration PRs.
+database access or host shell bridge. I3 adds read-only project discovery and
+explicit project/runtime lifecycle commands; services, jobs and Git commands
+are subsequent integration PRs.
+
+## Project and runtime commands
+
+```shell
+dev status
+dev project list
+dev project show <canonical-project-UUIDv4>
+dev project activate <canonical-project-UUIDv4>
+dev project switch <canonical-project-UUIDv4>
+dev project deactivate
+dev runtime reconcile
+dev --json project list
+dev project show <canonical-project-UUIDv4> --json
+```
+
+**Reading is inert.** `dev project list` and `dev project show UUID` never
+activate or select a project globally. Display slugs/names cannot substitute
+for canonical immutable UUIDv4 mutation targets. There is **at most one active
+runtime** shared across SSH and the dashboard.
+
+`activate` requires an inactive runtime; `switch` can replace the active
+project or activate one while globally inactive. `deactivate` stops the
+**global runtime** (it never deletes any project), and `reconcile` performs an
+**explicit recovery** by cleaning up owned workloads without reactivating
+any project. Mutations use the controller's existing exclusive coordinator
+lock and generation fencing. Any concurrent operation from the web or SSH
+goes through that same path.
+
+**I4 limitation:** Runtime transitions are still synchronous controller
+operations. The CLI allows up to 420 seconds for a transition; an SSH
+disconnection, Ctrl-C or timeout does **not** imply the transition failed or
+was cancelled. On a disconnected or interrupted operation, the CLI reports
+an **unknown outcome** and advises checking `dev status` before any retry.
+Controller-owned durable transition receipts and resumption are reserved for
+the follow-up I4 reliability PR.
 
 ## Operator trust and enrollment
 
