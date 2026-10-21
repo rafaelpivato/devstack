@@ -74,15 +74,27 @@ export function RuntimeActionScreen({action,projectId,runtime,projects,navigatio
   const begin=async()=>{
     if (!allowed || !confirmed || busy || pendingElsewhere) return;
     setBusy(true);setError(null);
+    // Confirm the authoritative state *before* recording a new submission.
+    // If this read fails, no operation has been sent.
+    let verified:RuntimeSnapshot;
+    try {
+      verified=await readRuntime();
+    } catch(e) {
+      setError("Cannot verify current runtime. No transition was submitted. "+
+        (e instanceof Error?e.message:"Try again when connected."));
+      setBusy(false);
+      return;
+    }
+    if(!actionAllowed(action,projectId,verified)) {
+      setError("Runtime state changed. No transition was submitted. Review current state.");
+      setBusy(false);
+      return;
+    }
     const key=existing?.requestKey??freshKey();
     const submitted:PendingTransition={action,projectId,requestKey:key,receiptId:existing?.receiptId};
     setPending(submitted);
-    savePending(submitted); // Set key BEFORE sending. Lost responses must not cause duplicate work.
+    savePending(submitted); // Set key BEFORE POST; a lost response must never trigger a new key.
     try {
-      // An updated runtime must be inspected immediately before the explicit submit.
-      const verified=await readRuntime();
-      if (!actionAllowed(action,projectId,verified))
-        throw new Error("Runtime state changed. Review the current state before retrying.");
       const response=await submitTransition(action,projectId,key);
       const result={...submitted,receiptId:response.operation.id};
       savePending(result);setPending(result);
