@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
+import time
 from pathlib import Path
 import re
 import shutil
@@ -30,8 +32,12 @@ EX_TEMPFAIL = 75
 EX_NOPERM = 77
 EX_CONFIG = 78
 
+# Receipts are controller-owned. Polling stops when the SSH client exits.
+POLL_SECONDS = 0.25
+RECEIPT_TIMEOUT = 10
+
 _CONFLICT_CODES = frozenset({
-    "ControlError", "ProjectConflict", "JobError", "DockerControlError",
+    "TransitionConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError",
     "ConfigurationConflict", "WebhookBusy", "ImportConflict",
     "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict",
     "BulkRepositoryConflict",
@@ -99,6 +105,8 @@ def parser() -> argparse.ArgumentParser:
         _common_flags(command)
         if name in {"show", "activate", "switch"}:
             command.add_argument("project_id", type=_project_uuid, metavar="UUID")
+        if name in {"activate", "switch", "deactivate"}:
+            _transition_flags(command)
 
     runtime = commands.add_parser(
         "runtime", help="Explicit global runtime recovery.",
@@ -108,7 +116,28 @@ def parser() -> argparse.ArgumentParser:
     reconcile = runtime_actions.add_parser(
         "reconcile", help="Reconcile controller state without autoactivation.")
     _common_flags(reconcile)
+    _transition_flags(reconcile)
+    listing = runtime_actions.add_parser(
+        "operations", help="List recent durable runtime transition receipts.")
+    _common_flags(listing)
+    operation = runtime_actions.add_parser(
+        "operation", help="Inspect one durable transition by receipt UUID.")
+    _common_flags(operation)
+    operation.add_argument("id", type=_project_uuid, metavar="UUID")
     return root
+
+
+def _transition_flags(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--detach", action="store_true",
+                         help="Submit and return receipt immediately without following")
+    command.add_argument("--request-key", type=_request_key, metavar="HEX32",
+                         help="Reuse the same idempotency key after disconnect")
+
+
+def _request_key(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", value):
+        raise argparse.ArgumentTypeError("expected 32 lowercase hex characters")
+    return value
 
 
 def _width() -> int:
@@ -191,6 +220,29 @@ def _render_project_detail(data: dict) -> str:
     return "\n".join(lines)
 
 
+def _render_receipt(data: dict) -> str:
+    if not isinstance(data, dict) or not isinstance(data.get("status"), str):
+        raise ControllerUnavailable("Invalid transition receipt")
+    lines = [
+        _line("Operation", data.get("id")),
+        _line("Action", data.get("action")),
+        _line("State", data["status"]),
+    ]
+    if data.get("project_id"):
+        lines.append(_line("Project", data["project_id"]))
+    if data.get("error_code"):
+        lines.append(_line("Error", data["error_code"]))
+    return "\n".join(lines)
+
+
+def _render_receipt_list(data: dict) -> str:
+    if not isinstance(data, dict) or not isinstance(data.get("operations"), list):
+        raise ControllerUnavailable("Invalid transition list")
+    if not data["operations"]:
+        return "No transitions recorded."
+    return "\n\n".join(_render_receipt(item) for item in data["operations"])
+
+
 def _print(payload: object, *, use_json: bool, name: str) -> None:
     if use_json:
         print(json.dumps(payload, separators=(",", ":"), ensure_ascii=True,
@@ -198,6 +250,10 @@ def _print(payload: object, *, use_json: bool, name: str) -> None:
     elif name in {"status", "project_activate", "project_switch",
                   "project_deactivate", "runtime_reconcile"}:
         print(_render_status(payload))
+    elif name in {"transition_receipt", "transition_detached"}:
+        print(_render_receipt(payload))
+    elif name == "transition_list":
+        print(_render_receipt_list(payload))
     elif name == "project_list":
         print(_render_project_list(payload))
     elif name == "project_show":
@@ -208,10 +264,65 @@ def _print(payload: object, *, use_json: bool, name: str) -> None:
         print(_render_status(payload["runtime"]))
 
 
-# I3 remains a synchronous controller operation. I4 will introduce durable
-# operation receipts; we must not mistake an interrupted SSH session for a
-# successful cancellation. Docker Compose may take several minutes to stop/start.
-TRANSITION_TIMEOUT = 420
+def _is_transition(args: argparse.Namespace) -> bool:
+    return ((args.command == "project" and args.action in
+             {"activate", "switch", "deactivate"})
+            or (args.command == "runtime" and args.action == "reconcile"))
+
+
+def _unknown_outcome(key: str | None = None) -> None:
+    message = ("dev: operation outcome is unknown; inspect 'dev runtime operations'"
+               " or 'dev status' before retrying.")
+    if key:
+        message += f" Reuse --request-key {key} to recover the receipt."
+    print(message, file=sys.stderr)
+
+
+def _submit_transition(args: argparse.Namespace) -> tuple[object, str]:
+    action = args.action
+    project_id = (args.project_id if action in {"activate", "switch"} else None)
+    key = args.request_key or secrets.token_hex(16)
+    # Print before network submission. If SSH drops before receiving a receipt,
+    # an operator can safely resubmit with this same key, never duplicate work.
+    print(f"dev: transition request key {key}", file=sys.stderr, flush=True)
+    receipt = send(
+        args.socket, "transition_submit", action=action,
+        project_id=project_id, request_key=key, timeout=RECEIPT_TIMEOUT,
+    )
+    if args.detach:
+        return receipt, "transition_detached"
+    return _await_transition(args.socket, receipt), "transition_result"
+
+
+def _await_transition(socket: Path, receipt: dict) -> dict:
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("id"), str):
+        raise ControllerUnavailable("Malformed runtime transition receipt")
+    identifier = receipt["id"]
+    while True:
+        state = receipt.get("status")
+        if state == "succeeded":
+            result = receipt.get("result")
+            if not isinstance(result, dict):
+                raise ControllerUnavailable("Missing successful transition result")
+            return result
+        if state in {"failed", "interrupted"}:
+            error = receipt.get("error_code")
+            if not isinstance(error, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,79}", error):
+                error = "TransitionFailed"
+            raise TransitionUnsuccessful(identifier, state, error)
+        if state not in {"queued", "running"}:
+            raise ControllerUnavailable("Malformed transition state")
+        time.sleep(POLL_SECONDS)
+        receipt = send(socket, "transition_status", id=identifier,
+                       timeout=RECEIPT_TIMEOUT)
+
+
+class TransitionUnsuccessful(RuntimeError):
+    def __init__(self, identifier: str, status: str, error: str):
+        self.identifier = identifier
+        self.status = status
+        self.error = error
+        super().__init__(status)
 
 
 def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
@@ -219,7 +330,9 @@ def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
         protocol = ensure_compatible(args.socket)
         status = send(args.socket, "status")
         return {"protocol": protocol, "runtime": status}, "doctor"
-    ensure_compatible(args.socket)
+    min_version = (1 if (_is_transition(args) or args.command == "runtime")
+                   else 0)
+    ensure_compatible(args.socket, minimum_minor=min_version)
     if args.command == "status":
         return send(args.socket, "status"), "status"
     if args.command == "project":
@@ -227,39 +340,35 @@ def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
             return send(args.socket, "projects"), "project_list"
         if args.action == "show":
             return send(args.socket, "project_detail", project_id=args.project_id), "project_show"
-        if args.action in {"activate", "switch"}:
-            return (send(args.socket, args.action,
-                         project_id=args.project_id, timeout=TRANSITION_TIMEOUT),
-                    "project_" + args.action)
-        if args.action == "deactivate":
-            return (send(args.socket, "deactivate", timeout=TRANSITION_TIMEOUT),
-                    "project_deactivate")
-    if args.command == "runtime" and args.action == "reconcile":
-        return (send(args.socket, "reconcile", timeout=TRANSITION_TIMEOUT),
-                "runtime_reconcile")
+    if args.command == "runtime":
+        if args.action == "operations":
+            return send(args.socket, "transition_list"), "transition_list"
+        if args.action == "operation":
+            return send(args.socket, "transition_status", id=args.id), "transition_receipt"
+    if _is_transition(args):
+        return _submit_transition(args)
     raise AssertionError("Unexpected CLI dispatch")
-
-
-def _is_transition(args: argparse.Namespace) -> bool:
-    return ((args.command == "project" and args.action in
-             {"activate", "switch", "deactivate"})
-            or (args.command == "runtime" and args.action == "reconcile"))
-
-
-def _unknown_outcome() -> None:
-    print("dev: operation outcome is unknown. Inspect 'dev status' before retrying.",
-          file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    key = args.request_key if _is_transition(args) else None
     try:
         payload, name = _dispatch(args)
+        if name == "transition_result":
+            name = "status"
         _print(payload, use_json=args.json, name=name)
         return 0
+    except TransitionUnsuccessful as exc:
+        print(f"dev: transition {exc.identifier} {exc.status} ({exc.error}).",
+              file=sys.stderr)
+        if exc.status == "interrupted":
+            print("dev: inspect 'dev status'; interrupted transitions are never auto-replayed.",
+                  file=sys.stderr)
+        return EX_TEMPFAIL
     except KeyboardInterrupt:
         if _is_transition(args):
-            _unknown_outcome()
+            _unknown_outcome(key)
         else:
             print("dev: interrupted.", file=sys.stderr)
         return 130
@@ -276,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         print("dev: controller is unavailable or returned an invalid response.",
               file=sys.stderr)
         if _is_transition(args):
-            _unknown_outcome()
+            _unknown_outcome(key)
         return EX_UNAVAILABLE
     except ControllerRejected as exc:
         code = exc.code if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,79}", exc.code) else "Rejected"
