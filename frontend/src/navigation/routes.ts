@@ -7,6 +7,10 @@ export type AppRoute =
   | {kind:"project"; projectId:string}
   | {kind:"lane"; projectId:string; lane:Lane}
   | {kind:"repository"; projectId:string; repositoryId:string}
+  | {kind:"runtime-action"; action:"activate"|"switch"; projectId:string}
+  | {kind:"runtime-global-action"; action:"deactivate"|"reconcile"}
+  | {kind:"runtime-operations"}
+  | {kind:"runtime-operation"; operationId:string}
   | {kind:"not-found"};
 
 const uuid4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -25,7 +29,25 @@ export function repoUrl(id: string, repoId: string): string {
   if (!isProjectId(repoId)) throw new Error("Invalid repository identifier");
   return laneUrl(id, "repositories") + "/" + repoId;
 }
+export function operationUrl(id: string): string {
+  if (!isProjectId(id)) throw new Error("Invalid operation identifier");
+  return PREVIEW_ROOT + "/runtime/operations/" + id;
+}
+export function actionUrl(action: "activate"|"switch", projectId:string):string {
+  return projectUrl(projectId) + "/runtime/" + action;
+}
+export function globalActionUrl(action:"deactivate"|"reconcile"):string {
+  return PREVIEW_ROOT + "/runtime/" + action;
+}
+export const OPERATIONS_URL=PREVIEW_ROOT+"/runtime/operations";
 export function routeFor(pathname: string): AppRoute {
+  if (pathname === OPERATIONS_URL) return {kind:"runtime-operations"};
+  if (pathname === globalActionUrl("deactivate")) return {kind:"runtime-global-action",action:"deactivate"};
+  if (pathname === globalActionUrl("reconcile")) return {kind:"runtime-global-action",action:"reconcile"};
+  if (pathname.startsWith(OPERATIONS_URL+"/")) {
+    const id=pathname.slice((OPERATIONS_URL+"/").length);
+    return isProjectId(id)?{kind:"runtime-operation",operationId:id}:{kind:"not-found"};
+  }
   if (pathname === PREVIEW_ROOT || pathname === PREVIEW_ROOT + "/") return {kind:"entry"};
   if (pathname === PREVIEW_ROOT + "/projects") return {kind:"projects"};
   if (!pathname.startsWith(PREVIEW_ROOT + "/projects/")) return {kind:"not-found"};
@@ -33,6 +55,9 @@ export function routeFor(pathname: string): AppRoute {
   if (!isProjectId(segments[0])) return {kind:"not-found"};
   const projectId = segments[0];
   if (segments.length === 1) return {kind:"project", projectId};
+  if (segments.length === 3 && segments[1] === "runtime" &&
+      (segments[2] === "activate" || segments[2] === "switch"))
+    return {kind:"runtime-action",projectId,action:segments[2]};
   if (segments.length === 2 && isLane(segments[1]))
     return {kind:"lane", projectId, lane: segments[1]};
   if (segments.length === 3 && segments[1] === "repositories" && isProjectId(segments[2]))
@@ -42,6 +67,9 @@ export function routeFor(pathname: string): AppRoute {
 /** Used only for a fresh deep link; a user-initiated Back follows browser history. */
 export function parentUrl(route: AppRoute): string {
   switch (route.kind) {
+    case "runtime-operation": return OPERATIONS_URL;
+    case "runtime-operations": case "runtime-global-action": return PREVIEW_ROOT;
+    case "runtime-action": return projectUrl(route.projectId);
     case "repository": return laneUrl(route.projectId, "repositories");
     case "lane": return projectUrl(route.projectId);
     case "project": return PREVIEW_ROOT + "/projects";
@@ -49,6 +77,6 @@ export function parentUrl(route: AppRoute): string {
   }
 }
 export function routeProjectId(route: AppRoute): string | null {
-  if (route.kind === "project" || route.kind === "lane" || route.kind === "repository") return route.projectId;
+  if (route.kind === "project" || route.kind === "lane" || route.kind === "repository" || route.kind === "runtime-action") return route.projectId;
   return null;
 }

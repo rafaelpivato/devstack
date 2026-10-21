@@ -10,6 +10,7 @@ import os
 import json
 from pathlib import Path
 import secrets
+import re
 
 from flask import (
     Flask, abort, flash, jsonify, redirect, render_template, request,
@@ -25,10 +26,10 @@ from devstack.update_control import (
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound", "BulkRepositoryNotFound"}
+NOT_FOUND = {"TransitionNotFound", "WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound", "BulkRepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError", "JobInvalid"}
-CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict", "BulkRepositoryConflict"}
+CONFLICT = {"TransitionConflict", "WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict", "BulkRepositoryConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -842,6 +843,64 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def runtime_api():
         try:
             return jsonify(call("status"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/runtime/transitions")
+    def runtime_transition_submit_api():
+        """Submit only the existing controller-owned durable transition contract."""
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {"action", "project_id"}:
+            abort(400)
+        action = payload["action"]
+        target = payload["project_id"]
+        if not isinstance(action, str) or action not in {
+            "activate", "switch", "deactivate", "reconcile",
+        }:
+            abort(400)
+        from uuid import UUID
+        if action in {"activate", "switch"}:
+            try:
+                if (not isinstance(target, str) or
+                        str(UUID(target, version=4)) != target):
+                    abort(400)
+            except (TypeError, ValueError, AttributeError):
+                abort(400)
+        elif target is not None:
+            abort(400)
+        key = request.headers.get("Idempotency-Key", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", key):
+            abort(400)
+        try:
+            receipt = call("transition_submit", action=action, project_id=target,
+                           request_key=key)
+            response = jsonify({"operation": receipt})
+            response.status_code = 202
+            response.headers["Location"] = url_for(
+                "runtime_transition_status_api", operation_id=receipt["id"])
+            return response
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/runtime/transitions")
+    def runtime_transition_list_api():
+        try:
+            return jsonify(call("transition_list"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/runtime/transitions/<operation_id>")
+    def runtime_transition_status_api(operation_id):
+        try:
+            from uuid import UUID
+            if str(UUID(operation_id, version=4)) != operation_id:
+                abort(404)
+        except (ValueError, TypeError):
+            abort(404)
+        try:
+            return jsonify(call("transition_status", id=operation_id))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
