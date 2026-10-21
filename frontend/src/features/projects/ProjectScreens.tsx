@@ -6,6 +6,9 @@ import { isProjectId, laneUrl, PREVIEW_ROOT, projectUrl, repoUrl, type Lane } fr
 import type { Navigator } from "../../navigation/useNavigation";
 import { GLOBAL_PROJECTS, OldDashboardLink } from "../../navigation/useNavigation";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
+import { RuntimeControls } from "../runtime/RuntimeScreens";
+import { OPERATIONS_URL, globalActionUrl } from "../../navigation/routes";
+import { NavLink } from "../../navigation/useNavigation";
 
 export const SECTIONS: readonly {lane:Lane; title:string; icon:string; description:string}[] = [
   {lane:"repositories", title:"Repositories", icon:"⑂", description:"Git repositories"},
@@ -31,10 +34,14 @@ export function Entry({runtime, projects, navigation}:{
   if(runtime.phase!=="active" || !runtime.project_id || !isProjectId(runtime.project_id))
     return <Shell title="Runtime status" navigation={navigation}>
       <Notice title={"Runtime: " + runtime.phase} role={runtime.phase==="error"?"alert":"status"}>
-        {runtime.phase==="error" ? "Recovery is required before activation. Use the current dashboard for controller-owned recovery." :
+        {runtime.phase==="error" ? "Recovery is required before activation. Review the controller-owned recovery action." :
           "DevStack is changing runtime state. No project has been assumed active."}
       </Notice>
-      <p className="actions"><OldDashboardLink>Runtime controls (current UI)</OldDashboardLink></p>
+      {runtime.phase==="error" &&
+        <p className="actions"><NavLink to={globalActionUrl("reconcile")}
+          navigate={navigation.navigate}>Review recovery →</NavLink></p>}
+      <p className="actions"><NavLink to={OPERATIONS_URL}
+        navigate={navigation.navigate}>Runtime operations →</NavLink></p>
       <ItemLink icon="▤" title="Browse projects" href={GLOBAL_PROJECTS} navigation={navigation}/>
     </Shell>;
   if (!chooseProject(projects, runtime.project_id))
@@ -73,11 +80,12 @@ export function ProjectHome({id,runtime,navigation,projectName}:{
     {detail.kind==="loading" && <Skeleton/>}
     {detail.kind==="error" && <Notice title="Project detail unavailable" role="alert">{detail.error.message}</Notice>}
     {detail.kind==="ready" && <ProjectSections detail={detail.data} navigation={navigation}/>}
-    {runtime.phase==="inactive" && <Notice title="Inactive runtime">This project is not running. Activation remains available in the current dashboard until the guarded v0.6 controls arrive in I3.</Notice>}
+    {runtime.phase==="inactive" && <Notice title="Inactive runtime">This project is not running. Activation requires an explicit confirmation.</Notice>}
     {runtime.phase==="active" && !active && <Notice title="Another project is active">This project is for inspection only. Switching requires an explicit controller operation.</Notice>}
     {runtime.phase!=="inactive" && runtime.phase!=="active" &&
       <Notice title={"Runtime: "+runtime.phase} role={runtime.phase==="error"?"alert":"status"}>No activation is available while the runtime is transitioning or requires recovery.</Notice>}
-    <p className="actions"><OldDashboardLink projectId={id}>{runtime.phase==="inactive"?"Activate using current UI ↗":active?"Current project controls ↗":"Open current project controls ↗"}</OldDashboardLink></p>
+    <RuntimeControls projectId={id} runtime={runtime} navigation={navigation}/>
+    <p className="actions"><NavLink to={OPERATIONS_URL} navigate={navigation.navigate}>Recent runtime operations →</NavLink></p>
   </Shell>;
 }
 function ProjectSections({detail,navigation}:{detail:ProjectDetail;navigation:Navigator}) {
