@@ -122,7 +122,7 @@ def _line(label: str, value: object) -> str:
         return prefix + text
     # Keep UUIDs whole on 40-column mobile terminals.
     return label + ":\n" + textwrap.indent(
-        textwrap.fill(text, width=_width() - 2, break_long_words=False,
+        textwrap.fill(text, width=_width() - 2, break_long_words=True,
                       break_on_hyphens=False),
         "  ",
     )

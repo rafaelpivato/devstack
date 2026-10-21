@@ -191,6 +191,21 @@ class ProjectRuntimeCLITests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["project"]["id"], self.a.id)
 
+    def test_long_unbroken_project_labels_wrap_without_splitting_uuid(self):
+        from devstack.cli.main import _render_project_list
+        value = {
+            "projects": [
+                {"name": "X" * 120, "slug": "a" * 63,
+                 "id": str(uuid4())},
+            ],
+        }
+        for width in (40, 60, 80):
+            with patch.object(cli.shutil, "get_terminal_size",
+                              return_value=os.terminal_size((width, 20))):
+                output = _render_project_list(value)
+            self.assertTrue(all(len(line) <= width for line in output.splitlines()))
+            self.assertIn(value["projects"][0]["id"], output)
+
     def test_interrupted_transition_has_unknown_outcome(self):
         with (patch.object(cli, "ensure_compatible",
                            return_value={"major": 1, "minor": 0}),
