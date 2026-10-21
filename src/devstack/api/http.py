@@ -227,12 +227,18 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         valid = (
             not segments or
             segments == ["projects"] or
+            segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
+                         ["runtime", "operations"]) or
+            (len(segments) == 3 and segments[:2] == ["runtime", "operations"]
+             and re.fullmatch(pattern, segments[2], re.IGNORECASE) is not None) or
             (len(segments) >= 2 and segments[0] == "projects" and
              re.fullmatch(pattern, segments[1], re.IGNORECASE) is not None and
              (len(segments) == 2 or
               (len(segments) == 3 and segments[2] in {
                   "repositories", "services", "jobs", "applications", "configuration",
               }) or
+              (len(segments) == 4 and segments[2] == "runtime" and
+               segments[3] in {"activate", "switch"}) or
               (len(segments) == 4 and segments[2] == "repositories" and
                re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None)))
         )
