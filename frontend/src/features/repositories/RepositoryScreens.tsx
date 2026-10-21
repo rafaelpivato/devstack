@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../api/client";
+import { useCallback, useState, type ReactNode } from "react";
 import { readProject } from "../../api/projects";
 import { readRuntime, type RuntimeSnapshot } from "../../api/runtime";
 import {
@@ -35,7 +34,7 @@ function ActionError({message}:{message:string|null}) {
   return message?<Notice title="Action not confirmed" role="alert">{message}</Notice>:null;
 }
 function ActionButton({children,disabled,onClick}:{
-  children:React.ReactNode;disabled?:boolean;onClick:()=>void;
+  children:ReactNode;disabled?:boolean;onClick:()=>void;
 }) {return <button type="button" className="primary-button" disabled={disabled} onClick={onClick}>{children}</button>;}
 function Context({id,navigation,children,title,subtitle}:{
   id:string;navigation:Navigator;children:React.ReactNode;title:string;subtitle?:string;
@@ -120,7 +119,7 @@ function RepositoryDetail({id,repositoryId,runtime,navigation}:{
   </Context>;
 }
 export function RepositoryAdd({id,runtime,navigation}:{id:string;runtime:RuntimeSnapshot;navigation:Navigator}) {
-  const [form,setForm]=useState({url:"",name:"",branch:""});
+  const [form,setForm]=useState(()=>loadSubmission(id,"add")?.form??{url:"",name:"",branch:""});
   const [pending,setPending]=useState<SavedRepositorySubmission|null>(()=>loadSubmission(id,"add"));
   const [error,setError]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
@@ -314,9 +313,9 @@ export function SourceReview({id,runtime,navigation}:{id:string;runtime:RuntimeS
     if(source.kind!=="ready"||!canWriteRepository(runtime)||busy||selected.length===0||!confirmed)return;
     setBusy(true);setError(null);setResult(null);
     const revision=source.data.revision;
-    setSelected([]);setOverwrites([]); // Do not allow resubmission of an unknown write.
     try{
       await verifyInactive();
+      setSelected([]);setOverwrites([]); // Do not allow resubmission of an unknown write.
       setResult(await applySource(id,revision,selected,required));
     }catch(e){setError(errorMessage(e)+" Review source changes again before retrying.");}
     finally{setBusy(false);}
