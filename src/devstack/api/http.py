@@ -17,7 +17,7 @@ from flask import (
 )
 from werkzeug.exceptions import HTTPException
 
-from .client import ControllerRejected, ControllerUnavailable, send
+from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
 from devstack.update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
     request_update,
