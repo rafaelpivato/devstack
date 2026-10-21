@@ -227,6 +227,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         valid = (
             not segments or
             segments == ["projects"] or
+            segments == ["administration"] or
+            segments in (["administration", "ssh"], ["administration", "updates"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
                          ["runtime", "operations"]) or
             (len(segments) == 3 and segments[:2] == ["runtime", "operations"]
@@ -239,6 +241,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
               }) or
               (len(segments) == 4 and segments[2] == "runtime" and
                segments[3] in {"activate", "switch"}) or
+              (len(segments) == 4 and segments[2] == "configuration" and
+               segments[3] in {"compose", "definitions", "webhooks", "name"}) or
               (len(segments) == 4 and segments[2] == "services" and
                re.fullmatch(r"[a-f0-9]{64}", segments[3]) is not None) or
               (len(segments) == 4 and segments[2] == "jobs" and

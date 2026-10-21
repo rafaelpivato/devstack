@@ -4,6 +4,8 @@ export const LANES = ["repositories", "services", "jobs", "applications", "confi
 export type Lane = typeof LANES[number];
 export type AppRoute =
   | {kind: "entry"} | {kind:"projects"}
+  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"}
+  | {kind:"config-detail";projectId:string;screen:"compose"|"definitions"|"webhooks"|"name"}
   | {kind:"project"; projectId:string}
   | {kind:"lane"; projectId:string; lane:Lane}
   | {kind:"repository"; projectId:string; repositoryId:string}
@@ -70,7 +72,15 @@ export function globalActionUrl(action:"deactivate"|"reconcile"):string {
   return PREVIEW_ROOT + "/runtime/" + action;
 }
 export const OPERATIONS_URL=PREVIEW_ROOT+"/runtime/operations";
+export const ADMIN_ROOT=PREVIEW_ROOT+"/administration";
+export function adminUrl(screen:"ssh"|"updates"):string{return ADMIN_ROOT+"/"+screen;}
+export function configUrl(id:string,screen:"compose"|"definitions"|"webhooks"|"name"):string {
+  return laneUrl(id,"configuration")+"/"+screen;
+}
 export function routeFor(pathname: string): AppRoute {
+  if(pathname===ADMIN_ROOT)return {kind:"administration"};
+  if(pathname===adminUrl("ssh"))return {kind:"admin-detail",screen:"ssh"};
+  if(pathname===adminUrl("updates"))return {kind:"admin-detail",screen:"updates"};
   if (pathname === OPERATIONS_URL) return {kind:"runtime-operations"};
   if (pathname === globalActionUrl("deactivate")) return {kind:"runtime-global-action",action:"deactivate"};
   if (pathname === globalActionUrl("reconcile")) return {kind:"runtime-global-action",action:"reconcile"};
@@ -90,6 +100,9 @@ export function routeFor(pathname: string): AppRoute {
     return {kind:"runtime-action",projectId,action:segments[2]};
   if (segments.length === 2 && isLane(segments[1]))
     return {kind:"lane", projectId, lane: segments[1]};
+  if(segments.length===3 && segments[1]==="configuration" &&
+    ["compose","definitions","webhooks","name"].includes(segments[2]))
+    return {kind:"config-detail",projectId,screen:segments[2] as "compose"|"definitions"|"webhooks"|"name"};
   if(segments.length===3 && segments[1]==="services" && isContainerId(segments[2]))
     return {kind:"service-logs",projectId,containerId:segments[2]};
   if(segments.length===4 && segments[1]==="jobs" && segments[2]==="run" &&
@@ -115,6 +128,9 @@ export function routeFor(pathname: string): AppRoute {
 /** Used only for a fresh deep link; a user-initiated Back follows browser history. */
 export function parentUrl(route: AppRoute): string {
   switch (route.kind) {
+    case "administration":return PREVIEW_ROOT+"/projects";
+    case "admin-detail":return ADMIN_ROOT;
+    case "config-detail":return laneUrl(route.projectId,"configuration");
     case "runtime-operation": return OPERATIONS_URL;
     case "runtime-operations": case "runtime-global-action": return PREVIEW_ROOT;
     case "runtime-action": return projectUrl(route.projectId);
@@ -130,7 +146,7 @@ export function parentUrl(route: AppRoute): string {
   }
 }
 export function routeProjectId(route: AppRoute): string | null {
-  if (["project","lane","repository","repo-add","repo-bulk","repo-receipt","repo-branch","repo-source","runtime-action","service-logs","job-detail","job-logs","job-run"].includes(route.kind))
+  if (["project","lane","repository","repo-add","repo-bulk","repo-receipt","repo-branch","repo-source","runtime-action","service-logs","job-detail","job-logs","job-run","config-detail"].includes(route.kind))
     return (route as {projectId:string}).projectId;
   return null;
 }

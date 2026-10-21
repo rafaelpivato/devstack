@@ -11,6 +11,9 @@ import { RepositoryScreen, RepositoryAdd, RepositoryBulk, RepositoryReceipt, Bra
 import { ServicesScreen, ServiceLogsScreen } from "./features/workloads/ServiceScreens";
 import { ApplicationsScreen } from "./features/workloads/ApplicationScreens";
 import { JobsScreen, JobDetail, JobLogs, RunJob } from "./features/workloads/JobScreens";
+import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor } from "./features/configuration/ProjectConfiguration";
+import { WebhookEditor } from "./features/configuration/WebhookEditor";
+import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
 import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
@@ -39,12 +42,24 @@ export function App() {
     action={route.action} projectId={null} runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="runtime-action") return <RuntimeActionScreen key={route.projectId+route.action}
     action={route.action} projectId={route.projectId} runtime={current} projects={list} navigation={navigation}/>;
+  if(route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
+  if(route.kind==="admin-detail")
+    return route.screen==="ssh"?<GitHubSSHScreen navigation={navigation}/>:
+      <UpdatesScreen runtime={current} navigation={navigation}/>;
   if(route.kind==="entry") return <Entry runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="projects") return <ProjectDirectory projects={list} runtime={current} navigation={navigation}/>;
   const id=routeProjectId(route);
   if(!id) return null;
   if(route.kind==="project") return <ProjectHome key={id} id={id} runtime={current} navigation={navigation}
     projectName={list.find(x=>x.id===id)?.name}/>;
+  if(route.kind==="lane"&&route.lane==="configuration")
+    return <ConfigurationHome id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="config-detail"){
+    if(route.screen==="compose")return <ComposeEditor key={id} id={id} runtime={current} navigation={navigation}/>;
+    if(route.screen==="definitions")return <DefinitionsEditor key={id} id={id} runtime={current} navigation={navigation}/>;
+    if(route.screen==="webhooks")return <WebhookEditor key={id} id={id} navigation={navigation}/>;
+    return <ProjectNameEditor key={id} id={id} runtime={current} navigation={navigation}/>;
+  }
   if(route.kind==="lane" && route.lane==="repositories")
     return <RepositoryScreen key={id} id={id} runtime={current} navigation={navigation}/>;
   if(route.kind==="repository")
