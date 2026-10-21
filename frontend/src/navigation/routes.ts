@@ -7,6 +7,10 @@ export type AppRoute =
   | {kind:"project"; projectId:string}
   | {kind:"lane"; projectId:string; lane:Lane}
   | {kind:"repository"; projectId:string; repositoryId:string}
+  | {kind:"service-logs";projectId:string;containerId:string}
+  | {kind:"job-detail";projectId:string;jobId:string}
+  | {kind:"job-logs";projectId:string;jobId:string}
+  | {kind:"job-run";projectId:string;mode:"task"|"compose"|"adhoc"}
   | {kind:"repo-add";projectId:string}
   | {kind:"repo-bulk";projectId:string}
   | {kind:"repo-receipt";projectId:string;mode:"add"|"bulk";operationId:string}
@@ -42,6 +46,19 @@ export function repoReceiptUrl(id:string,mode:"add"|"bulk",operationId:string):s
   if(!isProjectId(operationId)) throw new Error("Invalid operation identifier");
   return laneUrl(id,"repositories")+"/"+(mode==="add"?"adds":"updates")+"/"+operationId;
 }
+export function isContainerId(id:string):boolean{return /^[a-f0-9]{64}$/.test(id);}
+export function serviceUrl(id:string,containerId:string):string {
+  if(!isContainerId(containerId))throw Error("Invalid container identity");
+  return laneUrl(id,"services")+"/"+containerId;
+}
+export function jobUrl(id:string,jobId:string):string {
+  if(!isProjectId(jobId))throw Error("Invalid job identity");
+  return laneUrl(id,"jobs")+"/"+jobId;
+}
+export function jobLogsUrl(id:string,jobId:string):string{return jobUrl(id,jobId)+"/logs";}
+export function jobsRunUrl(id:string,mode:"task"|"compose"|"adhoc"):string {
+  return laneUrl(id,"jobs")+"/run/"+mode;
+}
 export function operationUrl(id: string): string {
   if (!isProjectId(id)) throw new Error("Invalid operation identifier");
   return PREVIEW_ROOT + "/runtime/operations/" + id;
@@ -73,6 +90,15 @@ export function routeFor(pathname: string): AppRoute {
     return {kind:"runtime-action",projectId,action:segments[2]};
   if (segments.length === 2 && isLane(segments[1]))
     return {kind:"lane", projectId, lane: segments[1]};
+  if(segments.length===3 && segments[1]==="services" && isContainerId(segments[2]))
+    return {kind:"service-logs",projectId,containerId:segments[2]};
+  if(segments.length===4 && segments[1]==="jobs" && segments[2]==="run" &&
+      (segments[3]==="task"||segments[3]==="compose"||segments[3]==="adhoc"))
+    return {kind:"job-run",projectId,mode:segments[3]};
+  if(segments.length===4 && segments[1]==="jobs" && isProjectId(segments[2]) && segments[3]==="logs")
+    return {kind:"job-logs",projectId,jobId:segments[2]};
+  if(segments.length===3 && segments[1]==="jobs" && isProjectId(segments[2]))
+    return {kind:"job-detail",projectId,jobId:segments[2]};
   if(segments.length===3 && segments[1]==="repositories"){
     if(segments[2]==="add") return {kind:"repo-add",projectId};
     if(segments[2]==="bulk") return {kind:"repo-bulk",projectId};
@@ -92,6 +118,9 @@ export function parentUrl(route: AppRoute): string {
     case "runtime-operation": return OPERATIONS_URL;
     case "runtime-operations": case "runtime-global-action": return PREVIEW_ROOT;
     case "runtime-action": return projectUrl(route.projectId);
+    case "service-logs": return laneUrl(route.projectId,"services");
+    case "job-logs": return jobUrl(route.projectId,route.jobId);
+    case "job-detail":case "job-run":return laneUrl(route.projectId,"jobs");
     case "repo-receipt": return route.mode==="add"?repoAddUrl(route.projectId):repoBulkUrl(route.projectId);
     case "repo-add":case "repo-bulk":case "repo-branch":case "repo-source":
     case "repository": return laneUrl(route.projectId, "repositories");
@@ -101,7 +130,7 @@ export function parentUrl(route: AppRoute): string {
   }
 }
 export function routeProjectId(route: AppRoute): string | null {
-  if (["project","lane","repository","repo-add","repo-bulk","repo-receipt","repo-branch","repo-source","runtime-action"].includes(route.kind))
+  if (["project","lane","repository","repo-add","repo-bulk","repo-receipt","repo-branch","repo-source","runtime-action","service-logs","job-detail","job-logs","job-run"].includes(route.kind))
     return (route as {projectId:string}).projectId;
   return null;
 }

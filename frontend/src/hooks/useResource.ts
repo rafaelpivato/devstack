@@ -34,12 +34,12 @@ export function useResource<T>(
       }
     };
     void poll();
-    const timer = window.setInterval(() => { void poll(); }, refreshMs);
+    const timer = refreshMs > 0 ? window.setInterval(() => { void poll(); }, refreshMs) : null;
     document.addEventListener("visibilitychange", poll);
     return () => {
       closed = true;
       controller.abort();
-      window.clearInterval(timer);
+      if (timer !== null) window.clearInterval(timer);
       document.removeEventListener("visibilitychange", poll);
     };
   }, [refresh, refreshMs]);

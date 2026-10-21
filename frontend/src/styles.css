@@ -83,3 +83,14 @@ code {font: .84rem/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-w
 .block-muted{display:block;color:var(--muted);font-size:.81rem}
 .text-button{background:transparent;border:0;padding:10px 0;color:var(--accent);text-decoration:underline}
 .text-button:focus-visible{outline:3px solid var(--accent)}
+
+/* Read-only bounded logs and supervised workload controls. */
+.log-view{margin:12px 0 15px;padding:13px 12px;max-width:100%;max-height:60vh;overflow:auto;
+  border:1px solid var(--line);border-radius:11px;background:#1c2024;color:var(--text);
+  white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}
+.field-inline{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  font-weight:600;margin:14px 0}
+.field-inline select,.form-stack textarea{border:1px solid var(--line);border-radius:9px;
+  min-height:44px;background:var(--panel);color:var(--text);padding:9px;font:inherit}
+.form-stack textarea{width:100%;min-height:110px}
+.field-inline select:focus-visible,.form-stack textarea:focus-visible{outline:3px solid var(--accent)}
