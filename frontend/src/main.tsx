@@ -7,6 +7,7 @@ import { Entry, ProjectDirectory, ProjectFeature, ProjectHome } from "./features
 import { useNavigation } from "./navigation/useNavigation";
 import { routeProjectId } from "./navigation/routes";
 import { RuntimeActionScreen, RuntimeOperations, RuntimeOperationDetail } from "./features/runtime/RuntimeScreens";
+import { RepositoryScreen, RepositoryAdd, RepositoryBulk, RepositoryReceipt, BranchReview, SourceReview } from "./features/repositories/RepositoryScreens";
 import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
@@ -41,10 +42,19 @@ export function App() {
   if(!id) return null;
   if(route.kind==="project") return <ProjectHome key={id} id={id} runtime={current} navigation={navigation}
     projectName={list.find(x=>x.id===id)?.name}/>;
-  if(route.kind==="lane"||route.kind==="repository") return <ProjectFeature key={id+("lane" in route?route.lane:"repo")} id={id}
-    lane={route.kind==="lane"?route.lane:"repositories"}
-    repoId={route.kind==="repository"?route.repositoryId:undefined}
-    navigation={navigation} runtime={current}/>;
+  if(route.kind==="lane" && route.lane==="repositories")
+    return <RepositoryScreen key={id} id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="repository")
+    return <RepositoryScreen key={id+route.repositoryId} id={id} repositoryId={route.repositoryId}
+      runtime={current} navigation={navigation}/>;
+  if(route.kind==="repo-add") return <RepositoryAdd id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="repo-bulk") return <RepositoryBulk id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="repo-receipt") return <RepositoryReceipt id={id} mode={route.mode}
+      operationId={route.operationId} navigation={navigation}/>;
+  if(route.kind==="repo-branch") return <BranchReview id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="repo-source") return <SourceReview id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="lane") return <ProjectFeature key={id+route.lane} id={id}
+    lane={route.lane} navigation={navigation} runtime={current}/>;
   return null;
 }
 
