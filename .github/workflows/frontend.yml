@@ -1,0 +1,61 @@
+name: Frontend integrity
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: npm test
+      - name: Rebuild release assets
+        working-directory: frontend
+        run: npm run build
+      - name: Verify committed build is reproducible
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- src/devstack/static/v06
+          test -f src/devstack/static/v06/manifest.json
+          git ls-files --error-unmatch src/devstack/static/v06/manifest.json >/dev/null
+      - name: Verify tagged-source style wheel has all assets
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet build
+          python3 -m build --wheel --outdir "$RUNNER_TEMP/devstack-wheels"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+          wheel = next(Path(os.environ["RUNNER_TEMP"], "devstack-wheels").glob("*.whl"))
+          with ZipFile(wheel) as archive:
+              files = set(archive.namelist())
+              prefix = "devstack/static/v06/"
+              manifest = json.loads(archive.read(prefix + "manifest.json"))
+              entry = manifest["src/main.tsx"]
+              css = entry.get("css") or [
+                  item["file"] for item in manifest.values()
+                  if item["file"].endswith(".css")
+              ]
+              assert css, "missing stylesheet"
+              for asset in (entry["file"], *css):
+                  assert prefix + asset in files, f"missing bundled asset: {asset}"
+              assert "devstack/templates/v06_preview.html" in files
+          PY

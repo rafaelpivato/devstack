@@ -189,6 +189,32 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             return jsonify({"ok": False, "controller": "recovery_required"}), 503
         return jsonify({"ok": True, "controller": "connected"})
 
+    @app.get("/__v06")
+    def v06_preview():
+        """Opt-in packaged React preview. Current dashboard/API remain the default."""
+        bundle = Path(app.static_folder) / "v06"
+        try:
+            manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+            entry = manifest["src/main.tsx"]
+            js_asset = entry["file"]
+            css_assets = entry.get("css") or [
+                item["file"] for item in manifest.values()
+                if isinstance(item, dict) and
+                isinstance(item.get("file"), str) and
+                item["file"].endswith(".css")
+            ]
+            # Only versioned local, packaged asset paths may be inserted.
+            paths = [js_asset, *css_assets]
+            if (not isinstance(css_assets, list) or
+                    not all(isinstance(path, str) and path.startswith("assets/")
+                            and ".." not in Path(path).parts
+                            and (bundle / path).is_file() for path in paths)):
+                raise ValueError("Invalid packaged bundle")
+        except (OSError, ValueError, TypeError, KeyError):
+            return jsonify({"ok": False, "message": "Frontend bundle unavailable."}), 503
+        return render_template("v06_preview.html", csrf=csrf(),
+                               js_asset=js_asset, css_assets=css_assets)
+
     @app.get("/")
     def index():
         try:

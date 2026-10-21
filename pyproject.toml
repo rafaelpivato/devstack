@@ -18,4 +18,5 @@ dev = "devstack.cli.main:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-devstack = ["templates/*.html", "static/css/*.css", "static/js/*.js"]
+devstack = ["templates/*.html", "static/css/*.css", "static/js/*.js",
+    "static/v06/manifest.json", "static/v06/assets/*.js", "static/v06/assets/*.css"]
