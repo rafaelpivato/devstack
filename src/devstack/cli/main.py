@@ -18,6 +18,8 @@ import sys
 import textwrap
 from uuid import UUID
 
+from devstack.cli import git_commands
+
 from devstack.ipc.client import (
     ControllerIncompatible, ControllerRejected, ControllerUnavailable,
     ensure_compatible, send,
@@ -109,6 +111,9 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("project_id", type=_project_uuid, metavar="UUID")
         if name in {"activate", "switch", "deactivate"}:
             _transition_flags(command)
+
+    git_commands.register(actions, commands, _common_flags, _project_flag,
+                          _project_uuid, _request_key)
 
     runtime = commands.add_parser(
         "runtime", help="Explicit global runtime recovery.",
@@ -545,6 +550,9 @@ def _print(payload: object, *, use_json: bool, name: str) -> None:
         print(_render_job_submission(payload))
     elif name == "compose_show":
         print(_render_compose(payload), end="")
+    elif name in {"repo_list", "repo_status", "git_operation",
+                  "branch_preview", "branch_apply"}:
+        print(git_commands.render(name, payload, _line))
     elif name == "job_list":
         print(_render_jobs(payload))
     elif name in {"job_show", "job_cancel"}:
@@ -631,6 +639,9 @@ def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
     ensure_compatible(args.socket, minimum_minor=min_version)
     if args.command == "status":
         return send(args.socket, "status"), "status"
+    if args.command == "repo" or (args.command == "project" and args.action
+                                  in {"import", "import-status"}):
+        return git_commands.dispatch(args, send)
     if args.command == "project":
         if args.action == "list":
             return send(args.socket, "projects"), "project_list"
@@ -720,6 +731,12 @@ def main(argv: list[str] | None = None) -> int:
             name = "status"
         _print(payload, use_json=args.json, name=name)
         return 0
+    except git_commands.GitOperationUnsuccessful as exc:
+        status = exc.receipt.get("status")
+        identifier = exc.receipt.get("id")
+        print(f"dev: Git operation {identifier} ended as {status}; inspect its status receipt.",
+              file=sys.stderr)
+        return EX_TEMPFAIL
     except TransitionUnsuccessful as exc:
         print(f"dev: transition {exc.identifier} {exc.status} ({exc.error}).",
               file=sys.stderr)
@@ -730,6 +747,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         if _is_transition(args):
             _unknown_outcome(key)
+        elif args.command == "repo" or (args.command == "project" and args.action == "import"):
+            print("dev: stopped waiting. Git work may continue; inspect operation status.",
+                  file=sys.stderr)
         else:
             print("dev: interrupted.", file=sys.stderr)
         return 130
