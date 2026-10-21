@@ -196,9 +196,11 @@ class JobCLIAcceptance(unittest.TestCase):
             with self.subTest(action=action):
                 rc, out, err = self.run_cli("job", action, identifier,
                                              "--project", self.b.id)
-                self.assertEqual(rc, cli.EX_TEMPFAIL)
+                self.assertEqual(rc, cli.EX_DATAERR if action == "show"
+                                 else cli.EX_TEMPFAIL)
                 self.assertEqual(out, "")
-                self.assertIn("JobError", err)
+                self.assertIn("ProtocolError" if action == "show"
+                              else "JobError", err)
         rc, out, err = self.run_cli("job", "list", "--project", self.b.id)
         self.assertEqual((rc, err), (0, ""))
         self.assertIn("No jobs", out)
