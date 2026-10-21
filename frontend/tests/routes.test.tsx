@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Entry, ProjectDirectory } from "../src/features/projects/ProjectScreens";
-import { isProjectId, laneUrl, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, routeFor } from "../src/navigation/routes";
+import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, routeFor } from "../src/navigation/routes";
 import type { Navigator } from "../src/navigation/useNavigation";
 import type { ProjectSummary, RuntimeSnapshot } from "../src/api/runtime";
 
@@ -24,11 +24,20 @@ describe("project-scoped hierarchical routes",()=>{
     expect(repo).toEqual({kind:"repository",projectId:A,repositoryId:B});
     expect(parentUrl(repo)).toBe(laneUrl(A,"repositories"));
     expect(parentUrl(routeFor(projectUrl(A)))).toBe(PREVIEW_ROOT+"/projects");
+    expect(routeFor(actionUrl("switch",A))).toEqual({kind:"runtime-action",action:"switch",projectId:A});
+    expect(parentUrl(routeFor(actionUrl("activate",A)))).toBe(projectUrl(A));
+    expect(routeFor(globalActionUrl("reconcile"))).toEqual({kind:"runtime-global-action",action:"reconcile"});
+    expect(parentUrl(routeFor(globalActionUrl("deactivate")))).toBe(PREVIEW_ROOT);
+    expect(routeFor(OPERATIONS_URL)).toEqual({kind:"runtime-operations"});
+    expect(routeFor(operationUrl(B))).toEqual({kind:"runtime-operation",operationId:B});
+    expect(parentUrl(routeFor(operationUrl(B)))).toBe(OPERATIONS_URL);
   });
   it("rejects invalid/unplanned paths; no implicit current-project alias",()=>{
     expect(isProjectId("not-a-uuid")).toBe(false);
     expect(routeFor(PREVIEW_ROOT+"/projects/current")).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/terminal")).toEqual({kind:"not-found"});
+    expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/runtime/execute")).toEqual({kind:"not-found"});
+    expect(routeFor(PREVIEW_ROOT+"/runtime/operations/not-a-uuid")).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/services/"+B)).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/repositories/"+B+"/logs")).toEqual({kind:"not-found"});
     expect(routeFor("/api/v2/projects")).toEqual({kind:"not-found"});
