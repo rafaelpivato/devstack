@@ -7,7 +7,7 @@ import { Notice, Shell } from "../../components/Shell";
 
 export const editable=(runtime:RuntimeSnapshot)=>runtime.phase==="inactive"&&runtime.project_id===null;
 export const message=(e:unknown)=>e instanceof Error?e.message:"Operation could not be completed";
-export async function verifyInactive(id:string){
+export async function verifyInactive(_id:string){
   const {readRuntime}=await import("../../api/runtime");
   const status=await readRuntime();
   if(!editable(status))throw Error("Runtime is not inactive. No edit submitted.");

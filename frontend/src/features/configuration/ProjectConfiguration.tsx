@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { readProject } from "../../api/projects";
 import { readCompose, saveCompose, readReviewedSettings, saveReviewedSettings,
   validateCollection, renameProject } from "../../api/configuration";
-import type { ReviewedSettings, SettingsCollection } from "../../api/configuration";
+import type { ReviewedSettings } from "../../api/configuration";
 import type { RuntimeSnapshot } from "../../api/runtime";
 import { useResource } from "../../hooks/useResource";
 import { ItemLink, Notice, Shell, Skeleton } from "../../components/Shell";
@@ -92,7 +92,12 @@ export function DefinitionsEditor({id,runtime,navigation}:{
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const current=state.kind==="ready"?state.data:null;
-  const initial=current?JSON.stringify({applications:current.applications,tasks:current.tasks},null,2):"";
+  const initial=current?JSON.stringify({
+    applications:current.applications.map(a=>({
+      name:a.name,service:a.service,...(a.port==null?{}:{port:a.port}),
+    })),
+    tasks:current.tasks,
+  },null,2):"";
   const text=raw??initial;
   const parsed=(()=>{
     try{const obj:unknown=JSON.parse(text);return validateCollection(obj)?obj:null;}catch{return null;}

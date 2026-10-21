@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { deleteWebhook, putWebhook, readWebhooks } from "../../api/configuration";
 import { useResource } from "../../hooks/useResource";
-import { Notice, Skeleton, Status } from "../../components/Shell";
+import { Notice, Skeleton } from "../../components/Shell";
 import type { Navigator } from "../../navigation/useNavigation";
 import { ConfigBack, ConfigShell, Feedback, message } from "./Common";
 const validRoute=(s:string)=>/^[a-z][a-z0-9_-]{0,62}$/.test(s);
