@@ -204,7 +204,7 @@ class GitCLIContractTests(unittest.TestCase):
         rc, out, err, _, _ = self.run_cli(
             "repo", "update", REPO, "--project", PROJECT,
             "--expected-head", HEAD, side_effect=ControllerRejected("RepositoryGitError"))
-        self.assertEqual(rc, cli.EX_DATAERR)
+        self.assertEqual(rc, cli.EX_TEMPFAIL)
         self.assertEqual(out, "")
         self.assertIn("RepositoryGitError", err)
         self.assertNotIn("private", err)
