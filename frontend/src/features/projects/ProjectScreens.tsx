@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { readProject, type ProjectDetail } from "../../api/projects";
 import type { ProjectSummary, RuntimeSnapshot } from "../../api/runtime";
 import { useResource } from "../../hooks/useResource";
-import { laneUrl, type Lane } from "../../navigation/routes";
+import { isProjectId, laneUrl, projectUrl, type Lane } from "../../navigation/routes";
 import type { Navigator } from "../../navigation/useNavigation";
 import { GLOBAL_PROJECTS, OldDashboardLink } from "../../navigation/useNavigation";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
