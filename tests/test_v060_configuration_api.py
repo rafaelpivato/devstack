@@ -68,6 +68,29 @@ class ConfigurationApiTests(unittest.TestCase):
             "project_id":PROJECT,**payload,
         })])
 
+    def test_admin_and_webhooks_preserve_exact_api_boundaries(self):
+        headers={"X-CSRF-Token":self.csrf}
+        base=f"/api/v2/projects/{PROJECT}/webhooks/github"
+        self.assertEqual(self.client.put(base,json={
+            "service":"web","port":8000,"destination":"/hooks"
+        }).status_code,403)
+        self.assertEqual(self.client.put(base,headers=headers,json={
+            "service":"web","port":8000
+        }).status_code,400)
+        self.assertEqual(self.client.get("/api/v2/github/ssh").status_code,200)
+        self.assertEqual(self.client.post("/api/v2/github/ssh/generate").status_code,403)
+        self.assertEqual(self.client.post("/api/v2/devstack/update-now",json={}).status_code,403)
+        self.assertEqual(self.calls,[("github_ssh_status",{})])
+
+    def test_canonical_collection_review_is_deterministic(self):
+        service=object.__new__(ConfigurationService)
+        service.settings=lambda _project:{"tasks":[],"applications":[]}
+        original=service.settings_review(PROJECT)["revision"]
+        service.settings=lambda _project:{"applications":[],"tasks":[]}
+        self.assertEqual(service.settings_review(PROJECT)["revision"],original)
+        service.settings=lambda _project:{"applications":[{"name":"new","service":"api"}],"tasks":[]}
+        self.assertNotEqual(service.settings_review(PROJECT)["revision"],original)
+
     def test_controller_rejects_stale_collection_revision_inside_lock(self):
         service=object.__new__(ConfigurationService)
         service.coordinator=SimpleNamespace(locked=lambda:nullcontext())
