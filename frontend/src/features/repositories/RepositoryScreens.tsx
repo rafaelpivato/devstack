@@ -5,7 +5,7 @@ import {
   repositoryStatus, updateRepository, previewBranch, applyBranch, reviewSource, applySource,
   submitRepoAdd, submitRepoBulk, repoAddReceipt, repoBulkReceipt,
   type RepositoryStatus, type BranchPreview, type BranchApplyResult, type SourceReviewResult,
-  type SourceApplyResult,
+  type SourceApplyResult, type RepositoryAddReceipt, type RepositoryBulkReceipt,
 } from "../../api/repositories";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { useResource } from "../../hooks/useResource";
@@ -68,7 +68,7 @@ export function RepositoryScreen({id,repositoryId,runtime,navigation}:{
           <LinkRow to={repoBranchUrl(id)} label="Review branch change" navigation={navigation}/>
         </>}
         {detail.data.linked_source&&<LinkRow to={repoSourceUrl(id)} label="Review imported configuration" navigation={navigation}/>}
-        {detail.data.last_repository_update && typeof detail.data.last_repository_update==="object" &&
+        {typeof detail.data.last_repository_update==="object" && detail.data.last_repository_update!==null &&
           "id" in detail.data.last_repository_update &&
           typeof detail.data.last_repository_update.id==="string" &&
           <LinkRow to={repoReceiptUrl(id,"bulk",detail.data.last_repository_update.id)}
@@ -204,9 +204,9 @@ export function RepositoryBulk({id,runtime,navigation}:{id:string;runtime:Runtim
 export function RepositoryReceipt({id,operationId,mode,navigation}:{
   id:string;operationId:string;mode:"add"|"bulk";navigation:Navigator;
 }) {
-  const load=useCallback((signal:AbortSignal)=>mode==="add"?
-    repoAddReceipt(id,operationId,signal):repoBulkReceipt(id,operationId,signal),[id,operationId,mode]);
-  const resource=useResource(load,2000);
+  const load=useCallback(async(signal:AbortSignal):Promise<RepositoryAddReceipt|RepositoryBulkReceipt>=>
+    mode==="add"?repoAddReceipt(id,operationId,signal):repoBulkReceipt(id,operationId,signal),[id,operationId,mode]);
+  const resource=useResource<RepositoryAddReceipt|RepositoryBulkReceipt>(load,2000);
   const value=resource.kind==="ready"?resource.data:null;
   return <Context id={id} title={mode==="add"?"Repository add":"Repository batch"} navigation={navigation}>
     {resource.kind==="loading"&&<Skeleton/>}
