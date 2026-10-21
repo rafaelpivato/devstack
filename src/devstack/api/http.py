@@ -227,6 +227,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         valid = (
             not segments or
             segments == ["projects"] or
+            segments == ["administration"] or
+            segments in (["administration", "ssh"], ["administration", "updates"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
                          ["runtime", "operations"]) or
             (len(segments) == 3 and segments[:2] == ["runtime", "operations"]
@@ -239,6 +241,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
               }) or
               (len(segments) == 4 and segments[2] == "runtime" and
                segments[3] in {"activate", "switch"}) or
+              (len(segments) == 4 and segments[2] == "configuration" and
+               segments[3] in {"compose", "definitions", "webhooks", "name"}) or
               (len(segments) == 4 and segments[2] == "services" and
                re.fullmatch(r"[a-f0-9]{64}", segments[3]) is not None) or
               (len(segments) == 4 and segments[2] == "jobs" and
@@ -676,6 +680,32 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(400)
         try:
             return jsonify(call("settings_replace", project_id=identifier, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/settings-review")
+    def read_settings_review_api(identifier):
+        try:
+            return jsonify(call("settings_review", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.put("/api/v2/projects/<identifier>/settings-review")
+    def save_settings_review_api(identifier):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {
+            "applications", "tasks", "revision"
+        } or not isinstance(payload["applications"], list) or not isinstance(payload["tasks"], list):
+            abort(400)
+        if not isinstance(payload["revision"], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", payload["revision"]
+        ):
+            abort(400)
+        try:
+            result = call("settings_replace_checked", project_id=identifier, **payload)
+            return jsonify(result)
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 

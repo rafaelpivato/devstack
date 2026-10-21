@@ -136,7 +136,20 @@ class ConfigurationService:
             } for t in tasks],
         }
 
-    def replace_settings(self, identifier: str, applications: list, tasks: list) -> dict:
+    def settings_review(self, identifier: str) -> dict:
+        """Canonical complete collection and opaque revision for safe replacement.
+
+        A frontend must never treat a settings collection as independent row
+        updates. Revision comparison is repeated while holding the transition
+        lock immediately before the write transaction.
+        """
+        current = self.settings(identifier)
+        blob = json.dumps(current, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=True).encode("utf-8")
+        return {**current, "revision": self._revision(blob)}
+
+    def replace_settings(self, identifier: str, applications: list, tasks: list,
+                         expected_revision: str | None = None) -> dict:
         # Reuse exactly the parser's limits and value constraints for project
         # definitions. Never trust client-provided relative paths or raw argv.
         if not isinstance(applications, list) or not isinstance(tasks, list):
@@ -189,6 +202,12 @@ class ConfigurationService:
         with self.coordinator.locked():
             self._editable(identifier)
             self.registry.get(identifier)
+            if expected_revision is not None:
+                if not isinstance(expected_revision, str) or not _SHA.fullmatch(expected_revision):
+                    raise ConfigurationInvalid("Invalid expected settings revision")
+                current = self.settings_review(identifier)
+                if current["revision"] != expected_revision:
+                    raise ConfigurationConflict("Project definitions changed since review")
             with self.registry.database.transaction(write=True) as con:
                 con.execute("DELETE FROM applications WHERE project_id=?", (identifier,))
                 con.execute("DELETE FROM tasks WHERE project_id=?", (identifier,))

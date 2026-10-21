@@ -179,6 +179,13 @@ class Controller:
             return self.configuration.replace_settings(
                 request["project_id"], request["applications"], request["tasks"],
             )
+        if operation == "settings_review":
+            return self.configuration.settings_review(request["project_id"])
+        if operation == "settings_replace_checked":
+            return self.configuration.replace_settings(
+                request["project_id"], request["applications"], request["tasks"],
+                expected_revision=request["revision"],
+            )
         if operation == "webhooks":
             return {"webhooks": self.ingress.list(request["project_id"])}
         if operation == "webhook_upsert":

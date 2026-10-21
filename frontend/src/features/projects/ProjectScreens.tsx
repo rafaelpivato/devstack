@@ -7,7 +7,7 @@ import type { Navigator } from "../../navigation/useNavigation";
 import { GLOBAL_PROJECTS, OldDashboardLink } from "../../navigation/useNavigation";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { RuntimeControls } from "../runtime/RuntimeScreens";
-import { OPERATIONS_URL, globalActionUrl } from "../../navigation/routes";
+import { OPERATIONS_URL, globalActionUrl, ADMIN_ROOT } from "../../navigation/routes";
 import { NavLink } from "../../navigation/useNavigation";
 
 export const SECTIONS: readonly {lane:Lane; title:string; icon:string; description:string}[] = [
@@ -64,6 +64,9 @@ export function ProjectDirectory({projects,runtime,navigation}:{
           ? <Status text="Active" kind="positive"/> : undefined}/>)}</div>
     {projects.length===0 && <Notice title="No projects">Use the current dashboard to create or import your first project.</Notice>}
     <p className="actions"><OldDashboardLink>Create or import project (current UI) ↗</OldDashboardLink></p>
+    <div className="section-head">DevStack</div>
+    <div className="item-group"><ItemLink icon="⚙" title="Administration"
+      detail="GitHub SSH and published updates" href={ADMIN_ROOT} navigation={navigation}/></div>
   </Shell>;
 }
 
