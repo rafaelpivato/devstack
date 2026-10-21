@@ -1,6 +1,6 @@
 # ADR-0003: Native SSH CLI through the existing controller IPC
 
-**Status:** Proposed — awaiting owner review/acceptance in the first v0.5.3 documentation PR.
+**Status:** Accepted by project owner for implementation, 2026-10-20. Individual implementation PR review/merge into integration is delegated to the assistant; final integration → `main` review remains with the owner.
 **Date:** 2026-10-20
 **Milestone:** [#51](https://github.com/rafaelpivato/devstack/issues/51)
 **Normative dependencies:** [ADR-0001](0001-multiple-projects-single-runtime.md) and [ADR-0002](0002-v052-release-gate-and-v053-validation.md)
@@ -81,7 +81,7 @@ Implementation is sequenced by the [living implementation plan](../v0.5.3-implem
 
 `v0.5.3` is the **provisional next release**, not a deadline for the entire CLI milestone. Release scope, packaging version, tests and notes must match the actual delivered increment. Later versions are acceptable. Do not modify an already published tag.
 
-A docs PR must be accepted before runtime CLI implementation. Subsequent small PRs target the integration branch; a draft integration → main release PR is opened after the first documentation changes land on integration. CI continues to require full Python tests, real Docker two-project A → B → A isolation, and Ubuntu systemd/Unix privilege tests. Owner review and explicit merge approval are mandatory before publishing through the existing main-branch workflow.
+This ADR and the implementation plan must land on integration before runtime CLI implementation. Subsequent focused PRs target the integration branch, and the assistant may review and merge these intermediate PRs after relevant checks pass, without seeking an individual owner approval each time. A draft integration → main release PR is opened after the first documentation changes land on integration. CI continues to require full Python tests, real Docker two-project A → B → A isolation, and Ubuntu systemd/Unix privilege tests. **Only the final release PR from integration to `main` requires owner review and explicit approval to merge.** No assistant-initiated `main` merge, tag or publication.
 
 ## Required acceptance evidence
 
@@ -98,4 +98,4 @@ A docs PR must be accepted before runtime CLI implementation. Subsequent small P
 
 The CLI is a genuine second interface to one control plane. Centralizing protocol contracts and improving outcome reporting increases internal rigor without adding infrastructure or weakening privilege separation. Explicit trusted-group access is simple but grants substantial administrative capability, so it must be managed conservatively.
 
-**Open for owner review:** Exact supported command spelling and grouping, the minimum protocol version negotiation mechanism, and the smallest safe design for durable runtime transition receipts. The architectural boundaries above are not optional implementation shortcuts.
+**Implementation decisions remaining:** Exact command grouping, minimal protocol version negotiation, and the smallest safe durable transition receipt design may be refined in intermediate PRs, with decisions recorded in the living plan and summarized in the draft release PR. Architectural boundaries above remain binding. Escalate major scope/security changes rather than silently weakening them.
