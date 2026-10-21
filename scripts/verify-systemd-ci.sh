@@ -221,6 +221,16 @@ PY
 rm -rf "$ci_link_dir"
 echo "Native CLI operator group access, guest denial, and wrapper safety: PASS"
 
+# Check new durable operation history without giving SSH users filesystem
+# access to the controller's SQLite sidecar or original registry.
+runuser -u "$operator" -- "$root/venv/bin/dev" \
+  --socket "$socket" --json runtime operations | \
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["operations"] == []'
+if runuser -u "$operator" -- test -r "$state/runtime-transitions.sqlite3"; then
+  echo "Security violation: CLI user can read transition journal" >&2
+  exit 1
+fi
+
 # systemd restart must reconcile without activating stored projects.
 systemctl restart devstack-ci-control.service
 for attempt in $(seq 1 30); do

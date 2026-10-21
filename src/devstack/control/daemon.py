@@ -68,7 +68,7 @@ class Controller:
             return protocol_info()
         # A committed but incompletely published sync is a global barrier.
         # The operator can explicitly request reconciliation/replay.
-        if operation != "reconcile":
+        if operation not in {"reconcile", "transition_status", "transition_list"}:
             with self.registry.database.transaction() as con:
                 if con.execute("SELECT 1 FROM source_sync_pending LIMIT 1").fetchone():
                     from devstack.projects.source_sync import SourceSyncConflict

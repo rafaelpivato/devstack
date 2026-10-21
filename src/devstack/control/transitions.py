@@ -9,13 +9,11 @@ No automatic retry/reenactment is permitted after a daemon restart.
 """
 from __future__ import annotations
 
-import hashlib
+from contextlib import contextmanager
 import json
-import os
 from pathlib import Path
 import re
 import sqlite3
-import stat
 import threading
 import time
 from uuid import UUID, uuid4
@@ -24,7 +22,6 @@ from devstack.domain.models import project_id
 
 KEY_RE = re.compile(r"[0-9a-f]{32}\Z")
 ACTIONS = frozenset({"activate", "switch", "deactivate", "reconcile"})
-PENDING = frozenset({"queued", "running"})
 _SAFE_ERRORS = frozenset({
     "ControlError", "DomainError", "ProjectNotFound", "ProjectConflict",
     "SourceSyncConflict",
@@ -72,8 +69,6 @@ class TransitionSupervisor:
                 "ON transitions(started_ns DESC)"
             )
         self.path.chmod(0o600)
-
-    from contextlib import contextmanager
 
     @contextmanager
     def _transaction(self, *, write=False):
@@ -244,6 +239,16 @@ class TransitionSupervisor:
                 self._finish(identifier, "succeeded",
                              result={k: v for k, v in result.items()
                                      if k != "generation"})
+        except BaseException as exc:
+            # Worker-internal failures must never leave the receipt permanently
+            # looking 'running' while the controller itself is still alive.
+            try:
+                self._finish(identifier, "failed", error="TransitionFailed")
+            except Exception:
+                # A broken journal is not silently considered successful.
+                pass
+            if not isinstance(exc, Exception):
+                raise
         finally:
             with self._guard:
                 self._threads.pop(identifier, None)
