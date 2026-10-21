@@ -1,11 +1,9 @@
 """Regression tests for the shared web/SSH controller IPC foundation."""
-import json
+from contextlib import contextmanager
 from pathlib import Path
-import socket
 import socketserver
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import patch
 
@@ -48,12 +46,16 @@ class SharedIPCTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "controller.sock"
 
+    @contextmanager
     def running(self, server):
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(thread.join, 3)
-        self.addCleanup(server.shutdown)
-        self.addCleanup(server.server_close)
+        with server:
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                yield
+            finally:
+                server.shutdown()
+                thread.join(3)
 
     def test_contract_is_immutable_and_exact(self):
         self.assertTrue({"health", "status", "projects", "protocol_info"} <= set(OPERATIONS))
@@ -75,8 +77,7 @@ class SharedIPCTests(unittest.TestCase):
 
     def test_one_transport_and_compatibility_handshake(self):
         # No service or storage process is needed for a real Unix socket test.
-        with ControlServer(self.path, FakeController()) as server:
-            self.running(server)
+        with self.running(ControlServer(self.path, FakeController())):
             self.assertEqual(send(self.path, "status"), {"phase": "inactive"})
             self.assertEqual(send_payload(self.path, {"op": "projects"}), {"projects": []})
             self.assertIs(legacy_client.send, send)
@@ -91,8 +92,7 @@ class SharedIPCTests(unittest.TestCase):
             self.assertEqual(exc.exception.code, "ProtocolError")
 
     def test_server_rejects_unknown_or_extra_fields_before_execution(self):
-        with ControlServer(self.path, FakeController()) as server:
-            self.running(server)
+        with self.running(ControlServer(self.path, FakeController())):
             with self.assertRaises(ControllerRejected) as exc:
                 send(self.path, "status", argv=["/bin/sh"])
             self.assertEqual(exc.exception.code, "ProtocolError")
@@ -102,8 +102,7 @@ class SharedIPCTests(unittest.TestCase):
                 old_request(self.path, {"op": "exec", "command": "whoami"})
 
     def test_limit_requests_and_reply_size(self):
-        with ControlServer(self.path, FakeController()) as server:
-            self.running(server)
+        with self.running(ControlServer(self.path, FakeController())):
             with self.assertRaises(ControllerRejected) as exc:
                 send(self.path, "project_rename", project_id="x",
                      name="a" * MAX_MESSAGE)
@@ -115,14 +114,12 @@ class SharedIPCTests(unittest.TestCase):
     def test_controller_unavailable_or_invalid_reply(self):
         with self.assertRaises(ControllerUnavailable):
             send(self.path, "status", timeout=.1)
-        with socketserver.UnixStreamServer(str(self.path), InvalidReplyHandler) as server:
-            self.running(server)
+        with self.running(socketserver.UnixStreamServer(str(self.path), InvalidReplyHandler)):
             with self.assertRaises(ControllerUnavailable):
                 send(self.path, "status")
 
     def test_incompatible_controller_version(self):
-        with ControlServer(self.path, FakeController()) as server:
-            self.running(server)
+        with self.running(ControlServer(self.path, FakeController())):
             with patch.object(FakeController, "handle",
                               return_value={"major": 2, "minor": 0}):
                 with self.assertRaises(ControllerIncompatible):
