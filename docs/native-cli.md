@@ -1,9 +1,9 @@
-# Native DevStack SSH command (`dev`) — first milestone
+# Native DevStack SSH command (`dev`) — v0.5.3
 
 The `dev` command is a **local unprivileged client** of the same controller
 Unix socket used by the web interface. The CLI has no Docker socket access,
-database access or host shell bridge. I3–I6 add project/runtime lifecycle, service inspection, Compose and saved
-tasks, and background jobs; Git/repository commands follow later.
+database access or host shell bridge. v0.5.3 adds project/runtime lifecycle, service inspection, Compose and saved
+tasks, background jobs, and safe GitHub/repository workflows.
 
 ## Project and runtime commands
 
@@ -104,9 +104,8 @@ Likewise, `task run` executes only a preconfigured saved task; it cannot
 supply arbitrary host commands or raw Docker flags.
 
 The CLI prints the controller-assigned **job UUID** on acceptance. The work
-continues if the SSH session exits. Job history, log-following and explicit
-cancellation in the SSH CLI are reserved for **I6**; the existing web
-dashboard can inspect submitted jobs in the meantime.
+continues if the SSH session exits. Inspect jobs, follow logs and cancel
+independent jobs using the I6 commands documented below or the web dashboard.
 
 `service logs` is a **bounded snapshot** of the last 1–200 log lines
 (default 150), with bounded bytes and time enforced by the controller.
@@ -285,7 +284,8 @@ The web UI remains usable even if the human CLI was not enrolled.
   mobile SSH output is tested).
 - Global options are `--json` and `--socket PATH`. Both are also accepted after
   the initial `status` or `doctor` subcommand.
-- JSON mode writes exactly one structured object to stdout and errors to stderr.
+- JSON mode writes one structured object to stdout and errors to stderr,
+  except `job logs --follow --json`, which intentionally uses NDJSON chunks.
 - Exit status: `0` success; `2` bad CLI arguments; `65` invalid/rejected request;
   `69` controller unreachable or malformed reply; `75` operation conflict;
   `77` controller socket permission denied; `78` incompatible controller/response.

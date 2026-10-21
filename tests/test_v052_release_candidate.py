@@ -10,10 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 class V052ReleaseCandidateTests(unittest.TestCase):
     def test_version_matches_release_notes(self):
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
-        self.assertEqual(metadata["project"]["version"], "0.5.2")
-        release = ROOT / "docs" / "releases" / "v0.5.2.md"
+        version = metadata["project"]["version"]
+        self.assertIn(version, {"0.5.2", "0.5.3"})
+        release = ROOT / "docs" / "releases" / f"v{version}.md"
         self.assertTrue(release.is_file())
-        self.assertIn("Clean Ubuntu installation required", release.read_text())
+        self.assertIn(f"v{version}", release.read_text())
+        # Historical v0.5.2 cutover must stay documented after bumping.
+        original = ROOT / "docs" / "releases" / "v0.5.2.md"
+        self.assertIn("Clean Ubuntu installation required", original.read_text())
 
     def test_publication_is_only_from_main_after_docker_systemd_and_unit(self):
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
