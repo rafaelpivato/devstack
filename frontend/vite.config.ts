@@ -13,5 +13,4 @@ export default defineConfig({
     cssCodeSplit: false,
     rollupOptions: { input: entry },
   },
-  test: undefined,
 });
