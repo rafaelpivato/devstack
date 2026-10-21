@@ -50,7 +50,12 @@ jobs:
               prefix = "devstack/static/v06/"
               manifest = json.loads(archive.read(prefix + "manifest.json"))
               entry = manifest["src/main.tsx"]
-              for asset in (entry["file"], *entry["css"]):
+              css = entry.get("css") or [
+                  item["file"] for item in manifest.values()
+                  if item["file"].endswith(".css")
+              ]
+              assert css, "missing stylesheet"
+              for asset in (entry["file"], *css):
                   assert prefix + asset in files, f"missing bundled asset: {asset}"
               assert "devstack/templates/v06_preview.html" in files
           PY
