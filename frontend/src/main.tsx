@@ -8,6 +8,9 @@ import { useNavigation } from "./navigation/useNavigation";
 import { routeProjectId } from "./navigation/routes";
 import { RuntimeActionScreen, RuntimeOperations, RuntimeOperationDetail } from "./features/runtime/RuntimeScreens";
 import { RepositoryScreen, RepositoryAdd, RepositoryBulk, RepositoryReceipt, BranchReview, SourceReview } from "./features/repositories/RepositoryScreens";
+import { ServicesScreen, ServiceLogsScreen } from "./features/workloads/ServiceScreens";
+import { ApplicationsScreen } from "./features/workloads/ApplicationScreens";
+import { JobsScreen, JobDetail, JobLogs, RunJob } from "./features/workloads/JobScreens";
 import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
@@ -53,6 +56,20 @@ export function App() {
       operationId={route.operationId} navigation={navigation}/>;
   if(route.kind==="repo-branch") return <BranchReview id={id} runtime={current} navigation={navigation}/>;
   if(route.kind==="repo-source") return <SourceReview id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="lane"&&route.lane==="services")
+    return <ServicesScreen id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="service-logs") return <ServiceLogsScreen key={id+route.containerId} id={id}
+    containerId={route.containerId} runtime={current} navigation={navigation}/>;
+  if(route.kind==="lane"&&route.lane==="applications")
+    return <ApplicationsScreen id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="lane"&&route.lane==="jobs")
+    return <JobsScreen id={id} runtime={current} navigation={navigation}/>;
+  if(route.kind==="job-detail") return <JobDetail key={id+route.jobId}
+    id={id} jobId={route.jobId} runtime={current} navigation={navigation}/>;
+  if(route.kind==="job-logs") return <JobLogs key={id+route.jobId} id={id}
+    jobId={route.jobId} navigation={navigation}/>;
+  if(route.kind==="job-run") return <RunJob key={id+route.mode}
+    id={id} mode={route.mode} runtime={current} navigation={navigation}/>;
   if(route.kind==="lane") return <ProjectFeature key={id+route.lane} id={id}
     lane={route.lane} navigation={navigation} runtime={current}/>;
   return null;

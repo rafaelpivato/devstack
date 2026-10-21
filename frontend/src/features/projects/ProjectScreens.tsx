@@ -114,16 +114,11 @@ export function ProjectFeature({id,lane,navigation,runtime}:{
     {detail.kind==="loading" && <Skeleton/>}
     {detail.kind==="error" && <Notice title="Project detail unavailable" role="alert">{detail.error.message}</Notice>}
     {detail.kind==="ready" && <>
-      {lane==="applications" && <div className="item-group">{detail.data.applications.map(app=>
-        <div key={app.name} className="item-static"><span className="item-icon" aria-hidden="true">↗</span><span className="item-text"><strong>{app.name}</strong><small>{app.service} · port {app.port}</small></span></div>)}
-        {detail.data.applications.length===0 && <Notice title="No registered applications">Applications are configured per project.</Notice>}</div>}
       {lane==="configuration" && <div className="card">
         <div className="property"><span>Repositories</span><strong>{detail.data.repositories.length}</strong></div>
         <div className="property"><span>Saved tasks</span><strong>{detail.data.tasks.length}</strong></div>
         <div className="property"><span>Registered applications</span><strong>{detail.data.applications.length}</strong></div>
       </div>}
-      {(lane==="services" || lane==="jobs") &&
-        <Notice title="Detailed view coming in v0.6">{meta.description} remain available in the current dashboard. This screen does not represent a simulated service or job.</Notice>}
     </>}
     <p className="actions"><OldDashboardLink projectId={id}>Open {meta.title.toLowerCase()} in current UI ↗</OldDashboardLink></p>
   </Shell>;

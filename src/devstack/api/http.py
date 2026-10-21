@@ -239,6 +239,16 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
               }) or
               (len(segments) == 4 and segments[2] == "runtime" and
                segments[3] in {"activate", "switch"}) or
+              (len(segments) == 4 and segments[2] == "services" and
+               re.fullmatch(r"[a-f0-9]{64}", segments[3]) is not None) or
+              (len(segments) == 4 and segments[2] == "jobs" and
+               re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None) or
+              (len(segments) == 5 and segments[2] == "jobs" and
+               ((segments[3] == "run" and segments[4] in {
+                   "task", "compose", "adhoc",
+               }) or
+                (re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None
+                 and segments[4] == "logs"))) or
               (len(segments) == 4 and segments[2] == "repositories" and
                segments[3] in {"add", "bulk", "branch", "source"}) or
               (len(segments) == 5 and segments[2] == "repositories" and
