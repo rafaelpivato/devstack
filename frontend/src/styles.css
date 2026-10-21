@@ -63,3 +63,10 @@ code {font: .84rem/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-w
   .notice,.card {max-width:740px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after {scroll-behavior:auto!important}}
+
+.confirmation {margin:20px 0}
+.confirm-label {display:flex;gap:12px;align-items:center;margin:0 0 16px;min-height:44px;line-height:1.45}
+.confirm-label input {width:21px;height:21px;flex:0 0 21px;accent-color:var(--accent)}
+.primary-button {width:100%;min-height:48px;border:1px solid var(--accent);background:var(--accent);color:#172421;
+  font-weight:700;border-radius:11px;padding:10px 16px}
+.primary-button:disabled {opacity:.55;cursor:not-allowed}
