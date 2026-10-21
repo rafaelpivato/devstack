@@ -197,7 +197,12 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
             entry = manifest["src/main.tsx"]
             js_asset = entry["file"]
-            css_assets = entry.get("css", [])
+            css_assets = entry.get("css") or [
+                item["file"] for item in manifest.values()
+                if isinstance(item, dict) and
+                isinstance(item.get("file"), str) and
+                item["file"].endswith(".css")
+            ]
             # Only versioned local, packaged asset paths may be inserted.
             paths = [js_asset, *css_assets]
             if (not isinstance(css_assets, list) or
