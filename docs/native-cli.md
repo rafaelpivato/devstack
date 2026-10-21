@@ -76,6 +76,47 @@ execute later if a web action changes that state first. The user-facing
 interface and the CLI never gain direct Docker or registry access.
 
 
+## I5: services, Compose, and saved tasks
+
+All I5 operations require an **explicit project UUID** supplied with
+`--project UUID`. The CLI never silently targets whichever project happens
+to be active. Service reads for an inactive project return an empty service
+list; logs require that exact project to be active, and the controller
+verifies container ownership and activation generation.
+
+```shell
+dev service list --project <uuid>
+dev service logs <64-character-container-id> --project <uuid> --tail 150
+dev --json service list --project <uuid>
+
+dev compose show --project <uuid>
+dev compose build --project <uuid>
+dev compose restart --project <uuid>
+
+dev task list --project <uuid>
+dev task run <saved-task-name> --project <uuid>
+```
+
+`compose show` reads the revisioned managed YAML through the controller. This
+is read-only; no CLI edit or arbitrary Compose command is exposed.
+`compose build` and `compose restart` are the only allowed maintenance
+actions. They run as **controller-owned jobs**, not foreground CLI processes.
+Likewise, `task run` executes only a preconfigured saved task; it cannot
+supply arbitrary host commands or raw Docker flags.
+
+The CLI prints the controller-assigned **job UUID** on acceptance. The work
+continues if the SSH session exits. Job history, log-following and explicit
+cancellation in the SSH CLI are reserved for **I6**; the existing web
+dashboard can inspect submitted jobs in the meantime.
+
+`service logs` is a **bounded snapshot** of the last 1–200 log lines
+(default 150), with bounded bytes and time enforced by the controller.
+Raw log lines and Compose YAML are printed unchanged, even if they exceed
+the terminal width. Structured service/task/job summaries wrap cleanly on
+40-column terminals. Use `--json` to preserve metadata such as log
+truncation flags, Compose revision, and job UUID. There is no interactive
+container shell, arbitrary command runner, or unrestricted Compose API.
+
 ## Operator trust and enrollment
 
 Only a **trusted human Linux administrator** should be granted membership in

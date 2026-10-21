@@ -124,7 +124,74 @@ def parser() -> argparse.ArgumentParser:
         "operation", help="Inspect one durable transition by receipt UUID.")
     _common_flags(operation)
     operation.add_argument("id", type=_project_uuid, metavar="UUID")
+    service = commands.add_parser(
+        "service", help="Inspect project Compose services and bounded container logs.")
+    _common_flags(service)
+    services = service.add_subparsers(dest="action", required=True)
+    service_list = services.add_parser("list", help="List services for an explicit project.")
+    _common_flags(service_list)
+    _project_flag(service_list)
+    service_logs = services.add_parser(
+        "logs", help="Read bounded logs from a verified project container.")
+    _common_flags(service_logs)
+    service_logs.add_argument("container_id", type=_container_id, metavar="CONTAINER_ID")
+    _project_flag(service_logs)
+    service_logs.add_argument("--tail", type=_tail, default=150, metavar="LINES",
+                              help="Last 1–200 lines (default: 150)")
+
+    task = commands.add_parser(
+        "task", help="List and submit saved tasks through the controller.")
+    _common_flags(task)
+    tasks = task.add_subparsers(dest="action", required=True)
+    task_list = tasks.add_parser("list", help="List saved task definitions (read-only).")
+    _common_flags(task_list)
+    _project_flag(task_list)
+    task_run = tasks.add_parser("run", help="Submit a saved task as a controller job.")
+    _common_flags(task_run)
+    task_run.add_argument("name", type=_task_name, metavar="TASK_NAME")
+    _project_flag(task_run)
+
+    compose = commands.add_parser(
+        "compose", help="Read managed Compose or submit safe maintenance jobs.")
+    _common_flags(compose)
+    actions = compose.add_subparsers(dest="action", required=True)
+    for name, help_text in (
+        ("show", "Read the managed Compose YAML and revision."),
+        ("build", "Submit a Compose image build job."),
+        ("restart", "Submit a Compose service restart job."),
+    ):
+        command = actions.add_parser(name, help=help_text)
+        _common_flags(command)
+        _project_flag(command)
     return root
+
+
+def _project_flag(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--project", dest="project_id", type=_project_uuid,
+                         metavar="UUID", required=True,
+                         help="Explicit project UUID; never inferred from active state")
+
+
+def _container_id(value: str) -> str:
+    if not re.fullmatch(r"[a-f0-9]{64}", value):
+        raise argparse.ArgumentTypeError("expected a full 64-character Docker container ID")
+    return value
+
+
+def _tail(value: str) -> int:
+    try:
+        count = int(value)
+    except (ValueError, TypeError) as exc:
+        raise argparse.ArgumentTypeError("tail must be 1–200") from exc
+    if not 1 <= count <= 200:
+        raise argparse.ArgumentTypeError("tail must be 1–200")
+    return count
+
+
+def _task_name(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", value) or ".." in value:
+        raise argparse.ArgumentTypeError("invalid saved task name")
+    return value
 
 
 def _transition_flags(command: argparse.ArgumentParser) -> None:
@@ -243,6 +310,83 @@ def _render_receipt_list(data: dict) -> str:
     return "\n\n".join(_render_receipt(item) for item in data["operations"])
 
 
+def _render_services(data: dict) -> str:
+    if (not isinstance(data, dict) or type(data.get("active")) is not bool
+            or not isinstance(data.get("services"), list)):
+        raise ControllerUnavailable("Malformed service response")
+    if not data["active"]:
+        return "Runtime inactive for this project."
+    if not data["services"]:
+        return "No Compose services."
+    lines = []
+    for service in data["services"]:
+        if (not isinstance(service, dict)
+                or not isinstance(service.get("name"), str)
+                or not isinstance(service.get("status"), str)
+                or not isinstance(service.get("containers"), list)):
+            raise ControllerUnavailable("Malformed service metadata")
+        if lines:
+            lines.append("")
+        lines.extend((_line("Service", service["name"]),
+                      _line("State", service["status"])))
+        if not service["containers"]:
+            lines.append("  No containers.")
+        for container in service["containers"]:
+            if (not isinstance(container, dict)
+                    or not isinstance(container.get("id"), str)
+                    or not isinstance(container.get("state"), str)):
+                raise ControllerUnavailable("Malformed container metadata")
+            lines.extend((_line("Container", container["id"]),
+                          _line("Status", container["state"])))
+            if container.get("health"):
+                lines.append(_line("Health", container["health"]))
+    return "\n".join(lines)
+
+
+def _render_tasks(data: dict) -> str:
+    if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
+        raise ControllerUnavailable("Malformed task definitions")
+    if not data["tasks"]:
+        return "No saved tasks."
+    lines = []
+    for task in data["tasks"]:
+        if (not isinstance(task, dict)
+                or not isinstance(task.get("name"), str)
+                or not isinstance(task.get("mode"), str)):
+            raise ControllerUnavailable("Malformed saved task")
+        if lines:
+            lines.append("")
+        lines.extend((_line("Task", task["name"]), _line("Mode", task["mode"])))
+        if task.get("service"):
+            lines.append(_line("Service", task["service"]))
+        if task.get("image"):
+            lines.append(_line("Image", task["image"]))
+    return "\n".join(lines)
+
+
+def _render_job_submission(data: dict) -> str:
+    if not isinstance(data, dict) or not isinstance(data.get("job_id"), str):
+        raise ControllerUnavailable("Malformed job submission result")
+    return _line("Job", data["job_id"])
+
+
+def _render_compose(data: dict) -> str:
+    if (not isinstance(data, dict) or not isinstance(data.get("content"), str)
+            or not isinstance(data.get("revision"), str)):
+        raise ControllerUnavailable("Malformed Compose configuration")
+    # Compose is a source file: preserve exact YAML; don't reflow whitespace.
+    return data["content"]
+
+
+def _render_service_logs(data: dict) -> str:
+    if (not isinstance(data, dict) or not isinstance(data.get("text"), str)
+            or type(data.get("truncated")) is not bool
+            or type(data.get("tail")) is not int):
+        raise ControllerUnavailable("Malformed service logs")
+    # Keep raw log lines/timestamps intact; the controller already bounds bytes.
+    return data["text"]
+
+
 def _print(payload: object, *, use_json: bool, name: str) -> None:
     if use_json:
         print(json.dumps(payload, separators=(",", ":"), ensure_ascii=True,
@@ -258,6 +402,16 @@ def _print(payload: object, *, use_json: bool, name: str) -> None:
         print(_render_project_list(payload))
     elif name == "project_show":
         print(_render_project_detail(payload))
+    elif name == "service_list":
+        print(_render_services(payload))
+    elif name == "service_logs":
+        print(_render_service_logs(payload), end="")
+    elif name == "task_list":
+        print(_render_tasks(payload))
+    elif name in {"task_run", "compose_build", "compose_restart"}:
+        print(_render_job_submission(payload))
+    elif name == "compose_show":
+        print(_render_compose(payload), end="")
     elif name == "doctor":
         version = payload["protocol"]
         print(_line("IPC", f"compatible ({version['major']}.{version['minor']})"))
@@ -340,6 +494,27 @@ def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
             return send(args.socket, "projects"), "project_list"
         if args.action == "show":
             return send(args.socket, "project_detail", project_id=args.project_id), "project_show"
+    if args.command == "service":
+        if args.action == "list":
+            return send(args.socket, "services",
+                        project_id=args.project_id), "service_list"
+        if args.action == "logs":
+            return send(args.socket, "service_logs", project_id=args.project_id,
+                        container_id=args.container_id, tail=args.tail), "service_logs"
+    if args.command == "task":
+        if args.action == "list":
+            settings = send(args.socket, "settings_read", project_id=args.project_id)
+            return settings, "task_list"
+        if args.action == "run":
+            return send(args.socket, "task", project_id=args.project_id,
+                        name=args.name), "task_run"
+    if args.command == "compose":
+        if args.action == "show":
+            return send(args.socket, "compose_read",
+                        project_id=args.project_id), "compose_show"
+        if args.action in {"build", "restart"}:
+            return send(args.socket, "compose", project_id=args.project_id,
+                        action=args.action), "compose_" + args.action
     if args.command == "runtime":
         if args.action == "operations":
             return send(args.socket, "transition_list"), "transition_list"
