@@ -166,6 +166,67 @@ container, verifies termination, and keeps other jobs and services running.
 The existing global coordinator/activation generation fences stale work.
 No log file, database or Docker socket is read directly by the CLI.
 
+## I7: GitHub project imports and safe repository updates
+
+The CLI uses **only the existing controller IPC** for GitHub imports, Git
+status, clones and branch changes. It never runs local Git, reads credentials,
+uses a project checkout directly, or changes the globally active runtime.
+
+```shell
+# Public HTTPS GitHub or authenticated SSH source URL:
+dev project import https://github.com/owner/repo --slug demo --name "Demo"
+dev project import-status <operation-uuid>
+
+# Registered repo discovery and observed HEAD status:
+dev repo list --project <project-uuid>
+dev repo status <repo-uuid> --project <project-uuid>
+dev repo update <repo-uuid> --project <project-uuid> --expected-head <40-char-sha>
+
+# Durable background clone/bulk update with explicit request keys:
+dev repo add git@github.com:owner/extra.git \
+  --name extra --project <project-uuid> --branch main
+dev repo add-status <operation-uuid> --project <project-uuid>
+dev repo update-all --project <project-uuid>
+dev repo update-status <operation-uuid> --project <project-uuid>
+
+# Branches require a separate immutable review token:
+dev repo branch-preview feature/login --project <project-uuid>
+dev repo branch-apply feature/login --project <project-uuid> \
+  --revision <64-char-preview-revision>
+```
+
+`dev repo branch-preview` defaults to examining **all repositories** of the
+explicit project. Add `--repository <repo-uuid>` to preview or apply one.
+Review the returned `ready` flag, per-repository `action`, `target_branch`,
+and `fallback` **before** applying. Never guess the 64-character revision:
+the controller rechecks that exact preview revision and refuses stale/dirty
+changes. Review and apply require the runtime to be fully inactive.
+
+`dev repo update` requires an **observed HEAD commit hash** from
+`dev repo status`. The controller fetches and fast-forwards only when the
+checkout is clean, on an upstream-tracking branch, and has not changed since
+inspection. Bulk updates similarly require a deactivated runtime.
+
+Project import, repository add and bulk updates return **durable controller
+operation receipts**. By default they submit and return quickly. Use
+`--wait` on the original mutation to poll the operation until terminal, or
+the corresponding `...-status` command to recover a prior receipt. Mutation
+commands print a 32-character idempotency request key to stderr **before**
+submission. Preserve it across SSH disconnects and resubmit **identical
+arguments** with `--request-key <hex32>` to retrieve the existing operation
+without repeating side effects. Ctrl-C stops waiting only. Terminal states
+may include `succeeded`, `failed`, `interrupted`, `partial`, `blocked` or
+`recovery`; non-success terminal receipts yield nonzero status with
+`--wait`. Follow up on partial or interrupted actions through the controller
+or web UI; never assume implicit rollback.
+
+The entire workflow requires trusted `devstackipc` membership and has the
+same controller validation/locking as the web UI. JSON mode outputs the
+original typed controller response (including revision, error_code and
+per-repository results) without inventing extra fields. Human-readable text
+wraps for 40-column terminals. SSH credentials for private repositories
+must be configured separately through the existing secure GitHub SSH setup.
+
 ## Operator trust and enrollment
 
 Only a **trusted human Linux administrator** should be granted membership in
