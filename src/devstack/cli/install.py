@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import pwd
 import re
+import shutil
 import subprocess
 
 COMMAND = "dev"
@@ -36,6 +37,12 @@ def install_command(root: Path = DEFAULT_ROOT,
         raise CLIInstallError("The selected DevStack release does not provide 'dev'")
     if destination.is_symlink() and os.readlink(destination) == str(target):
         return False
+    # A different 'dev' found on PATH would be shadowed by the new shortcut.
+    existing = shutil.which(COMMAND)
+    if existing and Path(existing) != destination:
+        raise CLIInstallError(
+            f"Refusing to shadow existing command at {existing}"
+        )
     if os.path.lexists(destination):
         raise CLIInstallError(
             f"Refusing to replace existing command at {destination}"

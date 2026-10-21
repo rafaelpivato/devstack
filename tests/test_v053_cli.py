@@ -159,6 +159,30 @@ class CLIInstallTests(unittest.TestCase):
                 install_command(root, destination)
             self.assertEqual(destination.resolve(), collision)
 
+    def test_collision_with_other_command_on_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "app"
+            script = root / "releases" / "v0.5.3" / "venv/bin/dev"
+            script.parent.mkdir(parents=True)
+            script.write_text("#!/bin/sh\nexit 0\n")
+            script.chmod(0o755)
+            updater.point_at(root / "current", script.parent.parent.parent)
+            preexisting = Path(directory) / "bin" / "dev"
+            preexisting.parent.mkdir()
+            preexisting.write_text("#!/bin/sh\nexit 0\n")
+            preexisting.chmod(0o755)
+            destination = Path(directory) / "shortcut" / "dev"
+            destination.parent.mkdir()
+            with patch("devstack.cli.install.shutil.which",
+                       return_value=str(preexisting)):
+                with self.assertRaisesRegex(CLIInstallError, "shadow existing"):
+                    install_command(root, destination)
+            with patch("scripts.updater.shutil.which",
+                       return_value=str(preexisting)):
+                with self.assertRaisesRegex(RuntimeError, "shadow existing"):
+                    updater.cli_collision(root, destination)
+            self.assertFalse(destination.exists())
+
     def test_uninstalled_or_nonexecuting_entry_point_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "app"

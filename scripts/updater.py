@@ -143,6 +143,9 @@ def healthy(url: str, attempts: int = 90) -> bool:
 def cli_collision(root: Path, destination: Path = Path("/usr/local/bin/dev")) -> bool:
     """Preflight a new versioned CLI without modifying any host commands."""
     selected = root / "current" / "venv" / "bin" / "dev"
+    existing = shutil.which("dev")
+    if existing and Path(existing) != destination:
+        raise RuntimeError(f"Refusing to shadow existing 'dev' at {existing}")
     if not os.path.lexists(destination):
         return False
     if destination.is_symlink() and os.readlink(destination) == str(selected):
