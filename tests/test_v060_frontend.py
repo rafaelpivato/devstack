@@ -37,7 +37,23 @@ class FrontendFoundationTests(unittest.TestCase):
         self.assertIn(b'devstack-csrf', response.data)
         self.assertEqual(self.operations, [])  # preview never activates/reads runtime
         self.assertEqual(self.client.get("/static/v06/" + entry["file"]).status_code, 200)
-        self.assertEqual(self.client.get("/__v06/other").status_code, 404)
+        # Client-side history paths are server-renderable after refresh and
+        # never invoke a controller operation or mutate the global runtime.
+        uid = "11111111-1111-4111-8111-111111111111"
+        repo = "22222222-2222-4222-8222-222222222222"
+        for route in ("/__v06/", "/__v06/projects",
+                      f"/__v06/projects/{uid}",
+                      f"/__v06/projects/{uid}/services",
+                      f"/__v06/projects/{uid}/repositories/{repo}"):
+            with self.subTest(route=route):
+                self.assertEqual(self.client.get(route).status_code, 200)
+        for route in ("/__v06/other", "/__v06/projects/not-an-id",
+                      f"/__v06/projects/{uid}/terminal",
+                      f"/__v06/projects/{uid}/services/anything",
+                      "/__v06/api/v2/runtime"):
+            with self.subTest(invalid=route):
+                self.assertEqual(self.client.get(route).status_code, 404)
+        self.assertEqual(self.operations, [])
 
     def test_stable_api_and_csrf_guards_unchanged(self):
         # Only the existing JSON runtime GET calls the existing IPC operation.
