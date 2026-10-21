@@ -19,7 +19,7 @@ After the next stable release is published and installed, the root-owned
 CLI installer is available in the **versioned release**:
 
 ```shell
-sudo /opt/devstack/current/venv/bin/python -m devstack.cli.install --user "$USER"
+sudo /opt/devstack/current/venv/bin/python -m devstack.cli.install --user "$USER" --refresh-updater
 ```
 
 This installs the `/usr/local/bin/dev` symlink if it is not already present,
@@ -30,9 +30,12 @@ then enrolls the explicitly named operator account. The symlink follows
 the release directory. That older updater continues to install new application
 releases, but cannot automatically run the newly introduced CLI registration
 hook. Therefore, **after upgrading a pre-existing v0.5.2 host**, run the
-one-time command above. New clean installations using an updated installer
-create the command automatically, and subsequent releases with the new updater
-can maintain it. No reinstall of the entire host is required.
+one-time command above. The `--refresh-updater` option atomically installs
+the trusted updater shipped with the selected release and preserves the
+original standalone updater as `updater.py.pre-cli-backup`. This resolves
+the v0.5.2 updater migration gap for subsequent releases. New clean installs
+already receive the correct standalone updater from their release; the
+`--refresh-updater` option may be omitted there. No host reinstall is required.
 
 To enroll an existing SSH user automatically during a fresh installation,
 an administrator may explicitly set `DEVSTACK_CLI_OPERATOR=<linux-username>`

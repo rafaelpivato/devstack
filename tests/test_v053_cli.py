@@ -11,7 +11,9 @@ import unittest
 from unittest.mock import patch
 
 from devstack.cli import main as cli
-from devstack.cli.install import CLIInstallError, authorize_operator, install_command
+from devstack.cli.install import (
+    CLIInstallError, authorize_operator, install_command, refresh_updater,
+)
 from devstack.ipc.client import (
     ControllerIncompatible, ControllerRejected, ControllerUnavailable,
 )
@@ -202,6 +204,37 @@ class CLIInstallTests(unittest.TestCase):
             destination.unlink()
             destination.symlink_to(root / "current/venv/bin/dev")
             self.assertFalse(updater.cli_collision(root, destination))
+
+    def test_updater_refresh_migration_is_atomic_and_keeps_backup(self):
+        import stat
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "app"
+            selected = root / "releases/v0.5.3"
+            source = selected / "source/scripts/updater.py"
+            source.parent.mkdir(parents=True)
+            initial = (
+                b'#!/usr/bin/env python3\n'
+                b'"""Independent, conservative release updater. Example old."""\n'
+            )
+            changed = (
+                b'#!/usr/bin/env python3\n'
+                b'"""Independent, conservative release updater. Example new."""\n'
+            )
+            source.write_bytes(changed)
+            updater.point_at(root / "current", selected)
+            destination = base / "updater.py"
+            destination.write_bytes(initial)
+            self.assertTrue(refresh_updater(root, destination))
+            self.assertEqual(destination.read_bytes(), changed)
+            self.assertEqual((base / "updater.py.pre-cli-backup").read_bytes(), initial)
+            self.assertFalse(refresh_updater(root, destination))
+            self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o644)
+            collision = base / "not-devstack.py"
+            collision.write_text("unrelated\n")
+            with self.assertRaises(CLIInstallError):
+                refresh_updater(root, collision)
+            self.assertEqual(collision.read_text(), "unrelated\n")
 
     def test_enrolling_operator_requires_real_interactive_user(self):
         import pwd
