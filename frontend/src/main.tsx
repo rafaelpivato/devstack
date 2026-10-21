@@ -6,6 +6,7 @@ import { Shell, Notice, Skeleton } from "./components/Shell";
 import { Entry, ProjectDirectory, ProjectFeature, ProjectHome } from "./features/projects/ProjectScreens";
 import { useNavigation } from "./navigation/useNavigation";
 import { routeProjectId } from "./navigation/routes";
+import { RuntimeActionScreen, RuntimeOperations, RuntimeOperationDetail } from "./features/runtime/RuntimeScreens";
 import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
@@ -28,6 +29,12 @@ export function App() {
   }
   const current=runtime.data, list=projects.data.projects;
   const route=navigation.route;
+  if(route.kind==="runtime-operations") return <RuntimeOperations navigation={navigation}/>;
+  if(route.kind==="runtime-operation") return <RuntimeOperationDetail id={route.operationId} navigation={navigation}/>;
+  if(route.kind==="runtime-global-action") return <RuntimeActionScreen key={route.action}
+    action={route.action} projectId={null} runtime={current} projects={list} navigation={navigation}/>;
+  if(route.kind==="runtime-action") return <RuntimeActionScreen key={route.projectId+route.action}
+    action={route.action} projectId={route.projectId} runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="entry") return <Entry runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="projects") return <ProjectDirectory projects={list} runtime={current} navigation={navigation}/>;
   const id=routeProjectId(route);
