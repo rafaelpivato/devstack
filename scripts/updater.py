@@ -140,6 +140,22 @@ def healthy(url: str, attempts: int = 90) -> bool:
     return False
 
 
+def cli_collision(root: Path, destination: Path = Path("/usr/local/bin/dev"),
+                  release_cli: Path | None = None) -> bool:
+    """Preflight a new versioned CLI without modifying any host commands."""
+    selected = root / "current" / "venv" / "bin" / "dev"
+    existing = shutil.which("dev")
+    selected_executable = release_cli if release_cli is not None else selected
+    if (existing and Path(existing) != destination
+            and Path(existing).resolve() != selected_executable.resolve()):
+        raise RuntimeError(f"Refusing to shadow existing 'dev' at {existing}")
+    if not os.path.lexists(destination):
+        return False
+    if destination.is_symlink() and os.readlink(destination) == str(selected):
+        return False
+    raise RuntimeError(f"Refusing to overwrite unrelated 'dev' at {destination}")
+
+
 def restart_services() -> None:
     """Web has no Docker access. Restart sole Docker owner before the web API."""
     execute("systemctl", "stop", "devstack-web-v2.service", timeout=45)
@@ -175,12 +191,28 @@ def activate(
             "Deactivate all projects and restore v2 health before updating"
         )
     target = prepare_release(root, tag, repo)
+    cli_available = (target / "venv" / "bin" / "dev").is_file()
+    if cli_available:
+        # Perform the collision check BEFORE activating the new release.
+        cli_collision(root, release_cli=target / "venv" / "bin" / "dev")
+    cli_link = Path("/usr/local/bin/dev")
+    had_cli_link = os.path.lexists(cli_link)
     point_at(current, target)
     try:
         restart_services()
         if not healthy(health_url):
             raise RuntimeError(f"Controller+web reconciliation health check failed for {tag}")
+        if cli_available:
+            # The root updater runs the release-owned collision-safe setup.
+            # It installs a symlink to /opt/devstack/current, never a copied CLI.
+            execute(str(target / "venv" / "bin" / "python"), "-m",
+                    "devstack.cli.install", "--root", str(root), timeout=25)
     except Exception as exc:
+        # Do not leave the new command dangling after rollback to v0.5.2.
+        if (cli_available and not had_cli_link and cli_link.is_symlink()
+                and os.readlink(cli_link) ==
+                str(root / "current" / "venv" / "bin" / "dev")):
+            cli_link.unlink()
         # The updater remains outside the versioned application and uses only
         # the trusted prior v2 release. Never roll back to singleton v0.5.1.
         point_at(current, old)

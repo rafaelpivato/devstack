@@ -1,0 +1,1 @@
+"""Private, typed Unix-domain IPC shared by unprivileged DevStack clients."""

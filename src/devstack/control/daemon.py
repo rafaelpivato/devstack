@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import signal
-import socket
 import socketserver
 import threading
 
@@ -30,15 +29,16 @@ from .observability import ContainerObservability
 from .private_ports import PrivateApplicationPorts
 from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
+from .transitions import TransitionSupervisor
 from .bulk_repositories import BulkRepositoryUpdater
 from devstack.github_ssh import public_key, generate_key, test_connection
+from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send_payload
+from devstack.ipc.protocol import (
+    MAX_MESSAGE, ProtocolError, protocol_info, validate_request,
+)
 from .ingress import WebhookIngress, WebhookServer
 
-_MAX_MESSAGE = 64 * 1024
-
-
-class ProtocolError(ValueError):
-    pass
+_MAX_MESSAGE = MAX_MESSAGE
 
 
 class Controller:
@@ -47,6 +47,8 @@ class Controller:
         self.provisioner = ProjectProvisioner(self.registry, workspaces)
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
+        self.transitions = TransitionSupervisor(database, self.coordinator, self.registry,
+                                                self._reconcile)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.observability = ContainerObservability(self.coordinator, self.backend)
         self.private_ports = PrivateApplicationPorts(self.coordinator, self.backend)
@@ -62,58 +64,14 @@ class Controller:
         self.coordinator.ingress = self.ingress
 
     def handle(self, request: dict) -> dict:
-        if not isinstance(request, dict) or not isinstance(request.get("op"), str):
-            raise ProtocolError("Expected a controller operation")
-        operation = request["op"]
-        fields = {
-            "health": {"op"},
-            "status": {"op"},
-            "projects": {"op"},
-            "project_detail": {"op", "project_id"},
-            "project_rename": {"op", "project_id", "name"},
-            "source_review": {"op", "project_id"},
-            "source_apply": {"op", "project_id", "revision", "selected", "overwrites"},
-            "repository_status": {"op", "project_id", "repository_id"},
-            "repository_update": {"op", "project_id", "repository_id", "expected_head"},
-            "repository_bulk_submit": {"op", "project_id", "request_key"},
-            "repository_bulk_status": {"op", "project_id", "id"},
-            "branch_preview": {"op", "project_id", "branch", "repository_id"},
-            "branch_apply": {"op", "project_id", "branch", "repository_id", "revision"},
-            "repository_add_submit": {"op", "project_id", "url", "name", "branch", "request_key"},
-            "repository_add_status": {"op", "project_id", "id"},
-            "github_ssh_status": {"op"},
-            "github_ssh_generate": {"op"},
-            "github_ssh_test": {"op"},
-            "compose_read": {"op", "project_id"},
-            "compose_save": {"op", "project_id", "content", "revision"},
-            "settings_read": {"op", "project_id"},
-            "settings_replace": {"op", "project_id", "applications", "tasks"},
-            "webhooks": {"op", "project_id"},
-            "webhook_upsert": {"op", "project_id", "route", "service", "port", "destination"},
-            "webhook_remove": {"op", "project_id", "route"},
-            "project_create": {"op", "slug", "name"},
-            "import_submit": {"op", "url", "slug", "name", "request_key"},
-            "import_status": {"op", "id"},
-            "activate": {"op", "project_id"},
-            "switch": {"op", "project_id"},
-            "deactivate": {"op"},
-            "reconcile": {"op"},
-            "task": {"op", "project_id", "name"},
-            "compose": {"op", "project_id", "action"},
-            "job": {"op", "project_id", "id"},
-            "adhoc": {"op", "project_id", "kind", "service", "image", "network", "command"},
-            "jobs": {"op", "project_id"},
-            "services": {"op", "project_id"},
-            "private_ports": {"op", "project_id"},
-            "service_logs": {"op", "project_id", "container_id", "tail"},
-            "job_logs": {"op", "project_id", "id", "offset"},
-            "job_cancel": {"op", "project_id", "id"},
-        }
-        if operation not in fields or set(request) != fields[operation]:
-            raise ProtocolError("Unexpected or missing controller parameters")
+        operation = validate_request(request)
+        if operation == "protocol_info":
+            return protocol_info()
         # A committed but incompletely published sync is a global barrier.
         # The operator can explicitly request reconciliation/replay.
-        if operation != "reconcile":
+        if (operation not in {"reconcile", "transition_status", "transition_list"}
+                and not (operation == "transition_submit" and
+                         request["action"] == "reconcile")):
             with self.registry.database.transaction() as con:
                 if con.execute("SELECT 1 FROM source_sync_pending LIMIT 1").fetchone():
                     from devstack.projects.source_sync import SourceSyncConflict
@@ -129,6 +87,13 @@ class Controller:
             return {"alive": True, "runtime": state["phase"]}
         if operation == "status":
             return self._public_status(self.coordinator.status())
+        if operation == "transition_submit":
+            return self.transitions.submit(request["action"], request["project_id"],
+                                           request["request_key"])
+        if operation == "transition_status":
+            return self.transitions.get(request["id"])
+        if operation == "transition_list":
+            return self.transitions.list()
         if operation == "projects":
             return {"projects": [
                 {"id": p.id, "slug": p.slug, "name": p.name}
@@ -244,13 +209,7 @@ class Controller:
         if operation == "deactivate":
             return self._public_status(self.coordinator.deactivate())
         if operation == "reconcile":
-            # Reconcile actual execution before replaying file snapshots, then
-            # verify absence of both owned workloads and unfinished journals.
-            self.coordinator.reconcile()
-            self.source_review.recover_pending()
-            self.repository_add.reconcile()
-            self.bulk_repositories.recover()
-            return self._public_status(self.coordinator.status())
+            return self._reconcile()
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
         if operation == "compose":
@@ -287,6 +246,18 @@ class Controller:
             return job
         raise ProtocolError("Unknown operation")
 
+    def _reconcile(self, *, expected: dict | None = None) -> dict:
+        """Single full explicit recovery path for web and durable CLI requests.
+
+        Reconcile Docker before source publication, then verify the registry.
+        Always use the same fail-closed coordinator and recovery services.
+        """
+        self.coordinator.reconcile(expected=expected)
+        self.source_review.recover_pending()
+        self.repository_add.reconcile()
+        self.bulk_repositories.recover()
+        return self._public_status(self.coordinator.status())
+
     def _last_repository_update(self, identifier: str) -> dict | None:
         with self.registry.database.transaction() as con:
             row = con.execute(
@@ -322,7 +293,16 @@ class _Handler(socketserver.StreamRequestHandler):
             # Controller interface is local/private but must not expose paths,
             # process output, command argv or environment secrets on errors.
             response = {"ok": False, "error": type(exc).__name__}
-        self.wfile.write(json.dumps(response).encode("utf-8") + b"\n")
+        # Never emit an oversized or unserializable reply. Clients have the
+        # same fixed frame limit as the server; fail with a typed rejection.
+        try:
+            encoded = json.dumps(response, separators=(",", ":"),
+                                 allow_nan=False).encode("utf-8") + b"\n"
+        except (TypeError, ValueError, UnicodeError):
+            encoded = b'{"ok":false,"error":"ResponseSerializationError"}\n'
+        if len(encoded) > _MAX_MESSAGE:
+            encoded = b'{"ok":false,"error":"ResponseTooLarge"}\n'
+        self.wfile.write(encoded)
 
 
 class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -355,21 +335,14 @@ class ControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
 
 
 def request(location: Path, payload: dict, timeout: float = 20) -> dict:
-    """Tiny client for the next project's Flask API adapter."""
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(timeout)
-        connection.connect(str(location))
-        connection.sendall(json.dumps(payload).encode("utf-8") + b"\n")
-        reply = bytearray()
-        while not reply.endswith(b"\n"):
-            chunk = connection.recv(4096)
-            if not chunk or len(reply) + len(chunk) > _MAX_MESSAGE:
-                raise ProtocolError("Invalid controller response")
-            reply.extend(chunk)
-    result = json.loads(reply)
-    if not result.get("ok"):
-        raise ProtocolError("Controller rejected operation: " + result.get("error", "unknown"))
-    return result["result"]
+    """Compatibility wrapper for older internal callers.
+
+    All socket framing and error parsing now live in devstack.ipc.client.
+    """
+    try:
+        return send_payload(location, payload, timeout=timeout)
+    except (ControllerRejected, ControllerUnavailable) as exc:
+        raise ProtocolError("Controller request failed") from exc
 
 
 @contextmanager
@@ -411,6 +384,7 @@ def main():
         database = Database(args.state / "control.sqlite3")
         workspaces = WorkspaceStore(args.state / "projects")
         controller = Controller(database, workspaces)
+        controller.transitions.recover_interrupted()
         # Exclusive daemon lifetime lock guarantees that all handlers from an
         # earlier supervisor are gone. Their leases cannot be active now.
         with controller.coordinator.locked():
