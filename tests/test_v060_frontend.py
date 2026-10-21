@@ -44,12 +44,21 @@ class FrontendFoundationTests(unittest.TestCase):
         for route in ("/__v06/", "/__v06/projects",
                       f"/__v06/projects/{uid}",
                       f"/__v06/projects/{uid}/services",
-                      f"/__v06/projects/{uid}/repositories/{repo}"):
+                      f"/__v06/projects/{uid}/repositories/{repo}",
+                      f"/__v06/projects/{uid}/repositories/add",
+                      f"/__v06/projects/{uid}/repositories/bulk",
+                      f"/__v06/projects/{uid}/repositories/branch",
+                      f"/__v06/projects/{uid}/repositories/source",
+                      f"/__v06/projects/{uid}/repositories/adds/{repo}",
+                      f"/__v06/projects/{uid}/repositories/updates/{repo}"):
             with self.subTest(route=route):
                 self.assertEqual(self.client.get(route).status_code, 200)
         for route in ("/__v06/other", "/__v06/projects/not-an-id",
                       f"/__v06/projects/{uid}/terminal",
                       f"/__v06/projects/{uid}/services/anything",
+                      f"/__v06/projects/{uid}/repositories/add/anything",
+                      f"/__v06/projects/{uid}/repositories/adds/bad",
+                      f"/__v06/projects/{uid}/repositories/updates/{repo}/logs",
                       "/__v06/api/v2/runtime"):
             with self.subTest(invalid=route):
                 self.assertEqual(self.client.get(route).status_code, 404)
