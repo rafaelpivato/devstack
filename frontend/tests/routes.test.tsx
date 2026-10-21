@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Entry, ProjectDirectory } from "../src/features/projects/ProjectScreens";
-import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, routeFor } from "../src/navigation/routes";
+import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl, routeFor } from "../src/navigation/routes";
 import type { Navigator } from "../src/navigation/useNavigation";
 import type { ProjectSummary, RuntimeSnapshot } from "../src/api/runtime";
 
@@ -31,11 +31,21 @@ describe("project-scoped hierarchical routes",()=>{
     expect(routeFor(OPERATIONS_URL)).toEqual({kind:"runtime-operations"});
     expect(routeFor(operationUrl(B))).toEqual({kind:"runtime-operation",operationId:B});
     expect(parentUrl(routeFor(operationUrl(B)))).toBe(OPERATIONS_URL);
+    expect(routeFor(repoAddUrl(A))).toEqual({kind:"repo-add",projectId:A});
+    expect(routeFor(repoBulkUrl(A))).toEqual({kind:"repo-bulk",projectId:A});
+    expect(routeFor(repoBranchUrl(A))).toEqual({kind:"repo-branch",projectId:A});
+    expect(routeFor(repoSourceUrl(A))).toEqual({kind:"repo-source",projectId:A});
+    expect(routeFor(repoReceiptUrl(A,"bulk",B))).toEqual({kind:"repo-receipt",projectId:A,mode:"bulk",operationId:B});
+    expect(parentUrl(routeFor(repoReceiptUrl(A,"add",B)))).toBe(repoAddUrl(A));
+    expect(parentUrl(routeFor(repoBranchUrl(A)))).toBe(laneUrl(A,"repositories"));
   });
   it("rejects invalid/unplanned paths; no implicit current-project alias",()=>{
     expect(isProjectId("not-a-uuid")).toBe(false);
     expect(routeFor(PREVIEW_ROOT+"/projects/current")).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/terminal")).toEqual({kind:"not-found"});
+    expect(routeFor(laneUrl(A,"repositories")+"/shell")).toEqual({kind:"not-found"});
+    expect(routeFor(laneUrl(A,"repositories")+"/adds/not-uuid")).toEqual({kind:"not-found"});
+    expect(routeFor(laneUrl(A,"repositories")+"/updates/"+B+"/logs")).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/runtime/execute")).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/runtime/operations/not-a-uuid")).toEqual({kind:"not-found"});
     expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/services/"+B)).toEqual({kind:"not-found"});
