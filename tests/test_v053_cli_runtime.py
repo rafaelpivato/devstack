@@ -112,7 +112,8 @@ class ProjectRuntimeCLITests(unittest.TestCase):
                           "CONTROLLER_SOCKET": str(self.socket_path)})
         client = app.test_client()
         code, out, err = self.run_cli("project", "activate", self.a.id)
-        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(code, 0, err)
+        self.assertIn("transition request key", err)
         self.assertIn("Runtime: active", out)
         self.assertIn(self.a.id, out)
         self.assertEqual(client.get("/api/v2/runtime").json["project_id"], self.a.id)
@@ -120,22 +121,26 @@ class ProjectRuntimeCLITests(unittest.TestCase):
         generation = self.controller.coordinator.status()["generation"]
 
         code, out, err = self.run_cli("project", "switch", self.b.id, "--json")
-        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(code, 0, err)
+        self.assertIn("transition request key", err)
         self.assertEqual(json.loads(out)["project_id"], self.b.id)
         self.assertEqual(client.get("/api/v2/runtime").json["project_id"], self.b.id)
         self.assertEqual({c["project"] for c in self.backend.containers}, {self.b.id})
         self.assertFalse(self.controller.coordinator.authorized(self.a.id, generation))
 
         code, out, err = self.run_cli("project", "switch", self.a.id)
-        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(code, 0, err)
+        self.assertIn("transition request key", err)
         self.assertEqual({c["project"] for c in self.backend.containers}, {self.a.id})
         self.assertEqual(client.get("/api/v2/runtime").json["project_id"], self.a.id)
 
         code, out, err = self.run_cli("project", "deactivate")
-        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(code, 0, err)
+        self.assertIn("transition request key", err)
         self.assertEqual(self.backend.containers, [])
         code, out, err = self.run_cli("runtime", "reconcile", "--json")
-        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(code, 0, err)
+        self.assertIn("transition request key", err)
         self.assertEqual(json.loads(out)["phase"], "inactive")
         self.assertIsNone(json.loads(out)["project_id"])
         self.assertEqual({p.id for p in self.controller.registry.list()},
@@ -147,7 +152,7 @@ class ProjectRuntimeCLITests(unittest.TestCase):
         code, out, err = self.run_cli("project", "activate", self.b.id)
         self.assertEqual(code, cli.EX_TEMPFAIL)
         self.assertEqual(out, "")
-        self.assertIn("ControlError", err)
+        self.assertIn("TransitionConflict", err)
         code, out, err = self.run_cli("project", "switch", str(uuid4()))
         self.assertEqual(code, cli.EX_DATAERR)
         self.assertIn("ProjectNotFound", err)
@@ -223,15 +228,24 @@ class ProjectRuntimeCLITests(unittest.TestCase):
         self.assertEqual(code, 130)
         self.assertIn("outcome is unknown", err)
 
-    def test_transition_timeout_is_explicit(self):
+    def test_transition_returns_receipt_and_uses_bounded_ipc(self):
+        receipt = {
+            "id": str(uuid4()), "status": "succeeded",
+            "result": {"phase": "active", "project_id": self.a.id},
+        }
         with (patch.object(cli, "ensure_compatible",
-                           return_value={"major": 1, "minor": 0}),
-              patch.object(cli, "send",
-                           return_value={"phase": "active", "project_id": self.a.id}) as send):
+                           return_value={"major": 1, "minor": 1}) as compat,
+              patch.object(cli, "send", return_value=receipt) as sender):
             code, out, err = self.run_cli("project", "activate", self.a.id)
         self.assertEqual(code, 0, err)
-        self.assertEqual(send.call_args.kwargs["timeout"], cli.TRANSITION_TIMEOUT)
-        self.assertGreaterEqual(cli.TRANSITION_TIMEOUT, 300)
+        self.assertIn("Runtime: active", out)
+        self.assertEqual(sender.call_args.args[1], "transition_submit")
+        self.assertEqual(sender.call_args.kwargs["timeout"], cli.RECEIPT_TIMEOUT)
+        self.assertEqual(sender.call_args.kwargs["action"], "activate")
+        self.assertEqual(sender.call_args.kwargs["project_id"], self.a.id)
+        self.assertEqual(compat.call_args.kwargs["minimum_minor"], 1)
+        self.assertIn("transition request key", err)
+        self.assertLess(cli.RECEIPT_TIMEOUT, 30)
 
 
 if __name__ == "__main__":

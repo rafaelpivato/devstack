@@ -7,7 +7,7 @@ from __future__ import annotations
 
 MAX_MESSAGE = 64 * 1024
 PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 0
+PROTOCOL_MINOR = 1
 
 # Request shapes are intentionally exact, not permissive. Optional values
 # still occupy their named fields (typically as JSON null).
@@ -15,6 +15,9 @@ _OPERATION_FIELDS = {
     "protocol_info": (),
     "health": (),
     "status": (),
+    "transition_submit": ("action", "project_id", "request_key"),
+    "transition_status": ("id",),
+    "transition_list": (),
     "projects": (),
     "project_detail": ("project_id",),
     "project_rename": ("project_id", "name"),

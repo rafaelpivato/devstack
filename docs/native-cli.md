@@ -33,13 +33,48 @@ any project. Mutations use the controller's existing exclusive coordinator
 lock and generation fencing. Any concurrent operation from the web or SSH
 goes through that same path.
 
-**I4 limitation:** Runtime transitions are still synchronous controller
-operations. The CLI allows up to 420 seconds for a transition; an SSH
-disconnection, Ctrl-C or timeout does **not** imply the transition failed or
-was cancelled. On a disconnected or interrupted operation, the CLI reports
-an **unknown outcome** and advises checking `dev status` before any retry.
-Controller-owned durable transition receipts and resumption are reserved for
-the follow-up I4 reliability PR.
+**I4: durable transition receipts.** By default, the CLI submits
+the controller-owned transition and polls its durable receipt until it
+finishes. No Docker operation is owned by an SSH or browser connection.
+Use the following optional commands:
+
+```shell
+dev project activate <uuid> --detach
+dev project switch <uuid> --request-key <hex32>
+dev project deactivate --detach
+dev runtime reconcile --detach
+dev runtime operations
+dev runtime operation <operation-uuid>
+dev --json runtime operations
+```
+
+Each mutating CLI command prints an idempotency request key to **stderr before
+submission**, even in JSON mode. Retain this key when connection reliability
+is uncertain. If SSH disconnects after submission but before the reply,
+reissue the **identical operation and arguments** with
+`--request-key <hex32>`. The controller returns the *original receipt*,
+including completed outcomes, without starting Docker a second time.
+The `--detach` option returns the receipt immediately; without it,
+`dev` polls by operation ID until it reaches a terminal state.
+`dev runtime operations` displays up to 20 recent receipts.
+`dev runtime operation <id>` gives the exact current status. Status values
+are `queued`, `running`, `succeeded`, `failed` and `interrupted`.
+
+The sidecar receipt journal is private to the privileged controller and
+survives daemon restarts. The previous release's registry schema is unchanged,
+so the published v0.5.2 rollback path can still open the old database.
+After a daemon crash, pending receipts are explicitly marked
+`interrupted`: **they are never automatically replayed**. The existing
+coordinator performs fail-closed startup reconciliation and removes old
+runtime ownership; an interrupted receipt is intentionally not interpreted as
+success or failure. Inspect `dev status` and reconcile where appropriate.
+No retry may bypass the coordinator's generation fencing or global lock.
+
+Legacy synchronous web operations use the same coordinator; a queued CLI
+transition snapshots the exact runtime state, and must fail rather than
+execute later if a web action changes that state first. The user-facing
+interface and the CLI never gain direct Docker or registry access.
+
 
 ## Operator trust and enrollment
 

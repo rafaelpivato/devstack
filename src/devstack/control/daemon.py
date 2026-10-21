@@ -29,6 +29,7 @@ from .observability import ContainerObservability
 from .private_ports import PrivateApplicationPorts
 from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
+from .transitions import TransitionSupervisor
 from .bulk_repositories import BulkRepositoryUpdater
 from devstack.github_ssh import public_key, generate_key, test_connection
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send_payload
@@ -46,6 +47,8 @@ class Controller:
         self.provisioner = ProjectProvisioner(self.registry, workspaces)
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
+        self.transitions = TransitionSupervisor(database, self.coordinator, self.registry,
+                                                self._reconcile)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.observability = ContainerObservability(self.coordinator, self.backend)
         self.private_ports = PrivateApplicationPorts(self.coordinator, self.backend)
@@ -66,7 +69,9 @@ class Controller:
             return protocol_info()
         # A committed but incompletely published sync is a global barrier.
         # The operator can explicitly request reconciliation/replay.
-        if operation != "reconcile":
+        if (operation not in {"reconcile", "transition_status", "transition_list"}
+                and not (operation == "transition_submit" and
+                         request["action"] == "reconcile")):
             with self.registry.database.transaction() as con:
                 if con.execute("SELECT 1 FROM source_sync_pending LIMIT 1").fetchone():
                     from devstack.projects.source_sync import SourceSyncConflict
@@ -82,6 +87,13 @@ class Controller:
             return {"alive": True, "runtime": state["phase"]}
         if operation == "status":
             return self._public_status(self.coordinator.status())
+        if operation == "transition_submit":
+            return self.transitions.submit(request["action"], request["project_id"],
+                                           request["request_key"])
+        if operation == "transition_status":
+            return self.transitions.get(request["id"])
+        if operation == "transition_list":
+            return self.transitions.list()
         if operation == "projects":
             return {"projects": [
                 {"id": p.id, "slug": p.slug, "name": p.name}
@@ -197,13 +209,7 @@ class Controller:
         if operation == "deactivate":
             return self._public_status(self.coordinator.deactivate())
         if operation == "reconcile":
-            # Reconcile actual execution before replaying file snapshots, then
-            # verify absence of both owned workloads and unfinished journals.
-            self.coordinator.reconcile()
-            self.source_review.recover_pending()
-            self.repository_add.reconcile()
-            self.bulk_repositories.recover()
-            return self._public_status(self.coordinator.status())
+            return self._reconcile()
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
         if operation == "compose":
@@ -239,6 +245,18 @@ class Controller:
                 raise ProtocolError("Job does not belong to requested project")
             return job
         raise ProtocolError("Unknown operation")
+
+    def _reconcile(self, *, expected: dict | None = None) -> dict:
+        """Single full explicit recovery path for web and durable CLI requests.
+
+        Reconcile Docker before source publication, then verify the registry.
+        Always use the same fail-closed coordinator and recovery services.
+        """
+        self.coordinator.reconcile(expected=expected)
+        self.source_review.recover_pending()
+        self.repository_add.reconcile()
+        self.bulk_repositories.recover()
+        return self._public_status(self.coordinator.status())
 
     def _last_repository_update(self, identifier: str) -> dict | None:
         with self.registry.database.transaction() as con:
@@ -366,6 +384,7 @@ def main():
         database = Database(args.state / "control.sqlite3")
         workspaces = WorkspaceStore(args.state / "projects")
         controller = Controller(database, workspaces)
+        controller.transitions.recover_interrupted()
         # Exclusive daemon lifetime lock guarantees that all handlers from an
         # earlier supervisor are gone. Their leases cannot be active now.
         with controller.coordinator.locked():

@@ -128,8 +128,22 @@ class Coordinator:
             raise ControlError(message) from exc
         return self._update("active", identifier, generation)
 
-    def activate(self, identifier: str) -> dict:
+    def _check_expected(self, expected: dict | None) -> None:
+        """Require the exact committed runtime snapshot at execution time.
+
+        Under the coordinator's global flock this guards asynchronous work
+        from unintentionally executing after an intervening web transition.
+        """
+        if expected is None:
+            return
+        current = self.status()
+        if any(current[key] != expected.get(key) for key in
+               ("phase", "project_id", "generation", "updated_ns")):
+            raise ControlError("Runtime changed since transition submission")
+
+    def activate(self, identifier: str, *, expected: dict | None = None) -> dict:
         with self.locked():
+            self._check_expected(expected)
             if self.status()["phase"] != "inactive":
                 raise ControlError("Runtime is not inactive")
             self._validate(identifier)
@@ -151,8 +165,9 @@ class Coordinator:
                          "Deactivation cannot verify that project execution stopped")
             raise ControlError("Runtime deactivation failed closed") from exc
 
-    def deactivate(self) -> dict:
+    def deactivate(self, *, expected: dict | None = None) -> dict:
         with self.locked():
+            self._check_expected(expected)
             current = self.status()
             if current["phase"] == "inactive":
                 self._verify_clear()
@@ -162,8 +177,9 @@ class Coordinator:
             self._stop(current, "deactivating")
             return self._update("inactive", None)
 
-    def switch(self, target: str) -> dict:
+    def switch(self, target: str, *, expected: dict | None = None) -> dict:
         with self.locked():
+            self._check_expected(expected)
             current = self.status()
             if current["phase"] == "inactive":
                 self._validate(target)
@@ -193,9 +209,10 @@ class Coordinator:
         if not self.authorized(identifier, generation):
             raise ControlError("Stale or inactive project execution is forbidden")
 
-    def reconcile(self) -> dict:
+    def reconcile(self, *, expected: dict | None = None) -> dict:
         """Daemon startup and explicit ERROR recovery; never resumes work."""
         with self.locked():
+            self._check_expected(expected)
             previous = self.status()
             self._update("error", previous["project_id"], None,
                          "Checking Docker ownership after controller restart")
