@@ -14,6 +14,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Tests can supply a token without a DOM. Never persist tokens in local storage. */
   csrfToken?: string;
+  idempotencyKey?: string;
 }
 
 function kindFor(status: number): ApiErrorKind {
@@ -42,6 +43,11 @@ export async function apiRequest<T>(
         document.querySelector<HTMLMetaElement>('meta[name="devstack-csrf"]')?.content ?? "");
     if (!csrf) throw new ApiError("unauthorized", "Missing CSRF token. Reload DevStack.");
     headers.set("X-CSRF-Token", csrf);
+    if (options.idempotencyKey !== undefined) {
+      if (!/^[0-9a-f]{32}$/.test(options.idempotencyKey))
+        throw new ApiError("invalid", "Invalid idempotency key.");
+      headers.set("Idempotency-Key", options.idempotencyKey);
+    }
   }
   if (options.body !== undefined) headers.set("Content-Type", "application/json");
 
