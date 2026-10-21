@@ -39,9 +39,10 @@ class TransitionNotFound(LookupError):
 class TransitionSupervisor:
     """Idempotent, one-at-a-time transition submissions via existing Coordinator."""
 
-    def __init__(self, database, coordinator, registry):
+    def __init__(self, database, coordinator, registry, reconcile):
         self.coordinator = coordinator
         self.registry = registry
+        self.reconcile = reconcile
         self.path = database.path.parent / "runtime-transitions.sqlite3"
         if self.path.is_symlink() or (self.path.exists()
                                       and not self.path.is_file()):
@@ -229,7 +230,7 @@ class TransitionSupervisor:
                 elif action == "deactivate":
                     result = self.coordinator.deactivate(expected=expected)
                 else:
-                    result = self.coordinator.reconcile(expected=expected)
+                    result = self.reconcile(expected=expected)
             except Exception as exc:
                 name = type(exc).__name__
                 self._finish(identifier, "failed",

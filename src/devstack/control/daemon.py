@@ -47,7 +47,8 @@ class Controller:
         self.provisioner = ProjectProvisioner(self.registry, workspaces)
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
-        self.transitions = TransitionSupervisor(database, self.coordinator, self.registry)
+        self.transitions = TransitionSupervisor(database, self.coordinator, self.registry,
+                                                self._reconcile)
         self.jobs = JobSupervisor(self.coordinator, self.backend, workspaces)
         self.observability = ContainerObservability(self.coordinator, self.backend)
         self.private_ports = PrivateApplicationPorts(self.coordinator, self.backend)
@@ -68,7 +69,9 @@ class Controller:
             return protocol_info()
         # A committed but incompletely published sync is a global barrier.
         # The operator can explicitly request reconciliation/replay.
-        if operation not in {"reconcile", "transition_status", "transition_list"}:
+        if (operation not in {"reconcile", "transition_status", "transition_list"}
+                and not (operation == "transition_submit" and
+                         request["action"] == "reconcile")):
             with self.registry.database.transaction() as con:
                 if con.execute("SELECT 1 FROM source_sync_pending LIMIT 1").fetchone():
                     from devstack.projects.source_sync import SourceSyncConflict
@@ -206,13 +209,7 @@ class Controller:
         if operation == "deactivate":
             return self._public_status(self.coordinator.deactivate())
         if operation == "reconcile":
-            # Reconcile actual execution before replaying file snapshots, then
-            # verify absence of both owned workloads and unfinished journals.
-            self.coordinator.reconcile()
-            self.source_review.recover_pending()
-            self.repository_add.reconcile()
-            self.bulk_repositories.recover()
-            return self._public_status(self.coordinator.status())
+            return self._reconcile()
         if operation == "task":
             return {"job_id": self.jobs.submit_task(request["project_id"], request["name"])}
         if operation == "compose":
@@ -248,6 +245,18 @@ class Controller:
                 raise ProtocolError("Job does not belong to requested project")
             return job
         raise ProtocolError("Unknown operation")
+
+    def _reconcile(self, *, expected: dict | None = None) -> dict:
+        """Single full explicit recovery path for web and durable CLI requests.
+
+        Reconcile Docker before source publication, then verify the registry.
+        Always use the same fail-closed coordinator and recovery services.
+        """
+        self.coordinator.reconcile(expected=expected)
+        self.source_review.recover_pending()
+        self.repository_add.reconcile()
+        self.bulk_repositories.recover()
+        return self._public_status(self.coordinator.status())
 
     def _last_repository_update(self, identifier: str) -> dict | None:
         with self.registry.database.transaction() as con:

@@ -200,6 +200,33 @@ class TransitionAcceptance(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn(receipt["id"], out)
 
+    def test_reconcile_uses_full_source_recovery_during_pending_sync(self):
+        from unittest.mock import patch
+        # A pending publication blocks ordinary actions, but both explicit
+        # web and durable CLI recovery paths must stay available.
+        with self.db.transaction(write=True) as con:
+            con.execute(
+                "INSERT INTO source_sync_pending(project_id,payload,started_ns) "
+                "VALUES(?,?,?)", (self.a.id, "{}", time.time_ns()),
+            )
+
+        def recover():
+            with self.db.transaction(write=True) as con:
+                con.execute("DELETE FROM source_sync_pending")
+
+        with patch.object(self.controller.source_review, "recover_pending",
+                          side_effect=recover) as recovery:
+            listed = send(self.socket_path, "transition_list")
+            self.assertEqual(listed["operations"], [])
+            operation = self.op("reconcile")
+            finished = self.wait(operation)
+            self.assertEqual(finished["status"], "succeeded")
+            self.assertEqual(finished["result"]["phase"], "inactive")
+            recovery.assert_called_once()
+        with self.db.transaction() as con:
+            self.assertIsNone(con.execute(
+                "SELECT 1 FROM source_sync_pending").fetchone())
+
     def test_cli_wait_and_reconcile(self):
         code, out, err = self.run_cli("project", "activate", self.a.id)
         self.assertEqual(code, 0, err)
