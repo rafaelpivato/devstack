@@ -100,7 +100,9 @@ export function JobLogs({id,jobId,navigation}:{
         throw Error("Unexpected controller log offset");
       setPages(p=>result.next_offset===offset?p:[...p,result.text]);
       setOffset(result.next_offset);
-      setComplete(result.complete);
+      // 'complete' means the job stopped, not that all historical log pages
+      // have been consumed. Read through to an empty terminal page.
+      setComplete(result.complete && result.next_offset===offset);
     }catch(e){setError(e instanceof Error?e.message:"Cannot retrieve log page");}
     finally{setLoading(false);setStarted(true);}
   },[id,jobId,offset,loading,complete]);
@@ -140,9 +142,16 @@ export function RunJob({id,mode,runtime,navigation}:{
   const submit=async()=>{
     if(!active||!confirmed||!valid||busy||unknown)return;
     setBusy(true);setError(null);
+    // Verify the controller state before attempting a POST. An unavailable
+    // preflight is not an unknown submission and may be retried normally.
     try{
-      const r=await readJobSafeRuntime(id);
-      if(!r)throw Error("The active runtime changed. No job submitted.");
+      if(!await readJobSafeRuntime(id))throw Error("The runtime changed. No job submitted.");
+    }catch(e){
+      setError((e instanceof Error?e.message:"Runtime unavailable")+". No job was submitted.");
+      setBusy(false);
+      return;
+    }
+    try{
       let result;
       if(mode==="task")result=await runTask(id,task);
       else if(mode==="compose")result=await runCompose(id,action);
@@ -157,7 +166,7 @@ export function RunJob({id,mode,runtime,navigation}:{
       navigation.navigate(jobUrl(id,result.job_id));
     }catch(e){
       setError(e instanceof Error?e.message:"Job submission outcome unknown");
-      setUnknown(true); // No backend idempotency contract; never blindly resubmit.
+      setUnknown(true); // No job-submit idempotency contract: never automatically retry.
     }finally{setBusy(false);}
   };
   return <WorkloadShell title={mode==="task"?"Run saved task":mode==="compose"?"Compose operation":"Ad-hoc container"} id={id} navigation={navigation}>
