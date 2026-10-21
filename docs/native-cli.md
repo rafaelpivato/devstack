@@ -2,9 +2,8 @@
 
 The `dev` command is a **local unprivileged client** of the same controller
 Unix socket used by the web interface. The CLI has no Docker socket access,
-database access or host shell bridge. I3 adds read-only project discovery and
-explicit project/runtime lifecycle commands; services, jobs and Git commands
-are subsequent integration PRs.
+database access or host shell bridge. I3–I6 add project/runtime lifecycle, service inspection, Compose and saved
+tasks, and background jobs; Git/repository commands follow later.
 
 ## Project and runtime commands
 
@@ -116,6 +115,56 @@ the terminal width. Structured service/task/job summaries wrap cleanly on
 40-column terminals. Use `--json` to preserve metadata such as log
 truncation flags, Compose revision, and job UUID. There is no interactive
 container shell, arbitrary command runner, or unrestricted Compose API.
+
+## I6: background jobs, log follow and targeted cancellation
+
+Jobs run under the privileged controller and are **not tied to the life of
+the SSH client**. Every job command requires `--project UUID`, including
+history and log reads. The target project is never inferred from the active
+project, and all job/container ownership checks remain in the controller.
+
+```shell
+dev job list --project <project-uuid>
+dev job show <job-uuid> --project <project-uuid>
+dev job logs <job-uuid> --project <project-uuid>
+dev job logs <job-uuid> --project <project-uuid> --offset 16384
+dev job logs <job-uuid> --project <project-uuid> --follow
+dev job cancel <job-uuid> --project <project-uuid>
+
+# Disposable Compose service command (not an interactive shell)
+dev job run web --project <project-uuid> -- python -m unittest
+
+# Standalone image command with an explicit network policy
+dev job image python:3.12-alpine --project <project-uuid> \
+  --network none -- python -V
+dev job image redis:7-alpine --project <project-uuid> \
+  --network project -- redis-cli ping
+```
+
+Use a literal `--` to separate **ad-hoc container argv** from CLI options.
+All DevStack options, including `--project` and `--network`, go **before**
+that separator; everything after it is passed as a bounded array to the
+existing controller-side task-spec validator (maximum 64 argv strings and
+4 KiB total). There is no host shell, interactive stdin/TTY, arbitrary
+Docker CLI flag support or raw host command runner.
+
+`job list` shows up to 40 recent controller jobs for one project.
+`job show` reports a job's status, cancellation policy, and exit code if
+finished. `job logs` reads one controller-bounded 16 KiB page, with a byte
+offset from 0 through 2 MiB. The response includes `next_offset` and
+`complete` in JSON for programmatic pagination. `--follow` polls successive
+pages, emits only new text and stops after the controller reports completion.
+Its JSON mode uses **newline-delimited JSON (NDJSON)**, one object per emitted
+chunk/final completion notice. The plain log text is not reflowed or altered.
+
+Ctrl-C or SSH disconnection **stops following only**; it does not terminate
+or cancel the job. `job cancel` is a separate, explicit command and is only
+permitted for the controller's `independent` cancellation policy. A saved
+task that executes inside a shared service and Compose build/restart are not
+independently cancellable. Independent cancellation targets the named job
+container, verifies termination, and keeps other jobs and services running.
+The existing global coordinator/activation generation fences stale work.
+No log file, database or Docker socket is read directly by the CLI.
 
 ## Operator trust and enrollment
 

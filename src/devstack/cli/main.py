@@ -35,6 +35,8 @@ EX_CONFIG = 78
 # Receipts are controller-owned. Polling stops when the SSH client exits.
 POLL_SECONDS = 0.25
 RECEIPT_TIMEOUT = 10
+JOB_POLL_SECONDS = 0.5
+JOB_LOG_MAX_OFFSET = 2 * 1024 * 1024
 
 _CONFLICT_CODES = frozenset({
     "TransitionConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError",
@@ -163,6 +165,43 @@ def parser() -> argparse.ArgumentParser:
         command = actions.add_parser(name, help=help_text)
         _common_flags(command)
         _project_flag(command)
+    job = commands.add_parser(
+        "job", help="Submit disposable jobs; inspect, follow and cancel jobs.")
+    _common_flags(job)
+    jobs = job.add_subparsers(dest="action", required=True)
+    job_list = jobs.add_parser("list", help="List recent jobs for a project.")
+    _common_flags(job_list)
+    _project_flag(job_list)
+    job_show = jobs.add_parser("show", help="Show one project's job status.")
+    _common_flags(job_show)
+    job_show.add_argument("id", type=_project_uuid, metavar="JOB_UUID")
+    _project_flag(job_show)
+    job_logs = jobs.add_parser(
+        "logs", help="Read paginated job logs or follow until completion.")
+    _common_flags(job_logs)
+    job_logs.add_argument("id", type=_project_uuid, metavar="JOB_UUID")
+    _project_flag(job_logs)
+    job_logs.add_argument("--offset", type=_job_offset, default=0, metavar="BYTES")
+    job_logs.add_argument("--follow", action="store_true",
+                          help="Poll successive bounded chunks (Ctrl-C stops following only)")
+    job_cancel = jobs.add_parser(
+        "cancel", help="Cancel only an independently cancellable job.")
+    _common_flags(job_cancel)
+    job_cancel.add_argument("id", type=_project_uuid, metavar="JOB_UUID")
+    _project_flag(job_cancel)
+    for name, description in (
+        ("run", "Submit disposable Compose run (no interactive stdin/TTY)."),
+        ("image", "Submit a standalone Docker image job."),
+    ):
+        command = jobs.add_parser(name, help=description)
+        _common_flags(command)
+        command.add_argument("target", type=_task_name if name == "run"
+                             else _image_name, metavar="SERVICE" if name == "run"
+                             else "IMAGE")
+        _project_flag(command)
+        if name == "image":
+            command.add_argument("--network", choices=("none", "project"),
+                                 default="none", help="Container network isolation")
     return root
 
 
@@ -176,6 +215,23 @@ def _container_id(value: str) -> str:
     if not re.fullmatch(r"[a-f0-9]{64}", value):
         raise argparse.ArgumentTypeError("expected a full 64-character Docker container ID")
     return value
+
+
+def _image_name(value: str) -> str:
+    if (len(value) > 255 or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", value)):
+        raise argparse.ArgumentTypeError("invalid container image reference")
+    return value
+
+
+def _job_offset(value: str) -> int:
+    try:
+        result = int(value)
+    except (ValueError, TypeError) as exc:
+        raise argparse.ArgumentTypeError("job offset must be a byte position") from exc
+    if str(result) != value or not 0 <= result <= JOB_LOG_MAX_OFFSET:
+        raise argparse.ArgumentTypeError("job offset must be between 0 and 2097152")
+    return result
 
 
 def _tail(value: str) -> int:
@@ -387,6 +443,83 @@ def _render_service_logs(data: dict) -> str:
     return data["text"]
 
 
+_JOB_STATES = frozenset({
+    "queued", "running", "cancelling", "succeeded", "failed", "cancelled",
+})
+
+
+def _validate_job(data: object) -> dict:
+    if (not isinstance(data, dict) or not isinstance(data.get("id"), str)
+            or not isinstance(data.get("project_id"), str)
+            or data.get("status") not in _JOB_STATES
+            or not isinstance(data.get("kind"), str)
+            or not isinstance(data.get("action"), str)
+            or data.get("cancel_policy") not in {"project", "independent"}):
+        raise ControllerUnavailable("Malformed controller job response")
+    return data
+
+
+def _render_job(data: dict) -> str:
+    job = _validate_job(data)
+    parts = [
+        _line("Job", job["id"]),
+        _line("State", job["status"]),
+        _line("Kind", job["kind"]),
+        _line("Action", job["action"]),
+        _line("Cancel", job["cancel_policy"]),
+    ]
+    if job.get("exit_code") is not None:
+        if type(job["exit_code"]) is not int:
+            raise ControllerUnavailable("Malformed job exit status")
+        parts.append(_line("Exit code", job["exit_code"]))
+    return "\n".join(parts)
+
+
+def _render_jobs(data: dict) -> str:
+    if not isinstance(data, dict) or not isinstance(data.get("jobs"), list):
+        raise ControllerUnavailable("Malformed controller job list")
+    if not data["jobs"]:
+        return "No jobs recorded for this project."
+    return "\n\n".join(_render_job(job) for job in data["jobs"])
+
+
+def _validate_job_logs(data: object, *, expected_offset: int) -> dict:
+    if (not isinstance(data, dict) or not isinstance(data.get("text"), str)
+            or type(data.get("offset")) is not int
+            or type(data.get("next_offset")) is not int
+            or type(data.get("complete")) is not bool
+            or data["offset"] != expected_offset
+            or not expected_offset <= data["next_offset"] <= JOB_LOG_MAX_OFFSET
+            or len(data["text"].encode("utf-8")) > 16 * 1024 * 3):
+        raise ControllerUnavailable("Malformed or out-of-order controller job logs")
+    return data
+
+
+def _follow_job_logs(socket: Path, project: str, identifier: str,
+                     offset: int, *, use_json: bool) -> None:
+    """Follow controller-owned bounded chunks, never own/cancel the job.
+
+    JSON + follow uses newline-delimited JSON (NDJSON), not one JSON document.
+    Ctrl-C exits the follower while the underlying job continues independently.
+    """
+    while True:
+        payload = _validate_job_logs(
+            send(socket, "job_logs", project_id=project, id=identifier, offset=offset),
+            expected_offset=offset,
+        )
+        if use_json:
+            if payload["text"] or payload["complete"]:
+                print(json.dumps(payload, separators=(",", ":"), ensure_ascii=True))
+                sys.stdout.flush()
+        elif payload["text"]:
+            sys.stdout.write(payload["text"])
+            sys.stdout.flush()
+        offset = payload["next_offset"]
+        if payload["complete"]:
+            return
+        time.sleep(JOB_POLL_SECONDS)
+
+
 def _print(payload: object, *, use_json: bool, name: str) -> None:
     if use_json:
         print(json.dumps(payload, separators=(",", ":"), ensure_ascii=True,
@@ -412,6 +545,15 @@ def _print(payload: object, *, use_json: bool, name: str) -> None:
         print(_render_job_submission(payload))
     elif name == "compose_show":
         print(_render_compose(payload), end="")
+    elif name == "job_list":
+        print(_render_jobs(payload))
+    elif name in {"job_show", "job_cancel"}:
+        print(_render_job(payload))
+    elif name == "job_logs":
+        logs = _validate_job_logs(payload, expected_offset=payload.get("offset", -1))
+        print(logs["text"], end="")
+    elif name in {"job_run", "job_image"}:
+        print(_render_job_submission(payload))
     elif name == "doctor":
         version = payload["protocol"]
         print(_line("IPC", f"compatible ({version['major']}.{version['minor']})"))
@@ -515,6 +657,26 @@ def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
         if args.action in {"build", "restart"}:
             return send(args.socket, "compose", project_id=args.project_id,
                         action=args.action), "compose_" + args.action
+    if args.command == "job":
+        if args.action == "list":
+            return send(args.socket, "jobs", project_id=args.project_id), "job_list"
+        if args.action == "show":
+            return send(args.socket, "job", project_id=args.project_id,
+                        id=args.id), "job_show"
+        if args.action == "logs":
+            return send(args.socket, "job_logs", project_id=args.project_id,
+                        id=args.id, offset=args.offset), "job_logs"
+        if args.action == "cancel":
+            return send(args.socket, "job_cancel", project_id=args.project_id,
+                        id=args.id), "job_cancel"
+        if args.action in {"run", "image"}:
+            return send(
+                args.socket, "adhoc", project_id=args.project_id,
+                kind=args.action, service=args.target if args.action == "run" else "",
+                image=args.target if args.action == "image" else "",
+                network=args.network if args.action == "image" else "none",
+                command=args.command_argv,
+            ), "job_" + args.action
     if args.command == "runtime":
         if args.action == "operations":
             return send(args.socket, "transition_list"), "transition_list"
@@ -526,9 +688,33 @@ def _dispatch(args: argparse.Namespace) -> tuple[object, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    raw = list(argv if argv is not None else sys.argv[1:])
+    cli_parser = parser()
+    # Ad-hoc command argv is never parsed as host/DevStack flags. A literal
+    # separator is required; it preserves arguments like '-c' and '--version'.
+    suffix = None
+    if "--" in raw:
+        boundary = raw.index("--")
+        candidate = cli_parser.parse_args(raw[:boundary])
+        if candidate.command != "job" or candidate.action not in {"run", "image"}:
+            cli_parser.error("'--' is only supported for ad-hoc job commands")
+        suffix = raw[boundary + 1:]
+        args = candidate
+    else:
+        args = cli_parser.parse_args(raw)
+    if args.command == "job" and args.action in {"run", "image"}:
+        if not suffix or len(suffix) > 64 or any(
+                not part or "\x00" in part for part in suffix
+        ) or sum(len(part) for part in suffix) > 4096:
+            cli_parser.error("ad-hoc jobs need -- followed by 1–64 bounded argv items")
+        args.command_argv = suffix
     key = args.request_key if _is_transition(args) else None
     try:
+        if args.command == "job" and args.action == "logs" and args.follow:
+            ensure_compatible(args.socket)
+            _follow_job_logs(args.socket, args.project_id, args.id, args.offset,
+                             use_json=args.json)
+            return 0
         payload, name = _dispatch(args)
         if name == "transition_result":
             name = "status"
