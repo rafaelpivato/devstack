@@ -223,15 +223,24 @@ class ProjectRuntimeCLITests(unittest.TestCase):
         self.assertEqual(code, 130)
         self.assertIn("outcome is unknown", err)
 
-    def test_transition_timeout_is_explicit(self):
+    def test_transition_returns_receipt_and_uses_bounded_ipc(self):
+        receipt = {
+            "id": str(uuid4()), "status": "succeeded",
+            "result": {"phase": "active", "project_id": self.a.id},
+        }
         with (patch.object(cli, "ensure_compatible",
-                           return_value={"major": 1, "minor": 0}),
-              patch.object(cli, "send",
-                           return_value={"phase": "active", "project_id": self.a.id}) as send):
+                           return_value={"major": 1, "minor": 1}) as compat,
+              patch.object(cli, "send", return_value=receipt) as sender):
             code, out, err = self.run_cli("project", "activate", self.a.id)
         self.assertEqual(code, 0, err)
-        self.assertEqual(send.call_args.kwargs["timeout"], cli.TRANSITION_TIMEOUT)
-        self.assertGreaterEqual(cli.TRANSITION_TIMEOUT, 300)
+        self.assertIn("Runtime: active", out)
+        self.assertEqual(sender.call_args.args[1], "transition_submit")
+        self.assertEqual(sender.call_args.kwargs["timeout"], cli.RECEIPT_TIMEOUT)
+        self.assertEqual(sender.call_args.kwargs["action"], "activate")
+        self.assertEqual(sender.call_args.kwargs["project_id"], self.a.id)
+        self.assertEqual(compat.call_args.kwargs["minimum_minor"], 1)
+        self.assertIn("transition request key", err)
+        self.assertLess(cli.RECEIPT_TIMEOUT, 30)
 
 
 if __name__ == "__main__":
