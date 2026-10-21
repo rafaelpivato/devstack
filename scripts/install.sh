@@ -134,6 +134,13 @@ if ! python3 /usr/local/lib/devstack/updater.py --tag "$release_tag"; then
   echo "Release health checks failed; inspect devstack-control and devstack-web-v2 journals." >&2
   exit 1
 fi
+# Never guess which cloud SSH user should be granted full DevStack admin.
+# Operators may opt in explicitly at provisioning time or via the setup
+# command after logging into a released installation.
+if [[ -n "${DEVSTACK_CLI_OPERATOR:-}" ]]; then
+  /opt/devstack/current/venv/bin/python -m devstack.cli.install \
+    --user "$DEVSTACK_CLI_OPERATOR"
+fi
 systemctl enable --now devstack-update.timer
 systemctl enable --now devstack-update-request.path
 echo "DevStack $release_tag ready; dashboard is private at http://127.0.0.1:8765."

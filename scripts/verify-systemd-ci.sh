@@ -9,6 +9,8 @@ fi
 
 web=devstack-ci-web
 controller=devstack-ci-control
+operator=devstack-ci-operator
+guest=devstack-ci-guest
 ipc=devstack-ci-ipc
 state=/var/lib/devstack-ci
 socket=/run/devstack-control-ci/control.sock
@@ -39,6 +41,13 @@ useradd --system --no-create-home --gid "$ipc" \
 useradd --system --no-create-home --user-group \
   --shell /usr/sbin/nologin "$controller"
 usermod -aG docker "$controller"
+useradd --no-create-home --shell /bin/bash "$operator"
+useradd --no-create-home --shell /bin/bash "$guest"
+usermod -aG "$ipc" "$operator"
+if id -nG "$operator" | tr ' ' '\n' | grep -qx docker; then
+  echo "Security violation: CLI operator has Docker group membership" >&2
+  exit 1
+fi
 if id -nG "$web" | tr ' ' '\n' | grep -qx docker; then
   echo "Web service user has Docker privileges" >&2
   exit 1
@@ -158,6 +167,59 @@ else:
     raise AssertionError("Web account unexpectedly connected to Docker socket")
 print("Web identity has scoped project IPC but no database, Docker or shell control")
 PY
+
+# Real Linux-user isolation for the new native CLI, not just mocked IPC.
+operator_json="$(runuser -u "$operator" -- "$root/venv/bin/dev" \
+  --socket "$socket" --json status)"
+printf '%s' "$operator_json" | python3 -c \
+  'import json,sys; assert json.load(sys.stdin)["phase"] == "inactive"'
+runuser -u "$operator" -- "$root/venv/bin/dev" \
+  --socket "$socket" doctor | grep -q 'IPC: compatible'
+if runuser -u "$operator" -- test -r "$state/control.sqlite3"; then
+  echo "Security violation: authorized CLI user can read control DB" >&2
+  exit 1
+fi
+if runuser -u "$operator" -- test -r /var/run/docker.sock; then
+  echo "Security violation: authorized CLI user can read Docker socket" >&2
+  exit 1
+fi
+if runuser -u "$guest" -- "$root/venv/bin/dev" --socket "$socket" status \
+    >/tmp/devstack-ci-cli-guest.out 2>/tmp/devstack-ci-cli-guest.err; then
+  echo "Security violation: unauthorized CLI user reached controller" >&2
+  exit 1
+else
+  status=$?
+  if [[ "$status" != 77 ]]; then
+    echo "Wrong CLI denial exit code: $status" >&2
+    exit 1
+  fi
+fi
+test ! -s /tmp/devstack-ci-cli-guest.out
+grep -q 'access denied' /tmp/devstack-ci-cli-guest.err
+# Unit-test stable symlink logic with a private collision path, avoiding
+# arbitrary changes to /usr/local/bin on a shared GitHub runner.
+ln -s "$root" "$root/current"
+ci_link_dir="$(mktemp -d)"
+"$root/venv/bin/python" - "$root" "$ci_link_dir" <<'PY'
+import pathlib, sys
+from devstack.cli.install import CLIInstallError, install_command
+root = pathlib.Path(sys.argv[1])
+dest = pathlib.Path(sys.argv[2]) / "dev"
+assert install_command(root, dest)
+assert not install_command(root, dest)
+assert dest.is_symlink() and dest.resolve() == (root / "venv/bin/dev").resolve()
+collision = dest.with_name("collision")
+collision.write_text("leave untouched")
+try:
+    install_command(root, collision)
+except CLIInstallError:
+    pass
+else:
+    raise AssertionError("An unrelated executable was replaced")
+assert collision.read_text() == "leave untouched"
+PY
+rm -rf "$ci_link_dir"
+echo "Native CLI operator group access, guest denial, and wrapper safety: PASS"
 
 # systemd restart must reconcile without activating stored projects.
 systemctl restart devstack-ci-control.service
