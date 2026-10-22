@@ -19,6 +19,9 @@ jobs:
       - name: Install locked dependencies
         working-directory: frontend
         run: npm ci --ignore-scripts
+      - name: Reject vulnerable frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=low
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
