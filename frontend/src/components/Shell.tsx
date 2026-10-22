@@ -6,7 +6,10 @@ import { PREVIEW_ROOT } from "../navigation/routes";
 export function Shell({title, subtitle, navigation, children, back, badge}:PropsWithChildren<{
   title:string; subtitle?:string; navigation:Navigator; back?:boolean; badge?:ReactNode;
 }>) {
+  const heading=useRef<HTMLHeadingElement>(null);
+  useEffect(()=>{heading.current?.focus({preventScroll:true});},[]);
   return <div className="app-shell">
+    <a href="#content" className="skip-link">Skip to content</a>
     <header className="app-header">
       <div className="topline">
         {back && <button type="button" className="icon-button" aria-label="Back" onClick={navigation.back}>‹</button>}
