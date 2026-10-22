@@ -5,6 +5,7 @@ separately permissioned state directories. No journal access or user payloads.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import time
@@ -25,10 +26,11 @@ class DiagnosticStore:
     def __init__(self, path: Path):
         self.path = Path(path)
 
+    @contextmanager
     def _connect(self):
         if self.path.is_symlink() or (self.path.exists() and not self.path.is_file()):
             raise RuntimeError("Unsafe diagnostics store")
-        if not self.path.parent.is_dir():
+        if self.path.parent.is_symlink() or not self.path.parent.is_dir():
             raise RuntimeError("Diagnostics directory unavailable")
         con = sqlite3.connect(str(self.path), timeout=5, isolation_level=None)
         try:
@@ -37,10 +39,11 @@ class DiagnosticStore:
                 id INTEGER PRIMARY KEY, at_ns INTEGER NOT NULL,
                 source TEXT NOT NULL, level TEXT NOT NULL, code TEXT NOT NULL)""")
             self.path.chmod(0o600)
-            return con
-        except Exception:
+            yield con
+            if con.in_transaction:
+                con.commit()
+        finally:
             con.close()
-            raise
 
     def record(self, source: str, code: str, level: str = "info"):
         if source not in SOURCES or code not in CODES or level not in LEVELS:
