@@ -110,18 +110,23 @@ export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navi
     finally{setBusy(false);}
   };
   return <Shell title="Published updates" navigation={navigation} back>
-    <Notice title="Safe release updater">Uses the existing system updater, not arbitrary Git or shell commands. The runtime must be inactive. The host independently rechecks these conditions.</Notice>
+    <Notice title="Safe release updater">Checking published versions is always read-only, even with an active project. Installing a release requires an inactive runtime; the host independently rechecks this.</Notice>
     {state.kind==="loading"&&<Skeleton/>}
     {state.kind==="error"&&<Notice title="Update status unavailable" role="alert">{state.error.message}</Notice>}
     {data&&<section className="card">
       <div className="property"><span>Installed</span><strong>{data.installed}</strong></div>
       <div className="property"><span>Published</span><strong>{data.latest??"Not checked"}</strong></div>
       <div className="property"><span>Update available</span><strong>{data.update_available?"Yes":"Not confirmed"}</strong></div>
-      {data.check_error&&<p className="text-muted">{data.check_error}</p>}
-      {data.update!==null&&<p className="text-muted">System updater state is available from the existing release service.</p>}
+      {data.check_error&&<p role="alert">Release check failed: {data.check_error}</p>}
+      {data.update&&<details className="technical-details" open><summary>System updater status</summary>
+        <div className="property"><span>Phase</span><strong>{data.update.phase}</strong></div>
+        <div className="property"><span>Unit</span><strong>{data.update.unit_state}</strong></div>
+        <div className="property"><span>Last result</span><strong>{data.update.last_result}</strong></div>
+        <div className="property"><span>Exit code</span><code>{data.update.last_exit_code||"not available"}</code></div>
+      </details>}
     </section>}
     <button className="text-button" type="button" onClick={()=>{setCheck(true);setSerial(x=>x+1);}}>
-      Check published releases</button>
+      Check published releases (read only)</button>
     {!editable(runtime)&&<Notice title="Runtime must be inactive">Deactivate the active project before requesting a DevStack release update.</Notice>}
     {data?.update_available&&<label className="confirm-label">
       <input type="checkbox" checked={confirmation} onChange={e=>setConfirmation(e.target.checked)}/>
