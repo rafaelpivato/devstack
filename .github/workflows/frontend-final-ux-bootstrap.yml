@@ -18,6 +18,8 @@ jobs:
         working-directory: frontend
         run: |
           npm ci --ignore-scripts
+          npm audit fix --ignore-scripts
+          npm audit --audit-level=low
           npm audit --json > /tmp/devstack-npm-audit.json || true
           node -e "const a=require('/tmp/devstack-npm-audit.json'); console.log(JSON.stringify({counts:a.metadata?.vulnerabilities,packages:Object.entries(a.vulnerabilities||{}).map(([name,v])=>({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable}))},null,2))"
           npm audit --omit=dev
@@ -27,6 +29,7 @@ jobs:
       - name: Commit immutable assets
         run: |
           git add -f src/devstack/static/v06/manifest.json src/devstack/static/v06/assets
+          git add frontend/package.json frontend/package-lock.json
           git add -u src/devstack/static/v06
           if git diff --cached --quiet; then exit 0; fi
           git config user.name "github-actions[bot]"
