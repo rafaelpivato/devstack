@@ -77,6 +77,12 @@ describe("runtime-defined landing and non-mutating project browsing",()=>{
     expect(html).not.toContain("Running");
     expect(navigator.navigate).not.toHaveBeenCalled();
   });
+  it("offers create/import from an entirely empty registry",()=>{
+    const html=renderToStaticMarkup(<Entry
+      runtime={{phase:"inactive",project_id:null}} projects={[]} navigation={navigator}/>);
+    expect(html).toContain("Create or import project");
+    expect(html).toContain(PREVIEW_ROOT+"/projects");
+  });
   it("does not reinterpret transition or error as inactive",()=>{
     for(const phase of ["activating","deactivating","switching","error"] as const){
       const html=renderToStaticMarkup(<Entry runtime={{phase,project_id:A}} projects={projects} navigation={navigator}/>);
