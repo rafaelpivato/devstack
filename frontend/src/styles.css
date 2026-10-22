@@ -135,3 +135,14 @@ textarea, input, select {font-size:16px}
  .item-link,.item-static{gap:9px;padding:12px 10px}
  .status{white-space:normal;text-align:right}
 }
+
+/* Global Administration is reachable on every screen; preserve 44px targets at 320px. */
+.admin-shortcut{display:inline-flex;align-items:center;justify-content:center;flex:0 0 44px;
+ min-width:44px;min-height:44px;border:1px solid var(--line);border-radius:10px;
+ color:var(--text);font-size:1.3rem;text-decoration:none}
+.admin-shortcut:hover,.admin-shortcut[aria-current="page"]{background:var(--card);text-decoration:none}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+ clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.topline{min-width:0;flex-wrap:wrap}
+.global-projects{margin-left:auto;min-height:44px}
+@media(max-width:360px){.topline{gap:6px}.wordmark{font-size:1rem}.brand-mark{margin-right:3px}}
