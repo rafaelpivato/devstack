@@ -203,7 +203,7 @@ export function RuntimeActionScreen({action,projectId,runtime,projects,navigatio
         {copyFeedback&&<p role="status">{copyFeedback}</p>}
       </details>
       {finalReceipt&&<button type="button" className="text-button" onClick={()=>{
-        finishPending(matched.id);setPending(null);setInspection(null);
+        if(matched)finishPending(matched.id);setPending(null);setInspection(null);
       }}>Dismiss resolved request</button>}
     </section>}
     {pendingElsewhere&&<Notice title="Another saved request exists" role="alert">
