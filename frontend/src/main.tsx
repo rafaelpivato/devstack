@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { watchAppearance } from "./lib/appearance";
 import { readRuntime, readProjects } from "./api/runtime";
 import { useResource } from "./hooks/useResource";
 import { Shell, Notice, Skeleton } from "./components/Shell";
@@ -19,6 +20,7 @@ import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
 export function App() {
+  useEffect(watchAppearance,[]);
   const navigation=useNavigation();
   const loadRuntime=useCallback(readRuntime,[]);
   const loadProjects=useCallback(readProjects,[]);
