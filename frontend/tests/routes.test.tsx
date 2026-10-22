@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import {Shell} from "../src/components/Shell";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Entry, ProjectDirectory } from "../src/features/projects/ProjectScreens";
 import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl, routeFor } from "../src/navigation/routes";
@@ -12,6 +13,18 @@ const projects:ProjectSummary[] = [
 ];
 const navigator={route:{kind:"entry"},navigate:vi.fn(),back:vi.fn()} as unknown as Navigator;
 
+describe("semantic and accessible shell",()=>{
+  it("provides a visible-on-focus skip link, focusable heading and main landmark",()=>{
+    const html=renderToStaticMarkup(<Shell title="Projects" navigation={navigator}>
+      <p>Nested content</p>
+    </Shell>);
+    expect(html).toContain('href="#content"');
+    expect(html).toContain('class="skip-link"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('<main');
+    expect(html).toContain('id="content"');
+  });
+});
 describe("project-scoped hierarchical routes",()=>{
   it("keeps stable UUIDs in routes and parent hierarchy",()=>{
     expect(routeFor(PREVIEW_ROOT)).toEqual({kind:"entry"});
@@ -63,6 +76,12 @@ describe("runtime-defined landing and non-mutating project browsing",()=>{
     expect(html).toContain(PREVIEW_ROOT+"/projects");
     expect(html).not.toContain("Running");
     expect(navigator.navigate).not.toHaveBeenCalled();
+  });
+  it("offers create/import from an entirely empty registry",()=>{
+    const html=renderToStaticMarkup(<Entry
+      runtime={{phase:"inactive",project_id:null}} projects={[]} navigation={navigator}/>);
+    expect(html).toContain("Create or import project");
+    expect(html).toContain(PREVIEW_ROOT+"/projects");
   });
   it("does not reinterpret transition or error as inactive",()=>{
     for(const phase of ["activating","deactivating","switching","error"] as const){

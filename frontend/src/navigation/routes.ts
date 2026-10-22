@@ -1,9 +1,17 @@
 /** Navigation is presentation state, never the global active runtime. */
 export const PREVIEW_ROOT = "/__v06";
+export const GLOBAL_PROJECTS_URL=PREVIEW_ROOT+"/projects";
+export const CREATE_PROJECT_URL=GLOBAL_PROJECTS_URL+"/create";
+export const IMPORT_PROJECT_URL=GLOBAL_PROJECTS_URL+"/import";
+export function importReceiptUrl(id:string):string {
+  if(!isProjectId(id))throw new Error("Invalid import operation");
+  return PREVIEW_ROOT+"/imports/"+id;
+}
 export const LANES = ["repositories", "services", "jobs", "applications", "configuration"] as const;
 export type Lane = typeof LANES[number];
 export type AppRoute =
   | {kind: "entry"} | {kind:"projects"}
+  | {kind:"project-create"} | {kind:"project-import"} | {kind:"project-import-receipt"; operationId:string}
   | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"}
   | {kind:"config-detail";projectId:string;screen:"compose"|"definitions"|"webhooks"|"name"}
   | {kind:"project"; projectId:string}
@@ -78,6 +86,12 @@ export function configUrl(id:string,screen:"compose"|"definitions"|"webhooks"|"n
   return laneUrl(id,"configuration")+"/"+screen;
 }
 export function routeFor(pathname: string): AppRoute {
+  if(pathname===CREATE_PROJECT_URL)return {kind:"project-create"};
+  if(pathname===IMPORT_PROJECT_URL)return {kind:"project-import"};
+  if(pathname.startsWith(PREVIEW_ROOT+"/imports/")){
+    const id=pathname.slice((PREVIEW_ROOT+"/imports/").length);
+    return isProjectId(id)?{kind:"project-import-receipt",operationId:id}:{kind:"not-found"};
+  }
   if(pathname===ADMIN_ROOT)return {kind:"administration"};
   if(pathname===adminUrl("ssh"))return {kind:"admin-detail",screen:"ssh"};
   if(pathname===adminUrl("updates"))return {kind:"admin-detail",screen:"updates"};
@@ -128,6 +142,8 @@ export function routeFor(pathname: string): AppRoute {
 /** Used only for a fresh deep link; a user-initiated Back follows browser history. */
 export function parentUrl(route: AppRoute): string {
   switch (route.kind) {
+    case "project-create":case "project-import":return GLOBAL_PROJECTS_URL;
+    case "project-import-receipt":return IMPORT_PROJECT_URL;
     case "administration":return PREVIEW_ROOT+"/projects";
     case "admin-detail":return ADMIN_ROOT;
     case "config-detail":return laneUrl(route.projectId,"configuration");

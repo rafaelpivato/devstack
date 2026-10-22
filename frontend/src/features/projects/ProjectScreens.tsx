@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { readProject, type ProjectDetail } from "../../api/projects";
 import type { ProjectSummary, RuntimeSnapshot } from "../../api/runtime";
 import { useResource } from "../../hooks/useResource";
-import { isProjectId, laneUrl, projectUrl, type Lane } from "../../navigation/routes";
+import { isProjectId, laneUrl, projectUrl, CREATE_PROJECT_URL, IMPORT_PROJECT_URL, type Lane } from "../../navigation/routes";
 import type { Navigator } from "../../navigation/useNavigation";
 import { GLOBAL_PROJECTS, OldDashboardLink } from "../../navigation/useNavigation";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
@@ -28,8 +28,9 @@ export function Entry({runtime, projects, navigation}:{
   if(runtime.phase==="inactive" && runtime.project_id===null)
     return <Shell title="No active project" navigation={navigation}>
       <Notice title="Choose a project">Activation is explicit. Browsing a project will not start it.</Notice>
-      {projects.length===0 ? <p className="text-muted">No projects registered yet. <OldDashboardLink>Create or import a project</OldDashboardLink>.</p> :
-        <ItemLink icon="▤" title="Select project" detail={projects.length+" available"} href={GLOBAL_PROJECTS} navigation={navigation}/>}
+      <ItemLink icon="▤" title={projects.length===0?"Create or import project":"Select project"}
+        detail={projects.length===0?"No projects registered yet":projects.length+" available"}
+        href={GLOBAL_PROJECTS} navigation={navigation}/>
     </Shell>;
   if(runtime.phase!=="active" || !runtime.project_id || !isProjectId(runtime.project_id))
     return <Shell title="Runtime status" navigation={navigation}>
@@ -62,8 +63,12 @@ export function ProjectDirectory({projects,runtime,navigation}:{
         href={projectUrl(project.id)} navigation={navigation}
         suffix={runtime.phase==="active" && runtime.project_id===project.id
           ? <Status text="Active" kind="positive"/> : undefined}/>)}</div>
-    {projects.length===0 && <Notice title="No projects">Use the current dashboard to create or import your first project.</Notice>}
-    <p className="actions"><OldDashboardLink>Create or import project (current UI) ↗</OldDashboardLink></p>
+    {projects.length===0 && <Notice title="No projects">Create an empty project or import one from GitHub.</Notice>}
+    <div className="section-head">Add a project</div>
+    <div className="item-group">
+      <ItemLink icon="＋" title="Create empty project" href={CREATE_PROJECT_URL} navigation={navigation}/>
+      <ItemLink icon="⑂" title="Import from GitHub" href={IMPORT_PROJECT_URL} navigation={navigation}/>
+    </div>
     <div className="section-head">DevStack</div>
     <div className="item-group"><ItemLink icon="⚙" title="Administration"
       detail="GitHub SSH and published updates" href={ADMIN_ROOT} navigation={navigation}/></div>

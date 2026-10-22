@@ -227,6 +227,9 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         valid = (
             not segments or
             segments == ["projects"] or
+            segments in (["projects","create"],["projects","import"]) or
+            (len(segments)==2 and segments[0]=="imports" and
+             re.fullmatch(pattern,segments[1],re.IGNORECASE) is not None) or
             segments == ["administration"] or
             segments in (["administration", "ssh"], ["administration", "updates"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
