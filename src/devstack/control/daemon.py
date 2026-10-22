@@ -304,12 +304,23 @@ class _Handler(socketserver.StreamRequestHandler):
             if not isinstance(data, dict):
                 raise ProtocolError("Expected a JSON object")
             result = self.server.controller.handle(data)
-            if isinstance(data, dict) and data.get("op") in (
-                    "transition_submit", "reconcile", "project_create",
-                    "import_submit", "repository_bulk_submit", "repository_add_submit",
-                    "branch_apply", "repository_update", "compose", "adhoc", "task"):
+            # Only static event names, never project names, argv, keys or stdout.
+            codes = {
+                "transition_submit": "runtime-request",
+                "reconcile": "runtime-reconcile",
+                "project_create": "project-create",
+                "import_submit": "project-import",
+                "repository_update": "repository-update",
+                "repository_add_submit": "repository-add",
+                "repository_bulk_submit": "repository-bulk-update",
+                "branch_apply": "repository-branch",
+                "compose": "compose-operation", "adhoc": "job-submit",
+                "task": "job-submit",
+            }
+            if isinstance(data, dict) and data.get("op") in codes:
                 try:
-                    self.server.controller.diagnostics.record("controller", "controller-action")
+                    self.server.controller.diagnostics.record(
+                        "controller", codes[data["op"]])
                 except Exception:
                     pass  # Recording must not change operation outcomes.
             response = {"ok": True, "result": result}

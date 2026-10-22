@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import secrets
 import re
+import sqlite3
 from datetime import datetime, timezone
 
 from flask import (
@@ -65,6 +66,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
                 source, code, level)
         except Exception:
             pass  # Diagnostics failure never elevates privileges or alters requests.
+
+    record_web("web-started")
 
     @app.after_request
     def record_http_failure(response):
@@ -224,7 +227,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             events.extend(data["events"])
             truncated = truncated or data["truncated"]
             sources["web"] = "available"
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
             pass
         safe_update = None
         try:

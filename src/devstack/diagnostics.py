@@ -13,7 +13,10 @@ import time
 SOURCES = frozenset({"controller", "web", "updater"})
 CODES = frozenset({
     "controller-started", "controller-stopping", "controller-action", "controller-error",
-    "web-error", "web-update-check", "web-update-check-failed",
+    "runtime-request", "runtime-reconcile", "project-create", "project-import",
+    "repository-update", "repository-add", "repository-bulk-update", "repository-branch",
+    "compose-operation", "job-submit",
+    "web-started", "web-error", "web-update-check", "web-update-check-failed",
     "web-update-request", "web-update-rejected",
 })
 LEVELS = frozenset({"info", "warning", "error"})
