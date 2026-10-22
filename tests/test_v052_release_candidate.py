@@ -11,7 +11,7 @@ class V052ReleaseCandidateTests(unittest.TestCase):
     def test_version_matches_release_notes(self):
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
         version = metadata["project"]["version"]
-        self.assertRegex(version, r"^[0-9]+\\.[0-9]+\\.[0-9]+$")
+        self.assertRegex(version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
         self.assertGreaterEqual(tuple(map(int,version.split("."))),(0,5,2))
         release = ROOT / "docs" / "releases" / f"v{version}.md"
         self.assertTrue(release.is_file())
