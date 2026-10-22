@@ -112,9 +112,11 @@ export function JobLogs({id,jobId,navigation}:{
     <p className="text-muted">Controller-paged output (max 2 MiB). No interactive terminal.</p>
     {error&&<ReadError message={error}/>}
     <TextLog label="Paged job output" text={text}/>
-    <CopyLog value={text}/>
-    {!complete&&<button className="text-button" type="button" disabled={loading||offset>=2*1024*1024}
-      onClick={()=>void fetchPage()}>{loading?"Loading…":"Load new output"}</button>}
+    <div className="log-actions">
+      <CopyLog value={text}/>
+      {!complete&&<button className="text-button" type="button" disabled={loading||offset>=2*1024*1024}
+        onClick={()=>void fetchPage()}>{loading?"Loading…":"Load new output"}</button>}
+    </div>
     {complete&&<Notice title="Output complete">The controller marked the job output complete.</Notice>}
     <p className="text-muted">Read offset: {offset} bytes</p>
   </WorkloadShell>;

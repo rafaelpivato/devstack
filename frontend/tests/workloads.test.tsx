@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from "react-dom/server";
 import {apiRequest} from "../src/api/client";
 import {isPrivateApplicationUrl} from "../src/api/workloads";
 import {canOperate} from "../src/features/workloads/WorkloadShared";
-import {cancellable} from "../src/features/workloads/JobScreens";
+import {cancellable,JobLogs} from "../src/features/workloads/JobScreens";
 import {ApplicationsScreen} from "../src/features/workloads/ApplicationScreens";
 import {jobUrl,jobLogsUrl,jobsRunUrl,isContainerId,serviceUrl,routeFor,parentUrl,laneUrl} from "../src/navigation/routes";
 import type {Navigator} from "../src/navigation/useNavigation";
@@ -35,6 +35,15 @@ describe("workload navigation",()=>{
     runtime={runtime("active",B)} navigation={nav}/>);
   expect(html).toContain("Not the active project");
   expect(nav.navigate).not.toHaveBeenCalled();
+ });
+});
+describe("mobile job output controls",()=>{
+ it("keeps Copy and Load in a spaced, wrapping action group",()=>{
+   const html=renderToStaticMarkup(<JobLogs id={A} jobId={B} navigation={nav}/>);
+   expect(html).toContain('class="log-actions"');
+   expect(html).toContain('class="copy-log-control"');
+   expect(html).toContain("Copy output");
+   expect(html).toContain("Load new output");
  });
 });
 describe("private application URLs",()=>{

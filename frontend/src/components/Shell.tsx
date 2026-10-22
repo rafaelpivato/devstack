@@ -13,7 +13,7 @@ export function Shell({title, subtitle, navigation, children, back, badge}:Props
     <header className="app-header">
       <div className="topline">
         {back && <button type="button" className="icon-button" aria-label="Back" onClick={navigation.back}>‹</button>}
-        <span className="wordmark"><span aria-hidden="true" className="brand-mark">▤</span> DevStack</span>
+        <NavLink to={PREVIEW_ROOT} navigate={navigation.navigate} className="wordmark"><span aria-hidden="true" className="brand-mark">▤</span> DevStack</NavLink>
         <NavLink to={GLOBAL_PROJECTS} navigate={navigation.navigate} className="global-projects">Projects</NavLink>
       </div>
       <div className="page-heading"><h1 tabIndex={-1} ref={heading}>{title}</h1>{badge}</div>
@@ -28,11 +28,11 @@ export function Shell({title, subtitle, navigation, children, back, badge}:Props
   </div>;
 }
 
-export function ItemLink({icon, title, detail, suffix, href, navigation}:{
-  icon:string; title:string; detail?:string; suffix?:ReactNode; href:string; navigation:Navigator;
+export function ItemLink({icon, title, detail, suffix, href, navigation, tone}:{
+  icon:string; title:string; detail?:string; suffix?:ReactNode; href:string; navigation:Navigator; tone?:"blue"|"amber";
 }) {
   return <NavLink to={href} navigate={navigation.navigate} className="item-link">
-    <span className="item-icon" aria-hidden="true">{icon}</span>
+    <span className={"item-icon"+(tone?" item-icon--"+tone:"")} aria-hidden="true">{icon}</span>
     <span className="item-text"><strong>{title}</strong>{detail && <small>{detail}</small>}</span>
     {suffix && <span className="item-suffix">{suffix}</span>}
     <span aria-hidden="true" className="chevron">›</span>

@@ -36,7 +36,7 @@ export function CopyLog({value}:{value:string}) {
       setFeedback("Copied to clipboard");
     }catch{setFeedback("Clipboard unavailable; select and copy the visible output.");}
   };
-  return <span>
+  return <span className="copy-log-control">
     <button className="text-button" type="button" disabled={!value} onClick={()=>void copy()}>Copy output</button>
     {feedback&&<span className="text-muted" role="status">{feedback}</span>}
   </span>;
