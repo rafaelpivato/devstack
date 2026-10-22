@@ -12,7 +12,9 @@ export interface WebhookList {webhooks:WebhookRoute[]}
 export interface GitHubIdentity {public_key:string|null}
 export interface GitHubTestResult {authenticated_user:string}
 export interface ReleaseStatus {
-  installed:string;latest:string|null;update_available:boolean;update:unknown;check_error:string|null;
+  installed:string;latest:string|null;update_available:boolean;
+  update:{phase:string;unit_state:string;last_result:string;last_exit_code:string}|null;
+  check_error:string|null;
 }
 export const readCompose=(id:string,signal?:AbortSignal)=>
   apiRequest<ComposeDocument>(project(id)+"/compose",{signal});

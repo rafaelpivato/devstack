@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 import secrets
 import re
+import sqlite3
+from datetime import datetime, timezone
 
 from flask import (
     Flask, abort, flash, jsonify, redirect, render_template, request,
@@ -19,9 +21,10 @@ from flask import (
 from werkzeug.exceptions import HTTPException
 
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
+from devstack.diagnostics import DiagnosticStore, MAX_EVENTS
 from devstack.update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
-    request_update,
+    request_update, updater_service_events,
 )
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
@@ -40,6 +43,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         SESSION_COOKIE_SAMESITE="Strict",
         SESSION_COOKIE_SECURE=os.environ.get("DEVSTACK_SECURE_COOKIES", "1") == "1",
         MAX_CONTENT_LENGTH=64 * 1024,
+        WEB_DIAGNOSTICS_PATH=os.environ.get(
+            "DEVSTACK_WEB_DIAGNOSTICS_PATH", "/var/lib/devstack-web/diagnostics.sqlite3"),
         CONTROLLER_SOCKET=os.environ.get(
             "DEVSTACK_CONTROL_SOCKET", "/run/devstack-control/control.sock"),
     )
@@ -54,6 +59,21 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
                    else 60 if op == "github_ssh_test" else 30)
         return send(Path(app.config["CONTROLLER_SOCKET"]), op,
                     timeout=timeout, **fields)
+
+    def record_web(code: str, *, source: str = "web", level: str = "info"):
+        try:
+            DiagnosticStore(Path(app.config["WEB_DIAGNOSTICS_PATH"])).record(
+                source, code, level)
+        except Exception:
+            pass  # Diagnostics failure never elevates privileges or alters requests.
+
+    record_web("web-started")
+
+    @app.after_request
+    def record_http_failure(response):
+        if response.status_code >= 400 and request.path.startswith("/api/v2/"):
+            record_web("web-error", level="error" if response.status_code >= 500 else "warning")
+        return response
 
     def csrf() -> str:
         if "_csrf" not in session:
@@ -122,9 +142,11 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         latest = None
         error = None
         if check_latest:
+            record_web("web-update-check", source="updater")
             try:
                 latest = latest_version()
             except UpdateControlError:
+                record_web("web-update-check-failed", source="updater", level="warning")
                 error = "Unable to check published GitHub releases."
         newer = (
             latest is not None and
@@ -145,7 +167,9 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         if tuple(map(int, latest[1:].split("."))) <= tuple(
                 map(int, installed[1:].split("."))):
             raise UpdateControlError("Already on the latest published release.")
-        return request_update()
+        result = request_update()
+        record_web("web-update-request", source="updater")
+        return result
 
     @app.get("/devstack/updates")
     def devstack_updates():
@@ -179,6 +203,64 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             return jsonify({"ok": False, "message": str(exc)}), 409
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
+
+    @app.get("/api/v2/devstack/diagnostics")
+    def devstack_diagnostics_api():
+        """Private read-only aggregate: selected metadata, not host journald text."""
+        raw = request.args.get("minutes", "5")
+        if raw not in {"1", "5", "30"}:
+            return jsonify({"ok": False, "message": "Window must be 1, 5 or 30 minutes"}), 400
+        minutes = int(raw)
+        sources = {"controller": "unavailable", "runtime": "unavailable",
+                   "web": "unavailable", "updater": "unavailable"}
+        events = []
+        truncated = False
+        try:
+            result = call("diagnostics_snapshot", minutes=minutes)
+            events.extend(result["events"])
+            sources.update({k: result["sources"][k] for k in ("controller", "runtime")})
+            truncated = bool(result["truncated"])
+        except (ControllerUnavailable, ControllerRejected, KeyError, ValueError, TypeError):
+            pass
+        try:
+            data = DiagnosticStore(Path(app.config["WEB_DIAGNOSTICS_PATH"])).snapshot(minutes)
+            events.extend(data["events"])
+            truncated = truncated or data["truncated"]
+            sources["web"] = "available"
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            pass
+        safe_update = None
+        try:
+            data = update_state()
+            valid_phases = {"idle", "queued", "updating", "failed"}
+            valid_units = {"inactive", "active", "activating", "deactivating", "failed", "unknown"}
+            phase = data.get("phase", "unknown")
+            unit = data.get("unit_state", "unknown")
+            safe_update = {
+                "phase": phase if phase in valid_phases else "unknown",
+                "unit_state": unit if unit in valid_units else "unknown",
+                "last_result": re.sub(r"[^a-zA-Z0-9_-]", "", data.get("last_result", ""))[:40],
+                "last_exit_code": re.sub(r"[^0-9-]", "", data.get("last_exit_code", ""))[:8],
+            }
+            history = updater_service_events(minutes)
+            events.extend(history["events"])
+            sources["updater"] = "available" if history["available"] else "partial (status only)"
+        except (OSError, ValueError, TypeError):
+            sources["updater"] = "unavailable"
+        # Always sort chronologically and clearly report clipping/partial sources.
+        events = [event for event in events if isinstance(event, dict) and
+                  isinstance(event.get("at"), int)]
+        events.sort(key=lambda row: (row["at"], row.get("source", ""), row.get("code", "")))
+        if len(events) > MAX_EVENTS:
+            events = events[-MAX_EVENTS:]
+            truncated = True
+        return jsonify({
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "version": installed_version(), "minutes": minutes,
+            "events": events, "truncated": truncated,
+            "sources": sources, "updater_status": safe_update,
+            "partial": any(value != "available" for value in sources.values()),
+        })
 
     @app.get("/healthz")
     def healthz():
@@ -231,7 +313,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             (len(segments)==2 and segments[0]=="imports" and
              re.fullmatch(pattern,segments[1],re.IGNORECASE) is not None) or
             segments == ["administration"] or
-            segments in (["administration", "ssh"], ["administration", "updates"]) or
+            segments in (["administration", "ssh"], ["administration", "updates"],
+                         ["administration", "diagnostics"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
                          ["runtime", "operations"]) or
             (len(segments) == 3 and segments[:2] == ["runtime", "operations"]

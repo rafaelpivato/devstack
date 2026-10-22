@@ -4,7 +4,7 @@ import { apiRequest } from "../src/api/client";
 import { validateCollection } from "../src/api/configuration";
 import { editable } from "../src/features/configuration/Common";
 import { ConfigurationHome } from "../src/features/configuration/ProjectConfiguration";
-import { AdministrationHome } from "../src/features/configuration/Administration";
+import { AdministrationHome, UpdatesScreen } from "../src/features/configuration/Administration";
 import { ADMIN_ROOT, adminUrl, configUrl, laneUrl, parentUrl, routeFor } from "../src/navigation/routes";
 import type { RuntimeSnapshot } from "../src/api/runtime";
 import type { Navigator } from "../src/navigation/useNavigation";
@@ -17,6 +17,7 @@ describe("configuration and admin lane",()=>{
     expect(parentUrl(routeFor(configUrl(A,"webhooks")))).toBe(laneUrl(A,"configuration"));
     expect(routeFor(ADMIN_ROOT)).toEqual({kind:"administration"});
     expect(routeFor(adminUrl("ssh"))).toEqual({kind:"admin-detail",screen:"ssh"});
+    expect(routeFor(adminUrl("diagnostics"))).toEqual({kind:"admin-detail",screen:"diagnostics"});
     expect(parentUrl(routeFor(adminUrl("updates")))).toBe(ADMIN_ROOT);
     expect(routeFor(configUrl(A,"compose")+"/shell")).toEqual({kind:"not-found"});
     expect(routeFor(ADMIN_ROOT+"/terminal")).toEqual({kind:"not-found"});
@@ -30,6 +31,9 @@ describe("configuration and admin lane",()=>{
     expect(html).toContain("View only");
     expect(nav.navigate).not.toHaveBeenCalled();
     expect(renderToStaticMarkup(<AdministrationHome navigation={nav}/>)).toContain("Secondary controls");
+    const noController=renderToStaticMarkup(<UpdatesScreen runtime={null} navigation={nav}/>);
+    expect(noController).toContain("Controller state unavailable");
+    expect(noController).toContain("disabled");
   });
   it("requires full arrays and exact properties before collection writes",()=>{
     expect(validateCollection({applications:[],tasks:[]})).toBe(true);

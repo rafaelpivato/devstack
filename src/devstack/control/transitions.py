@@ -132,6 +132,31 @@ class TransitionSupervisor:
             ).fetchall()
         return {"operations": [self._visible(row) for row in rows]}
 
+    def diagnostics(self, minutes: int, limit: int = 60) -> dict:
+        """Allowlisted receipt fields only; never disclose request keys or output."""
+        if type(minutes) is not int or minutes not in (1, 5, 30):
+            raise ValueError("Unsupported diagnostic window")
+        cutoff = time.time_ns() - minutes * 60 * 1_000_000_000
+        with self._transaction() as con:
+            rows = con.execute(
+                "SELECT id,action,status,error_code,started_ns,finished_ns "
+                "FROM transitions WHERE started_ns>=? OR finished_ns>=? "
+                "ORDER BY COALESCE(finished_ns,started_ns) DESC LIMIT ?",
+                (cutoff, cutoff, limit + 1),
+            ).fetchall()
+        result = []
+        for row in rows[:limit]:
+            result.append({
+                "at": (row["finished_ns"] or row["started_ns"]) // 1_000_000,
+                "source": "runtime",
+                "level": "error" if row["status"] in ("failed", "interrupted") else "info",
+                "code": "transition-" + row["status"],
+                "operation_id": row["id"],
+                "action": row["action"],
+                "error_code": row["error_code"] or None,
+            })
+        return {"events": result, "truncated": len(rows) > limit}
+
     def submit(self, action: str, target: str | None, key: str) -> dict:
         if action not in ACTIONS:
             raise TransitionConflict("Unrecognized transition action")

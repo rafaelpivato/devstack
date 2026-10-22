@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { watchAppearance } from "./lib/appearance";
 import { readRuntime, readProjects } from "./api/runtime";
 import { useResource } from "./hooks/useResource";
 import { Shell, Notice, Skeleton } from "./components/Shell";
@@ -14,16 +15,24 @@ import { JobsScreen, JobDetail, JobLogs, RunJob } from "./features/workloads/Job
 import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor } from "./features/configuration/ProjectConfiguration";
 import { WebhookEditor } from "./features/configuration/WebhookEditor";
 import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
+import {DiagnosticsScreen} from "./features/configuration/Diagnostics";
 import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
 import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
 export function App() {
+  useEffect(watchAppearance,[]);
   const navigation=useNavigation();
   const loadRuntime=useCallback(readRuntime,[]);
   const loadProjects=useCallback(readProjects,[]);
   const runtime=useResource(loadRuntime,8000);
   const projects=useResource(loadProjects,20000);
+  // Diagnostics must remain reachable with no active project or failed controller.
+  if(navigation.route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
+  if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="updates")
+    return <UpdatesScreen runtime={runtime.kind==="ready"?runtime.data:null} navigation={navigation}/>;
+  if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="diagnostics")
+    return <DiagnosticsScreen navigation={navigation}/>;
   if(navigation.route.kind==="not-found") return <Shell title="Page not found" navigation={navigation} back>
     <Notice title="Unknown page" role="alert">This URL is not a DevStack v0.6 screen.</Notice>
   </Shell>;
@@ -43,10 +52,8 @@ export function App() {
     action={route.action} projectId={null} runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="runtime-action") return <RuntimeActionScreen key={route.projectId+route.action}
     action={route.action} projectId={route.projectId} runtime={current} projects={list} navigation={navigation}/>;
-  if(route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
-  if(route.kind==="admin-detail")
-    return route.screen==="ssh"?<GitHubSSHScreen navigation={navigation}/>:
-      <UpdatesScreen runtime={current} navigation={navigation}/>;
+  if(route.kind==="admin-detail"&&route.screen==="ssh")
+    return <GitHubSSHScreen navigation={navigation}/>;
   if(route.kind==="entry") return <Entry runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="project-create")return <CreateProjectScreen runtime={current} navigation={navigation}/>;
   if(route.kind==="project-import")return <ImportProjectScreen runtime={current} navigation={navigation}/>;

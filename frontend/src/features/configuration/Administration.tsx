@@ -10,15 +10,19 @@ import { ItemLink, Notice, Shell, Skeleton } from "../../components/Shell";
 import { NavLink, GLOBAL_PROJECTS, type Navigator } from "../../navigation/useNavigation";
 import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
 import { Feedback, message, editable } from "./Common";
+import { AppearanceControls } from "./Appearance";
 
 export function AdministrationHome({navigation}:{navigation:Navigator}) {
   return <Shell title="DevStack administration" subtitle="Global — not a project" navigation={navigation} back>
     <Notice title="Secondary controls">These settings affect DevStack itself and are intentionally outside the active project's workspace.</Notice>
+    <AppearanceControls/>
     <div className="item-group">
       <ItemLink icon="⑂" title="GitHub SSH" detail="Public key and connectivity"
         href={adminUrl("ssh")} navigation={navigation}/>
       <ItemLink icon="↻" title="Published updates" detail="Installed release and guarded updater"
         href={adminUrl("updates")} navigation={navigation}/>
+      <ItemLink icon="≡" title="DevStack diagnostics" detail="Recent safe system events and copyable snapshots"
+        href={adminUrl("diagnostics")} navigation={navigation}/>
     </div>
     <p className="actions"><NavLink to={GLOBAL_PROJECTS} navigate={navigation.navigate}>Projects →</NavLink></p>
   </Shell>;
@@ -80,7 +84,7 @@ export function GitHubSSHScreen({navigation}:{navigation:Navigator}) {
     <p className="actions"><NavLink to={ADMIN_ROOT} navigate={navigation.navigate}>Administration →</NavLink></p>
   </Shell>;
 }
-export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navigation:Navigator}) {
+export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot|null;navigation:Navigator}) {
   const [check,setCheck]=useState(false);
   const [serial,setSerial]=useState(0);
   const load=useCallback((signal:AbortSignal)=>readReleaseStatus(check,signal),[check,serial]);
@@ -90,7 +94,7 @@ export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navi
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const data=state.kind==="ready"?state.data:null;
-  const canUpdate=editable(runtime)&&Boolean(data?.update_available)&&!data?.check_error;
+  const canUpdate=Boolean(runtime&&editable(runtime)&&data?.update_available&&!data?.check_error);
   const start=async()=>{
     if(!confirmation||!canUpdate||busy)return;
     setBusy(true);setError(null);setSuccess(null);
@@ -108,19 +112,25 @@ export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navi
     finally{setBusy(false);}
   };
   return <Shell title="Published updates" navigation={navigation} back>
-    <Notice title="Safe release updater">Uses the existing system updater, not arbitrary Git or shell commands. The runtime must be inactive. The host independently rechecks these conditions.</Notice>
+    <Notice title="Safe release updater">Checking published versions is always read-only, even with an active project. Installing a release requires an inactive runtime; the host independently rechecks this.</Notice>
     {state.kind==="loading"&&<Skeleton/>}
     {state.kind==="error"&&<Notice title="Update status unavailable" role="alert">{state.error.message}</Notice>}
     {data&&<section className="card">
       <div className="property"><span>Installed</span><strong>{data.installed}</strong></div>
       <div className="property"><span>Published</span><strong>{data.latest??"Not checked"}</strong></div>
       <div className="property"><span>Update available</span><strong>{data.update_available?"Yes":"Not confirmed"}</strong></div>
-      {data.check_error&&<p className="text-muted">{data.check_error}</p>}
-      {data.update!==null&&<p className="text-muted">System updater state is available from the existing release service.</p>}
+      {data.check_error&&<p role="alert">Release check failed: {data.check_error}</p>}
+      {data.update&&<details className="technical-details" open><summary>System updater status</summary>
+        <div className="property"><span>Phase</span><strong>{data.update.phase}</strong></div>
+        <div className="property"><span>Unit</span><strong>{data.update.unit_state}</strong></div>
+        <div className="property"><span>Last result</span><strong>{data.update.last_result}</strong></div>
+        <div className="property"><span>Exit code</span><code>{data.update.last_exit_code||"not available"}</code></div>
+      </details>}
     </section>}
     <button className="text-button" type="button" onClick={()=>{setCheck(true);setSerial(x=>x+1);}}>
-      Check published releases</button>
-    {!editable(runtime)&&<Notice title="Runtime must be inactive">Deactivate the active project before requesting a DevStack release update.</Notice>}
+      Check published releases (read only)</button>
+    {!runtime&&<Notice title="Controller state unavailable" role="alert">Release status is read-only and remains available. Installation is disabled until the authoritative controller runtime can be verified.</Notice>}
+    {runtime&&!editable(runtime)&&<Notice title="Runtime must be inactive">Deactivate the active project before requesting a DevStack release update.</Notice>}
     {data?.update_available&&<label className="confirm-label">
       <input type="checkbox" checked={confirmation} onChange={e=>setConfirmation(e.target.checked)}/>
       Install this published release; DevStack itself may restart

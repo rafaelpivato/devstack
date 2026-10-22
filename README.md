@@ -1,6 +1,6 @@
 # DevStack
 
-**v0.6.0 published; v0.6.1 patch in review (not published).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.6.1. v0.6.2 stabilization candidate is in [PR #85](https://github.com/rafaelpivato/devstack/pull/85) (not released).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 

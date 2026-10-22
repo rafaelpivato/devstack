@@ -22,6 +22,7 @@ from devstack.projects.source_sync import SourceReviewService
 from devstack.projects.workspaces import WorkspaceStore
 from devstack.storage.database import Database
 from devstack.storage.projects import ProjectRegistry
+from devstack.diagnostics import DiagnosticStore
 from .coordinator import Coordinator
 from .docker import DockerBackend
 from .jobs import JobSupervisor
@@ -44,6 +45,7 @@ _MAX_MESSAGE = MAX_MESSAGE
 class Controller:
     def __init__(self, database: Database, workspaces: WorkspaceStore, backend=None):
         self.registry = ProjectRegistry(database)
+        self.diagnostics = DiagnosticStore(database.path.parent / 'control-diagnostics.sqlite3')
         self.provisioner = ProjectProvisioner(self.registry, workspaces)
         self.backend = backend or DockerBackend(self.provisioner, workspaces)
         self.coordinator = Coordinator(database, self.registry, self.backend)
@@ -69,7 +71,7 @@ class Controller:
             return protocol_info()
         # A committed but incompletely published sync is a global barrier.
         # The operator can explicitly request reconciliation/replay.
-        if (operation not in {"reconcile", "transition_status", "transition_list"}
+        if (operation not in {"reconcile", "transition_status", "transition_list", "diagnostics_snapshot"}
                 and not (operation == "transition_submit" and
                          request["action"] == "reconcile")):
             with self.registry.database.transaction() as con:
@@ -94,6 +96,25 @@ class Controller:
             return self.transitions.get(request["id"])
         if operation == "transition_list":
             return self.transitions.list()
+        if operation == "diagnostics_snapshot":
+            minutes = request["minutes"]
+            if type(minutes) is not int or minutes not in (1, 5, 30):
+                raise ProtocolError("Invalid diagnostic window")
+            try:
+                events = self.diagnostics.snapshot(minutes)
+                controller_status = "available"
+            except Exception:
+                events = {"events": [], "truncated": False}
+                controller_status = "unavailable"
+            try:
+                runtime = self.transitions.diagnostics(minutes)
+                runtime_status = "available"
+            except Exception:
+                runtime = {"events": [], "truncated": False}
+                runtime_status = "unavailable"
+            return {"events": events["events"] + runtime["events"],
+                    "truncated": events["truncated"] or runtime["truncated"],
+                    "sources": {"controller": controller_status, "runtime": runtime_status}}
         if operation == "projects":
             return {"projects": [
                 {"id": p.id, "slug": p.slug, "name": p.name}
@@ -295,8 +316,31 @@ class _Handler(socketserver.StreamRequestHandler):
             if not isinstance(data, dict):
                 raise ProtocolError("Expected a JSON object")
             result = self.server.controller.handle(data)
+            # Only static event names, never project names, argv, keys or stdout.
+            codes = {
+                "transition_submit": "runtime-request",
+                "reconcile": "runtime-reconcile",
+                "project_create": "project-create",
+                "import_submit": "project-import",
+                "repository_update": "repository-update",
+                "repository_add_submit": "repository-add",
+                "repository_bulk_submit": "repository-bulk-update",
+                "branch_apply": "repository-branch",
+                "compose": "compose-operation", "adhoc": "job-submit",
+                "task": "job-submit",
+            }
+            if isinstance(data, dict) and data.get("op") in codes:
+                try:
+                    self.server.controller.diagnostics.record(
+                        "controller", codes[data["op"]])
+                except Exception:
+                    pass  # Recording must not change operation outcomes.
             response = {"ok": True, "result": result}
         except (Exception) as exc:
+            try:
+                self.server.controller.diagnostics.record("controller", "controller-error", "error")
+            except Exception:
+                pass
             # Controller interface is local/private but must not expose paths,
             # process output, command argv or environment secrets on errors.
             response = {"ok": False, "error": type(exc).__name__}
@@ -415,6 +459,10 @@ def main():
             controller.bulk_repositories.recover()
         except Exception:
             pass
+        try:
+            controller.diagnostics.record("controller", "controller-started")
+        except Exception:
+            pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
             with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
                 webhook_thread = threading.Thread(
@@ -430,6 +478,10 @@ def main():
                 try:
                     server.serve_forever(poll_interval=0.2)
                 finally:
+                    try:
+                        controller.diagnostics.record("controller", "controller-stopping")
+                    except Exception:
+                        pass
                     public_ingress.shutdown()
                     webhook_thread.join(timeout=10)
                     try:
