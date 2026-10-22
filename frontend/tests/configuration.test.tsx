@@ -17,6 +17,7 @@ describe("configuration and admin lane",()=>{
     expect(parentUrl(routeFor(configUrl(A,"webhooks")))).toBe(laneUrl(A,"configuration"));
     expect(routeFor(ADMIN_ROOT)).toEqual({kind:"administration"});
     expect(routeFor(adminUrl("ssh"))).toEqual({kind:"admin-detail",screen:"ssh"});
+    expect(routeFor(adminUrl("diagnostics"))).toEqual({kind:"admin-detail",screen:"diagnostics"});
     expect(parentUrl(routeFor(adminUrl("updates")))).toBe(ADMIN_ROOT);
     expect(routeFor(configUrl(A,"compose")+"/shell")).toEqual({kind:"not-found"});
     expect(routeFor(ADMIN_ROOT+"/terminal")).toEqual({kind:"not-found"});

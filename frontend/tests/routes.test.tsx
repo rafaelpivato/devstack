@@ -27,6 +27,7 @@ describe("semantic and accessible shell",()=>{
     expect(html).toContain("DevStack</a>");
     expect(html).toContain('href="/__v06/administration"');
     expect(html).toContain("DevStack administration");
+    expect(html).toContain("admin-shortcut");
   });
 });
 describe("restrained workspace accents",()=>{
