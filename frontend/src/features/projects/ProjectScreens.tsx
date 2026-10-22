@@ -10,11 +10,11 @@ import { RuntimeControls } from "../runtime/RuntimeScreens";
 import { OPERATIONS_URL, globalActionUrl, ADMIN_ROOT } from "../../navigation/routes";
 import { NavLink } from "../../navigation/useNavigation";
 
-export const SECTIONS: readonly {lane:Lane; title:string; icon:string; description:string}[] = [
-  {lane:"repositories", title:"Repositories", icon:"⑂", description:"Git repositories"},
+export const SECTIONS: readonly {lane:Lane; title:string; icon:string; description:string; tone?:"blue"|"amber"}[] = [
+  {lane:"repositories", title:"Repositories", icon:"⑂", description:"Git repositories", tone:"blue"},
   {lane:"services", title:"Services", icon:"⬡", description:"Compose services and logs"},
-  {lane:"jobs", title:"Jobs", icon:"▤", description:"Jobs, tasks and output"},
-  {lane:"applications", title:"Applications", icon:"↗", description:"Private application links"},
+  {lane:"jobs", title:"Jobs", icon:"▤", description:"Jobs, tasks and output", tone:"amber"},
+  {lane:"applications", title:"Applications", icon:"↗", description:"Private application links", tone:"blue"},
   {lane:"configuration", title:"Configuration", icon:"⚙", description:"Project definitions"},
 ];
 
@@ -105,7 +105,7 @@ function ProjectSections({detail,navigation}:{detail:ProjectDetail;navigation:Na
       const description=count===undefined?section.description:
         section.lane==="configuration"?count+" saved tasks":count+" registered";
       return <ItemLink key={section.lane} href={laneUrl(detail.project.id,section.lane)}
-        navigation={navigation} icon={section.icon} title={section.title} detail={description}/>;
+        navigation={navigation} icon={section.icon} tone={section.tone} title={section.title} detail={description}/>;
     })}
   </div></>;
 }

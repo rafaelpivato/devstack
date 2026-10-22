@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {Shell} from "../src/components/Shell";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Entry, ProjectDirectory } from "../src/features/projects/ProjectScreens";
+import { Entry, ProjectDirectory, SECTIONS } from "../src/features/projects/ProjectScreens";
 import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl, routeFor } from "../src/navigation/routes";
 import type { Navigator } from "../src/navigation/useNavigation";
 import type { ProjectSummary, RuntimeSnapshot } from "../src/api/runtime";
@@ -23,6 +23,14 @@ describe("semantic and accessible shell",()=>{
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('<main');
     expect(html).toContain('id="content"');
+    expect(html).toContain('href="/__v06" class="wordmark"');
+    expect(html).toContain("DevStack</a>");
+  });
+});
+describe("restrained workspace accents",()=>{
+  it("uses only two optional secondary icon tones, without color-only status semantics",()=>{
+    expect(SECTIONS.filter(section=>section.tone).map(section=>section.tone))
+      .toEqual(["blue","amber","blue"]);
   });
 });
 describe("project-scoped hierarchical routes",()=>{

@@ -56,7 +56,8 @@ class V053CandidateTests(unittest.TestCase):
                       installer)
         readme = (ROOT / "README.md").read_text()
         self.assertIn("v0.5.3", readme)
-        self.assertIn("release candidate", readme)
+        self.assertIn("v0.6.0 is a published release", readme)
+        self.assertIn("v0.6.1 is a proposed patch", readme)
         self.assertIn("docs/releases/v0.5.3.md", readme)
 
 
