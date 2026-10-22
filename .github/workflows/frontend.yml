@@ -20,9 +20,12 @@ jobs:
       - name: Install locked dependencies
         working-directory: frontend
         run: npm ci --ignore-scripts
+      - name: Regression-test fail-closed dependency audit classification
+        working-directory: frontend
+        run: node --test scripts/verified-audit.test.mjs
       - name: Reject vulnerable frontend dependencies
         working-directory: frontend
-        run: npm audit --audit-level=low
+        run: node scripts/verified-audit.mjs
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck
