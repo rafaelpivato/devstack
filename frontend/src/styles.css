@@ -185,3 +185,8 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:va
 .appearance-selected{margin-left:auto;font-size:.85rem}
 :disabled{cursor:not-allowed}
 @media(max-width:420px){.appearance-options{padding:12px}}
+
+.technical-details{margin:16px 0;border-top:1px solid var(--line);padding-top:12px}
+.technical-details summary{font-weight:700;cursor:pointer;min-height:44px;display:list-item;padding:10px}
+.technical-details .property{min-width:0}
+.technical-details code{overflow-wrap:anywhere}
