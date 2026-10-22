@@ -34,7 +34,6 @@ class DiagnosticsSecurityTests(unittest.TestCase):
             "truncated":False
         }
         controller.registry=Mock()
-        controller.registry.database.transaction.return_value.__enter__.return_value.execute.return_value.fetchone.return_value=None
         result=controller.handle({"op":"diagnostics_snapshot","minutes":5})
         self.assertEqual(result["sources"],{"controller":"unavailable","runtime":"available"})
         self.assertEqual(len(result["events"]),1)

@@ -29,6 +29,8 @@ export function App() {
   const projects=useResource(loadProjects,20000);
   // Diagnostics must remain reachable with no active project or failed controller.
   if(navigation.route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
+  if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="updates")
+    return <UpdatesScreen runtime={runtime.kind==="ready"?runtime.data:null} navigation={navigation}/>;
   if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="diagnostics")
     return <DiagnosticsScreen navigation={navigation}/>;
   if(navigation.route.kind==="not-found") return <Shell title="Page not found" navigation={navigation} back>
@@ -50,9 +52,8 @@ export function App() {
     action={route.action} projectId={null} runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="runtime-action") return <RuntimeActionScreen key={route.projectId+route.action}
     action={route.action} projectId={route.projectId} runtime={current} projects={list} navigation={navigation}/>;
-  if(route.kind==="admin-detail")
-    return route.screen==="ssh"?<GitHubSSHScreen navigation={navigation}/>:
-      <UpdatesScreen runtime={current} navigation={navigation}/>;
+  if(route.kind==="admin-detail"&&route.screen==="ssh")
+    return <GitHubSSHScreen navigation={navigation}/>;
   if(route.kind==="entry") return <Entry runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="project-create")return <CreateProjectScreen runtime={current} navigation={navigation}/>;
   if(route.kind==="project-import")return <ImportProjectScreen runtime={current} navigation={navigation}/>;

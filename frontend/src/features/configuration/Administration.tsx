@@ -84,7 +84,7 @@ export function GitHubSSHScreen({navigation}:{navigation:Navigator}) {
     <p className="actions"><NavLink to={ADMIN_ROOT} navigate={navigation.navigate}>Administration →</NavLink></p>
   </Shell>;
 }
-export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navigation:Navigator}) {
+export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot|null;navigation:Navigator}) {
   const [check,setCheck]=useState(false);
   const [serial,setSerial]=useState(0);
   const load=useCallback((signal:AbortSignal)=>readReleaseStatus(check,signal),[check,serial]);
@@ -94,7 +94,7 @@ export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navi
   const [error,setError]=useState<string|null>(null);
   const [success,setSuccess]=useState<string|null>(null);
   const data=state.kind==="ready"?state.data:null;
-  const canUpdate=editable(runtime)&&Boolean(data?.update_available)&&!data?.check_error;
+  const canUpdate=Boolean(runtime&&editable(runtime)&&data?.update_available&&!data?.check_error);
   const start=async()=>{
     if(!confirmation||!canUpdate||busy)return;
     setBusy(true);setError(null);setSuccess(null);
@@ -129,7 +129,8 @@ export function UpdatesScreen({runtime,navigation}:{runtime:RuntimeSnapshot;navi
     </section>}
     <button className="text-button" type="button" onClick={()=>{setCheck(true);setSerial(x=>x+1);}}>
       Check published releases (read only)</button>
-    {!editable(runtime)&&<Notice title="Runtime must be inactive">Deactivate the active project before requesting a DevStack release update.</Notice>}
+    {!runtime&&<Notice title="Controller state unavailable" role="alert">Release status is read-only and remains available. Installation is disabled until the authoritative controller runtime can be verified.</Notice>}
+    {runtime&&!editable(runtime)&&<Notice title="Runtime must be inactive">Deactivate the active project before requesting a DevStack release update.</Notice>}
     {data?.update_available&&<label className="confirm-label">
       <input type="checkbox" checked={confirmation} onChange={e=>setConfirmation(e.target.checked)}/>
       Install this published release; DevStack itself may restart
