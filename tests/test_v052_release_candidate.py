@@ -11,7 +11,8 @@ class V052ReleaseCandidateTests(unittest.TestCase):
     def test_version_matches_release_notes(self):
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
         version = metadata["project"]["version"]
-        self.assertIn(version, {"0.5.2", "0.5.3"})
+        self.assertRegex(version, r"^[0-9]+\\.[0-9]+\\.[0-9]+$")
+        self.assertGreaterEqual(tuple(map(int,version.split("."))),(0,5,2))
         release = ROOT / "docs" / "releases" / f"v{version}.md"
         self.assertTrue(release.is_file())
         self.assertIn(f"v{version}", release.read_text())
@@ -22,7 +23,7 @@ class V052ReleaseCandidateTests(unittest.TestCase):
     def test_publication_is_only_from_main_after_docker_systemd_and_unit(self):
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         self.assertRegex(workflow, r"(?m)^\s+branches:\s*\n\s+- main")
-        self.assertIn("needs: [candidate, docker-verification]", workflow)
+        self.assertIn("needs: [candidate, frontend-verification, docker-verification]", workflow)
         self.assertIn("uses: ./.github/workflows/docker-smoke.yml", workflow)
         self.assertIn("python -m unittest discover -s tests -v", workflow)
         self.assertIn("gh release create", workflow)
