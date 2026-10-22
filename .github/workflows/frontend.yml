@@ -22,7 +22,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Regression-test fail-closed dependency audit classification
         working-directory: frontend
-        run: node --test scripts/verified-audit.test.mjs
+        run: node --test scripts/verified-audit.unit.mjs
       - name: Reject vulnerable frontend dependencies
         working-directory: frontend
         run: node scripts/verified-audit.mjs
