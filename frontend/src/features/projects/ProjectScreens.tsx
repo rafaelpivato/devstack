@@ -28,8 +28,9 @@ export function Entry({runtime, projects, navigation}:{
   if(runtime.phase==="inactive" && runtime.project_id===null)
     return <Shell title="No active project" navigation={navigation}>
       <Notice title="Choose a project">Activation is explicit. Browsing a project will not start it.</Notice>
-      {projects.length===0 ? <p className="text-muted">No projects registered yet. Open Projects to create or import one.</p> :
-        <ItemLink icon="▤" title="Select project" detail={projects.length+" available"} href={GLOBAL_PROJECTS} navigation={navigation}/>}
+      <ItemLink icon="▤" title={projects.length===0?"Create or import project":"Select project"}
+        detail={projects.length===0?"No projects registered yet":projects.length+" available"}
+        href={GLOBAL_PROJECTS} navigation={navigation}/>
     </Shell>;
   if(runtime.phase!=="active" || !runtime.project_id || !isProjectId(runtime.project_id))
     return <Shell title="Runtime status" navigation={navigation}>
