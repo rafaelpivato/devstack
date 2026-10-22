@@ -98,11 +98,23 @@ class Controller:
             return self.transitions.list()
         if operation == "diagnostics_snapshot":
             minutes = request["minutes"]
-            events = self.diagnostics.snapshot(minutes)
-            runtime = self.transitions.diagnostics(minutes)
+            if type(minutes) is not int or minutes not in (1, 5, 30):
+                raise ProtocolError("Invalid diagnostic window")
+            try:
+                events = self.diagnostics.snapshot(minutes)
+                controller_status = "available"
+            except Exception:
+                events = {"events": [], "truncated": False}
+                controller_status = "unavailable"
+            try:
+                runtime = self.transitions.diagnostics(minutes)
+                runtime_status = "available"
+            except Exception:
+                runtime = {"events": [], "truncated": False}
+                runtime_status = "unavailable"
             return {"events": events["events"] + runtime["events"],
                     "truncated": events["truncated"] or runtime["truncated"],
-                    "sources": {"controller": "available", "runtime": "available"}}
+                    "sources": {"controller": controller_status, "runtime": runtime_status}}
         if operation == "projects":
             return {"projects": [
                 {"id": p.id, "slug": p.slug, "name": p.name}
