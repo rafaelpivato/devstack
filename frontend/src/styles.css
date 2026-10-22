@@ -190,3 +190,16 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:va
 .technical-details summary{font-weight:700;cursor:pointer;min-height:44px;display:list-item;padding:10px}
 .technical-details .property{min-width:0}
 .technical-details code{overflow-wrap:anywhere}
+
+.diagnostic-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0 20px}
+.diagnostic-controls select{min-height:44px;max-width:100%;background:var(--panel);
+ border:1px solid var(--line);border-radius:8px;padding:8px;color:var(--text)}
+.diagnostic-controls .text-button{padding:8px 12px;border:1px solid var(--line);border-radius:8px}
+.diagnostic-events{list-style:decimal;padding-left:24px;max-height:60vh;overflow:auto}
+.diagnostic-events li{padding:10px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.diagnostic-events time{font-variant-numeric:tabular-nums;font-size:.86rem}
+.diagnostic-events strong{display:block}
+.diagnostic-copy-source{width:100%;min-height:210px;max-width:100%;color:var(--text);
+ background:var(--code-bg);border:1px solid var(--line);border-radius:9px;padding:12px;
+ font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+@media(max-width:360px){.diagnostic-controls{gap:7px}.diagnostic-controls label{width:100%}}
