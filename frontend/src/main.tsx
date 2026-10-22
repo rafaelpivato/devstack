@@ -15,6 +15,7 @@ import { JobsScreen, JobDetail, JobLogs, RunJob } from "./features/workloads/Job
 import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor } from "./features/configuration/ProjectConfiguration";
 import { WebhookEditor } from "./features/configuration/WebhookEditor";
 import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
+import {DiagnosticsScreen} from "./features/configuration/Diagnostics";
 import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
 import "./styles.css";
 
@@ -26,6 +27,10 @@ export function App() {
   const loadProjects=useCallback(readProjects,[]);
   const runtime=useResource(loadRuntime,8000);
   const projects=useResource(loadProjects,20000);
+  // Diagnostics must remain reachable with no active project or failed controller.
+  if(navigation.route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
+  if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="diagnostics")
+    return <DiagnosticsScreen navigation={navigation}/>;
   if(navigation.route.kind==="not-found") return <Shell title="Page not found" navigation={navigation} back>
     <Notice title="Unknown page" role="alert">This URL is not a DevStack v0.6 screen.</Notice>
   </Shell>;
