@@ -12,7 +12,7 @@ export type Lane = typeof LANES[number];
 export type AppRoute =
   | {kind: "entry"} | {kind:"projects"}
   | {kind:"project-create"} | {kind:"project-import"} | {kind:"project-import-receipt"; operationId:string}
-  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"|"diagnostics"|"diagnostics"}
+  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"|"diagnostics"}
   | {kind:"config-detail";projectId:string;screen:"compose"|"definitions"|"webhooks"|"name"}
   | {kind:"project"; projectId:string}
   | {kind:"lane"; projectId:string; lane:Lane}
