@@ -50,7 +50,6 @@ export function App() {
     action={route.action} projectId={null} runtime={current} projects={list} navigation={navigation}/>;
   if(route.kind==="runtime-action") return <RuntimeActionScreen key={route.projectId+route.action}
     action={route.action} projectId={route.projectId} runtime={current} projects={list} navigation={navigation}/>;
-  if(route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
   if(route.kind==="admin-detail")
     return route.screen==="ssh"?<GitHubSSHScreen navigation={navigation}/>:
       <UpdatesScreen runtime={current} navigation={navigation}/>;
