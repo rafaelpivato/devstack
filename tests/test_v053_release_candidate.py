@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 class V053CandidateTests(unittest.TestCase):
     def test_single_staged_release_version_and_notes(self):
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
-        self.assertEqual(metadata["project"]["version"], "0.5.3")
+        version=metadata["project"]["version"]
+        self.assertGreaterEqual(tuple(map(int,version.split("."))),(0,5,3))
+        self.assertTrue((ROOT/"docs/releases"/f"v{version}.md").is_file())
         notes = (ROOT / "docs/releases/v0.5.3.md").read_text()
         self.assertIn("# DevStack v0.5.3", notes)
         self.assertIn("Release candidate", notes)
@@ -25,7 +27,7 @@ class V053CandidateTests(unittest.TestCase):
     def test_final_release_workflow_is_main_only_and_requires_gates(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertRegex(workflow, r"(?m)^\s+branches:\s*\n\s+- main\s*$")
-        self.assertIn("needs: [candidate, docker-verification]", workflow)
+        self.assertIn("needs: [candidate, frontend-verification, docker-verification]", workflow)
         self.assertIn("uses: ./.github/workflows/docker-smoke.yml", workflow)
         self.assertIn("python -m unittest discover -s tests -v", workflow)
         self.assertIn('gh release create "$TAG"', workflow)

@@ -2,6 +2,7 @@ name: Frontend integrity
 on:
   push:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,10 +19,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install locked dependencies
         working-directory: frontend
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --no-audit
+      - name: Regression-test fail-closed dependency audit classification
+        working-directory: frontend
+        run: node --test scripts/verified-audit.unit.mjs
       - name: Reject vulnerable frontend dependencies
         working-directory: frontend
-        run: npm audit --audit-level=low
+        run: node scripts/verified-audit.mjs
       - name: Typecheck
         working-directory: frontend
         run: npm run typecheck

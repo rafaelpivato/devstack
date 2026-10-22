@@ -77,7 +77,7 @@ class ReleaseAcceptanceGateTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text()
         docker = (ROOT / ".github" / "workflows" / "docker-smoke.yml").read_text()
         systemd = (ROOT / "scripts" / "verify-systemd-ci.sh").read_text()
-        self.assertIn("needs: [candidate, docker-verification]", workflow)
+        self.assertIn("needs: [candidate, frontend-verification, docker-verification]", workflow)
         self.assertIn("uses: ./.github/workflows/docker-smoke.yml", workflow)
         self.assertIn("python -m unittest discover -s tests -v", workflow)
         self.assertIn("needs: compose-smoke", docker)

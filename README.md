@@ -1,8 +1,10 @@
 # DevStack
 
-**v0.5.3 release candidate.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**v0.6.0 integration release candidate (not published).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
+
+The redesigned v0.6 project-first mobile interface is currently available as an **opt-in preview** at `/__v06` on an existing private DevStack host. Until real-device acceptance and the release cutover decision, the existing dashboard remains at `/`; no browser visit activates a project.
 
 ## Architecture
 
@@ -32,9 +34,9 @@ the trusted `devstackipc` group—**not** the Docker group. See
 
 ## Installation and release status
 
-The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. The trusted `scripts/install.sh` installs only the **latest published v0.5.2-or-later release**. v0.5.3 is a candidate until reviewed, merged into `main`, verified and published by release CI—not yet a live upgrade. Existing v0.5.2 installations may upgrade via their established updater **when v0.5.3 becomes published**, but need one explicit CLI enrollment and standalone-updater refresh afterward (see [release notes](docs/releases/v0.5.3.md)).
+The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. The trusted `scripts/install.sh` installs only the **latest published v0.5.2-or-later release**. v0.6.0 is a candidate until real-device validation, owner review, merge into `main`, verification and publication by release CI—not yet a live upgrade. Existing v0.5.2 installations may upgrade via their established updater **when v0.5.3 becomes published**, but need one explicit CLI enrollment and standalone-updater refresh afterward (see [release notes](docs/releases/v0.5.3.md)).
 
-For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md). For the next patch, see [v0.5.3 release notes](docs/releases/v0.5.3.md). Several physical-host checks (especially in-place update/rollback and reboot) remain deferred to live deployment; passing CI is not equivalent to an actual-host acceptance pass.
+For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md). For the CLI patch, see [v0.5.3 release notes](docs/releases/v0.5.3.md). For the planned UI release, see [v0.6.0 candidate notes](docs/releases/v0.6.0.md) and the [acceptance checklist](docs/v0.6-ux-parity-audit.md). Several physical-host checks (especially in-place update/rollback and reboot) remain deferred to live deployment; passing CI is not equivalent to an actual-host acceptance pass.
 
 Architecture and acceptance requirements: [ADR-0001](docs/adr/0001-multiple-projects-single-runtime.md) and [v0.5.2 acceptance plan](docs/v0.5.2-acceptance-plan.md).
 

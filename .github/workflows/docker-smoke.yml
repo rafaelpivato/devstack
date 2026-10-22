@@ -55,7 +55,7 @@ jobs:
           test "$(printf '%s\n' "$network" | sed '/^$/d' | wc -l)" -eq 1
           docker run --rm --network "$network" --security-opt no-new-privileges \
             --cap-drop ALL redis:7-alpine redis-cli -h redis ping
-      - name: Verify packaged v2 WSGI and static assets
+      - name: Verify installed v2 and v0.6 WSGI plus versioned browser assets
         run: |
           set -euo pipefail
           venv="$RUNNER_TEMP/devstack-fresh-v05"
@@ -88,6 +88,22 @@ jobs:
           with app.test_client() as client:
               assert client.get("/static/css/v2.css").status_code == 200
               assert client.get("/static/js/v2_dashboard.js").status_code == 200
+              # R1: a pip-installed release must serve the new UI without Node.
+              # The existing '/' dashboard remains the default until owner QA.
+              assert client.get("/__v06").status_code == 200
+              assert client.get("/__v06/projects/create").status_code == 200
+              assert client.get("/__v06/projects/import").status_code == 200
+              assert client.get("/__v06/unknown").status_code == 404
+              import importlib.metadata
+              import json
+              from pathlib import Path
+              bundle = Path(app.static_folder) / "v06"
+              manifest = json.loads((bundle / "manifest.json").read_text())
+              paths = [manifest["src/main.tsx"]["file"]]
+              paths.extend(entry["file"] for entry in manifest.values()
+                           if entry["file"].endswith(".css"))
+              for asset in paths:
+                  assert client.get("/static/v06/" + asset).status_code == 200
               # The web process fails closed without its separate controller.
               assert client.get("/healthz").status_code == 503
           PY

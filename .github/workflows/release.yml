@@ -37,6 +37,13 @@ jobs:
           if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
               raise SystemExit("Release version must be MAJOR.MINOR.PATCH")
           tag = f"v{version}"
+          notes = Path("docs/releases") / f"{tag}.md"
+          if not notes.is_file():
+              raise SystemExit(f"Release notes are required: {notes}")
+          import json
+          frontend_version = json.loads(Path("frontend/package.json").read_text())["version"]
+          if frontend_version != version:
+              raise SystemExit(f"Frontend version {frontend_version} disagrees with package {version}")
           found = subprocess.run(
               ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"],
               check=False,
@@ -47,6 +54,13 @@ jobs:
           print(f"{tag}: {'already tagged' if found else 'awaiting verification'}")
           PY
 
+  frontend-verification:
+    needs: candidate
+    if: needs.candidate.outputs.publish == 'true'
+    uses: ./.github/workflows/frontend.yml
+    permissions:
+      contents: read
+
   docker-verification:
     needs: candidate
     if: needs.candidate.outputs.publish == 'true'
@@ -55,7 +69,7 @@ jobs:
       contents: read
 
   publish:
-    needs: [candidate, docker-verification]
+    needs: [candidate, frontend-verification, docker-verification]
     if: needs.candidate.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -77,10 +91,6 @@ jobs:
           TAG: ${{ needs.candidate.outputs.tag }}
         run: |
           set -euo pipefail
-          if [[ -f "docs/releases/$TAG.md" ]]; then
-            gh release create "$TAG" --target "$GITHUB_SHA" \
-              --title "$TAG" --notes-file "docs/releases/$TAG.md"
-          else
-            gh release create "$TAG" --target "$GITHUB_SHA" \
-              --title "$TAG" --generate-notes
-          fi
+          test -s "docs/releases/$TAG.md"
+          gh release create "$TAG" --target "$GITHUB_SHA" \
+            --title "$TAG" --notes-file "docs/releases/$TAG.md"
