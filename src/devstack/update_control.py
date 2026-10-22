@@ -109,6 +109,43 @@ def update_state() -> dict[str, str]:
             "last_exit_code": code}
 
 
+def updater_service_events(minutes: int) -> dict:
+    """Restricted unit lifecycle properties only; never system journal output.
+
+    Monotonic timestamps are boot-local and converted to epoch ms for UI.
+    If systemd properties are unreadable, the caller reports partial coverage.
+    """
+    if type(minutes) is not int or minutes not in (1, 5, 30):
+        raise ValueError("Unsupported diagnostic window")
+    try:
+        completed = subprocess.run(
+            ["systemctl", "show", "devstack-update.service", "--no-pager",
+             "--property=ExecMainStartTimestampMonotonic",
+             "--property=ExecMainExitTimestampMonotonic"],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        props = dict(line.split("=", 1) for line in completed.stdout.splitlines()
+                     if "=" in line)
+        boot_epoch_ns = time.time_ns() - time.monotonic_ns()
+        now_ns = time.time_ns()
+        cutoff_ns = now_ns - minutes * 60 * 1_000_000_000
+        events = []
+        for field, code in (
+            ("ExecMainStartTimestampMonotonic", "updater-started"),
+            ("ExecMainExitTimestampMonotonic", "updater-exited"),
+        ):
+            value = props.get(field, "")
+            if not value.isdecimal():
+                continue
+            at_ns = boot_epoch_ns + int(value) * 1_000
+            if cutoff_ns <= at_ns <= now_ns:
+                events.append({"at": at_ns // 1_000_000, "source": "updater",
+                               "level": "info", "code": code})
+        return {"events": events, "available": True}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {"events": [], "available": False}
+
+
 def request_update() -> str:
     folder = check_request_directory()
     phase = update_state()["phase"]
