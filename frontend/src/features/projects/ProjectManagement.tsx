@@ -32,7 +32,7 @@ function FormField({title,value,onChange,placeholder}:{
   title:string;value:string;onChange:(value:string)=>void;placeholder?:string;
 }){
   return <label>{title}<input value={value} autoCapitalize="off" autoCorrect="off"
-    spellCheck={false} placeholder={placeholder} maxLength={300}
+    spellCheck={false} placeholder={placeholder} maxLength={2048}
     onChange={e=>onChange(e.target.value)}/></label>;
 }
 export function CreateProjectScreen({runtime,navigation}:{
@@ -62,7 +62,7 @@ export function CreateProjectScreen({runtime,navigation}:{
       <FormField title="Project slug" value={slug} onChange={setSlug} placeholder="my-project"/>
       <FormField title="Display name" value={name} onChange={setName} placeholder="My project"/>
     </div>
-    <p className="text-muted">Slug: lowercase letters, digits and hyphens; must start with a letter.</p>
+    <p className="text-muted">Slug: 1–63 lowercase letters, digits and hyphens; must start with a letter.</p>
     <button type="button" className="primary-button" disabled={!allowed||busy}
       onClick={()=>void submit()}>{busy?"Creating…":"Create project"}</button>
     {error&&<Notice title="Create not confirmed" role="alert">{error}</Notice>}

@@ -18,8 +18,8 @@ export function readProjectImport(id:string,signal?:AbortSignal){
   if(!isProjectId(id))return Promise.reject(new Error("Invalid import receipt identity"));
   return apiRequest<ImportReceipt>("/api/v2/imports/"+id,{signal});
 }
-export const projectSlugValid=(value:string)=>/^[a-z][a-z0-9-]{0,47}$/.test(value);
-export const projectNameValid=(value:string)=>value.trim().length>0&&value.length<=100;
+export const projectSlugValid=(value:string)=>/^[a-z][a-z0-9-]{0,62}$/.test(value);
+export const projectNameValid=(value:string)=>value.trim().length>0&&value===value.trim()&&value.length<=120;
 export function githubSourceValid(value:string):boolean {
   try {
     const url=new URL(value);
