@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="devstack-csrf" content="{{ csrf }}">
+  <title>DevStack · Frontend preview</title>
+  {% for asset in css_assets %}<link rel="stylesheet" href="{{ url_for('static', filename='v06/' + asset) }}">{% endfor %}
+  <script type="module" src="{{ url_for('static', filename='v06/' + js_asset) }}"></script>
+</head>
+<body><div id="app"></div></body>
+</html>

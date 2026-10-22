@@ -126,13 +126,13 @@ class AutoUpdateTests(unittest.TestCase):
         docker = (ROOT / ".github/workflows/docker-smoke.yml").read_text()
         self.assertIn("workflow_call:", docker)
         self.assertIn("uses: ./.github/workflows/docker-smoke.yml", release)
-        self.assertIn("needs: [candidate, docker-verification]", release)
+        self.assertIn("needs: [candidate, frontend-verification, docker-verification]", release)
         self.assertIn("python -m unittest discover -s tests -v", release)
 
     def test_current_patch_release_version(self):
         import tomllib
         version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-        self.assertRegex(version, r"^0\.5\.[0-9]+$")
+        self.assertRegex(version, r"^[0-9]+\.[0-9]+\.[0-9]+$")
         self.assertGreaterEqual(tuple(map(int, version.split("."))), (0, 5, 2))
         self.assertTrue((ROOT / "docs" / "releases" / f"v{version}.md").is_file())
 

@@ -10,6 +10,7 @@ import os
 import json
 from pathlib import Path
 import secrets
+import re
 
 from flask import (
     Flask, abort, flash, jsonify, redirect, render_template, request,
@@ -25,10 +26,10 @@ from devstack.update_control import (
 
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 SAMPLE_URL = "https://github.com/rafaelpivato/devstack/tree/main/examples/smoke"
-NOT_FOUND = {"WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound", "BulkRepositoryNotFound"}
+NOT_FOUND = {"TransitionNotFound", "WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound", "BulkRepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
            "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError", "JobInvalid"}
-CONFLICT = {"WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict", "BulkRepositoryConflict"}
+CONFLICT = {"TransitionConflict", "WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict", "BulkRepositoryConflict"}
 
 
 def create_app(config: dict | None = None, *, transport=None) -> Flask:
@@ -188,6 +189,84 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         if result.get("runtime") == "error":
             return jsonify({"ok": False, "controller": "recovery_required"}), 503
         return jsonify({"ok": True, "controller": "connected"})
+
+    @app.get("/__v06")
+    def v06_preview():
+        """Opt-in packaged React preview. Current dashboard/API remain the default."""
+        bundle = Path(app.static_folder) / "v06"
+        try:
+            manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+            entry = manifest["src/main.tsx"]
+            js_asset = entry["file"]
+            css_assets = entry.get("css") or [
+                item["file"] for item in manifest.values()
+                if isinstance(item, dict) and
+                isinstance(item.get("file"), str) and
+                item["file"].endswith(".css")
+            ]
+            # Only versioned local, packaged asset paths may be inserted.
+            paths = [js_asset, *css_assets]
+            if (not isinstance(css_assets, list) or
+                    not all(isinstance(path, str) and path.startswith("assets/")
+                            and ".." not in Path(path).parts
+                            and (bundle / path).is_file() for path in paths)):
+                raise ValueError("Invalid packaged bundle")
+        except (OSError, ValueError, TypeError, KeyError):
+            return jsonify({"ok": False, "message": "Frontend bundle unavailable."}), 503
+        return render_template("v06_preview.html", csrf=csrf(),
+                               js_asset=js_asset, css_assets=css_assets)
+
+    @app.get("/__v06/")
+    @app.get("/__v06/<path:frontend_path>")
+    def v06_deep_link(frontend_path=""):
+        """Only known project-scoped SPA routes; no generic catch-all."""
+        import re
+        pattern = (r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+                   r"[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+        segments = frontend_path.split("/") if frontend_path else []
+        valid = (
+            not segments or
+            segments == ["projects"] or
+            segments in (["projects","create"],["projects","import"]) or
+            (len(segments)==2 and segments[0]=="imports" and
+             re.fullmatch(pattern,segments[1],re.IGNORECASE) is not None) or
+            segments == ["administration"] or
+            segments in (["administration", "ssh"], ["administration", "updates"]) or
+            segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
+                         ["runtime", "operations"]) or
+            (len(segments) == 3 and segments[:2] == ["runtime", "operations"]
+             and re.fullmatch(pattern, segments[2], re.IGNORECASE) is not None) or
+            (len(segments) >= 2 and segments[0] == "projects" and
+             re.fullmatch(pattern, segments[1], re.IGNORECASE) is not None and
+             (len(segments) == 2 or
+              (len(segments) == 3 and segments[2] in {
+                  "repositories", "services", "jobs", "applications", "configuration",
+              }) or
+              (len(segments) == 4 and segments[2] == "runtime" and
+               segments[3] in {"activate", "switch"}) or
+              (len(segments) == 4 and segments[2] == "configuration" and
+               segments[3] in {"compose", "definitions", "webhooks", "name"}) or
+              (len(segments) == 4 and segments[2] == "services" and
+               re.fullmatch(r"[a-f0-9]{64}", segments[3]) is not None) or
+              (len(segments) == 4 and segments[2] == "jobs" and
+               re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None) or
+              (len(segments) == 5 and segments[2] == "jobs" and
+               ((segments[3] == "run" and segments[4] in {
+                   "task", "compose", "adhoc",
+               }) or
+                (re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None
+                 and segments[4] == "logs"))) or
+              (len(segments) == 4 and segments[2] == "repositories" and
+               segments[3] in {"add", "bulk", "branch", "source"}) or
+              (len(segments) == 5 and segments[2] == "repositories" and
+               segments[3] in {"adds", "updates"} and
+               re.fullmatch(pattern, segments[4], re.IGNORECASE) is not None) or
+              (len(segments) == 4 and segments[2] == "repositories" and
+               re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None)))
+        )
+        if not valid:
+            abort(404)
+        return v06_preview()
 
     @app.get("/")
     def index():
@@ -607,6 +686,32 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
+    @app.get("/api/v2/projects/<identifier>/settings-review")
+    def read_settings_review_api(identifier):
+        try:
+            return jsonify(call("settings_review", project_id=identifier))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.put("/api/v2/projects/<identifier>/settings-review")
+    def save_settings_review_api(identifier):
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {
+            "applications", "tasks", "revision"
+        } or not isinstance(payload["applications"], list) or not isinstance(payload["tasks"], list):
+            abort(400)
+        if not isinstance(payload["revision"], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", payload["revision"]
+        ):
+            abort(400)
+        try:
+            result = call("settings_replace_checked", project_id=identifier, **payload)
+            return jsonify(result)
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
     @app.get("/api/v2/projects/<identifier>/webhooks")
     def webhooks_api(identifier):
         try:
@@ -792,6 +897,64 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def runtime_api():
         try:
             return jsonify(call("status"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/runtime/transitions")
+    def runtime_transition_submit_api():
+        """Submit only the existing controller-owned durable transition contract."""
+        if not request.is_json:
+            abort(415)
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or set(payload) != {"action", "project_id"}:
+            abort(400)
+        action = payload["action"]
+        target = payload["project_id"]
+        if not isinstance(action, str) or action not in {
+            "activate", "switch", "deactivate", "reconcile",
+        }:
+            abort(400)
+        from uuid import UUID
+        if action in {"activate", "switch"}:
+            try:
+                if (not isinstance(target, str) or
+                        str(UUID(target, version=4)) != target):
+                    abort(400)
+            except (TypeError, ValueError, AttributeError):
+                abort(400)
+        elif target is not None:
+            abort(400)
+        key = request.headers.get("Idempotency-Key", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", key):
+            abort(400)
+        try:
+            receipt = call("transition_submit", action=action, project_id=target,
+                           request_key=key)
+            response = jsonify({"operation": receipt})
+            response.status_code = 202
+            response.headers["Location"] = url_for(
+                "runtime_transition_status_api", operation_id=receipt["id"])
+            return response
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/runtime/transitions")
+    def runtime_transition_list_api():
+        try:
+            return jsonify(call("transition_list"))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/runtime/transitions/<operation_id>")
+    def runtime_transition_status_api(operation_id):
+        try:
+            from uuid import UUID
+            if str(UUID(operation_id, version=4)) != operation_id:
+                abort(404)
+        except (ValueError, TypeError):
+            abort(404)
+        try:
+            return jsonify(call("transition_status", id=operation_id))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
