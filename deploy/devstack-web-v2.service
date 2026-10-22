@@ -23,6 +23,8 @@ PrivateDevices=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RuntimeDirectory=devstack-update-request
 RuntimeDirectoryMode=0700
+StateDirectory=devstack-web
+StateDirectoryMode=0700
 UMask=0077
 # This account must NOT be in the docker group. The only privileged
 # interface it can reach is the group-restricted controller Unix socket.
