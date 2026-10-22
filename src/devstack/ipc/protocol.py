@@ -18,6 +18,7 @@ _OPERATION_FIELDS = {
     "transition_submit": ("action", "project_id", "request_key"),
     "transition_status": ("id",),
     "transition_list": (),
+    "diagnostics_snapshot": ("minutes",),
     "projects": (),
     "project_detail": ("project_id",),
     "project_rename": ("project_id", "name"),
