@@ -23,8 +23,15 @@ export const projectNameValid=(value:string)=>value.trim().length>0&&value===val
 export function githubSourceValid(value:string):boolean {
   try {
     const url=new URL(value);
-    return url.protocol==="https:"&&url.hostname==="github.com"&&
-      !url.username&&!url.password&&!url.search&&!url.hash &&
-      /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/.test(url.pathname);
+    if(url.protocol!=="https:"||url.hostname!=="github.com"||url.username||
+       url.password||url.search||url.hash||value.includes("%"))return false;
+    const pieces=url.pathname.split("/").filter(Boolean);
+    if(pieces.length<2||pieces.length>10)return false;
+    const [owner,repo,...rest]=pieces;
+    if(!/^[A-Za-z0-9-]{1,39}$/.test(owner)||owner.startsWith("-")||owner.endsWith("-")||
+       !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(repo))return false;
+    if(rest.length>0&&(rest.length<2||rest[0]!=="tree"||
+        rest.slice(1).some(s=>!s||s==="."||s===".."||!/^[A-Za-z0-9_.-]+$/.test(s))))return false;
+    return true;
   }catch{return false;}
 }
