@@ -8,7 +8,7 @@ import {useResource} from "../../hooks/useResource";
 import {Notice,Shell,Skeleton,Status} from "../../components/Shell";
 import {NavLink,type Navigator} from "../../navigation/useNavigation";
 import {isProjectId, projectUrl, GLOBAL_PROJECTS_URL, importReceiptUrl} from "../../navigation/routes";
-import {freshKey} from "../runtime/RuntimeScreens";
+import {requestKey} from "../../lib/repositorySubmission";
 
 const KEY="devstack-v06-pending-project-import-v1";
 interface SavedImport {key:string;url:string;slug:string;name:string;receiptId?:string}
@@ -86,7 +86,7 @@ export function ImportProjectScreen({runtime,navigation}:{
     setBusy(true);setError(null);
     try{if(!mayCreate(await readRuntime()))throw Error("Runtime changed. Nothing submitted.");}
     catch(e){setError(e instanceof Error?e.message:"Cannot verify runtime");setBusy(false);return;}
-    const current=saved??{key:freshKey(),url,slug,name};
+    const current=saved??{key:requestKey(),url,slug,name};
     store(current);setSaved(current);
     try{const r=await submitProjectImport(url,slug,name,current.key);
       const next={...current,receiptId:r.import.id};

@@ -1,4 +1,4 @@
-import type { PropsWithChildren, ReactNode } from "react";
+import {useEffect,useRef,type PropsWithChildren,type ReactNode} from "react";
 import type { Navigator } from "../navigation/useNavigation";
 import { NavLink, GLOBAL_PROJECTS } from "../navigation/useNavigation";
 import { PREVIEW_ROOT } from "../navigation/routes";
@@ -13,7 +13,7 @@ export function Shell({title, subtitle, navigation, children, back, badge}:Props
         <span className="wordmark"><span aria-hidden="true" className="brand-mark">▤</span> DevStack</span>
         <NavLink to={GLOBAL_PROJECTS} navigate={navigation.navigate} className="global-projects">Projects</NavLink>
       </div>
-      <div className="page-heading"><h1>{title}</h1>{badge}</div>
+      <div className="page-heading"><h1 tabIndex={-1} ref={heading}>{title}</h1>{badge}</div>
       {subtitle && <p className="page-subtitle">{subtitle}</p>}
     </header>
     <main className="app-content" id="content">{children}</main>
@@ -37,7 +37,7 @@ export function ItemLink({icon, title, detail, suffix, href, navigation}:{
 }
 
 export function Notice({title, children, role="status"}:PropsWithChildren<{title:string; role?:"status"|"alert"}>) {
-  return <section className="notice" role={role}><strong>{title}</strong>{children && <p>{children}</p>}</section>;
+  return <section className="notice" role={role}><strong>{title}</strong>{children && <div className="notice-content">{children}</div>}</section>;
 }
 
 export function Status({text, kind="neutral"}:{text:string;kind?:"positive"|"neutral"|"warning"}) {
