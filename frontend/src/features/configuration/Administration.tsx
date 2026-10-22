@@ -10,10 +10,12 @@ import { ItemLink, Notice, Shell, Skeleton } from "../../components/Shell";
 import { NavLink, GLOBAL_PROJECTS, type Navigator } from "../../navigation/useNavigation";
 import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
 import { Feedback, message, editable } from "./Common";
+import { AppearanceControls } from "./Appearance";
 
 export function AdministrationHome({navigation}:{navigation:Navigator}) {
   return <Shell title="DevStack administration" subtitle="Global — not a project" navigation={navigation} back>
     <Notice title="Secondary controls">These settings affect DevStack itself and are intentionally outside the active project's workspace.</Notice>
+    <AppearanceControls/>
     <div className="item-group">
       <ItemLink icon="⑂" title="GitHub SSH" detail="Public key and connectivity"
         href={adminUrl("ssh")} navigation={navigation}/>
