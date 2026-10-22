@@ -14,6 +14,7 @@ import { JobsScreen, JobDetail, JobLogs, RunJob } from "./features/workloads/Job
 import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor } from "./features/configuration/ProjectConfiguration";
 import { WebhookEditor } from "./features/configuration/WebhookEditor";
 import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
+import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
 import "./styles.css";
 
 /** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
@@ -47,6 +48,9 @@ export function App() {
     return route.screen==="ssh"?<GitHubSSHScreen navigation={navigation}/>:
       <UpdatesScreen runtime={current} navigation={navigation}/>;
   if(route.kind==="entry") return <Entry runtime={current} projects={list} navigation={navigation}/>;
+  if(route.kind==="project-create")return <CreateProjectScreen runtime={current} navigation={navigation}/>;
+  if(route.kind==="project-import")return <ImportProjectScreen runtime={current} navigation={navigation}/>;
+  if(route.kind==="project-import-receipt")return <ImportReceiptScreen id={route.operationId} navigation={navigation}/>;
   if(route.kind==="projects") return <ProjectDirectory projects={list} runtime={current} navigation={navigation}/>;
   const id=routeProjectId(route);
   if(!id) return null;
