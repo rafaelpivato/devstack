@@ -366,7 +366,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     @app.get("/api/v2/projects/<identifier>")
     def get_project_api(identifier):
         try:
-            return jsonify(project_data(identifier))
+            return jsonify(call("project_detail", project_id=identifier))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
 
