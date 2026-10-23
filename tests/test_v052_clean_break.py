@@ -55,13 +55,15 @@ class V2OnlyCleanupTests(unittest.TestCase):
     def test_only_v2_static_and_templates_packaged(self):
         self.assertEqual(
             {p.name for p in (PACKAGE / "static" / "js").glob("*.js")},
-            {"v2_dashboard.js"},
+            set(),
         )
         self.assertEqual(
             {p.name for p in (PACKAGE / "static" / "css").glob("*.css")},
-            {"v2.css"},
+            set(),
         )
-        self.assertTrue((PACKAGE / "templates" / "v2_dashboard.html").exists())
+        self.assertTrue((PACKAGE / "templates" / "app.html").exists())
+        self.assertFalse(list((PACKAGE / "templates").glob("v2_*.html")))
+        self.assertFalse((PACKAGE / "templates" / "v06_preview.html").exists())
 
     def test_runtime_installation_uses_single_controller(self):
         installer = (ROOT / "scripts" / "install.sh").read_text()

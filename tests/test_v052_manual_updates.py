@@ -38,7 +38,7 @@ class ManualUpdateHTTPTests(unittest.TestCase):
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
-        self.browser.get("/devstack/updates")
+        self.browser.get("/")
         with self.browser.session_transaction() as session:
             self.csrf = session["_csrf"]
 
@@ -63,7 +63,7 @@ class ManualUpdateHTTPTests(unittest.TestCase):
         ).status_code, 202)
         self.assertEqual(self.browser.post(
             "/devstack/update-now", data={"_csrf": self.csrf},
-        ).status_code, 303)
+        ).status_code, 404)
         from devstack.api import http
         http.request_update.assert_called()
 
