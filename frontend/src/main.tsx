@@ -19,7 +19,7 @@ import {DiagnosticsScreen} from "./features/configuration/Diagnostics";
 import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
 import "./styles.css";
 
-/** Staged v0.6 shell: only existing read endpoints; current / dashboard stays live. */
+/** Canonical DevStack browser frontend: reads controller state only through the guarded API. */
 export function App() {
   useEffect(watchAppearance,[]);
   const navigation=useNavigation();

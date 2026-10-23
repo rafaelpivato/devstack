@@ -1,11 +1,12 @@
 /** Navigation is presentation state, never the global active runtime. */
-export const PREVIEW_ROOT = "/__v06";
-export const GLOBAL_PROJECTS_URL=PREVIEW_ROOT+"/projects";
+export const APP_ROOT = "/";
+export const ROUTE_PREFIX = "";
+export const GLOBAL_PROJECTS_URL=ROUTE_PREFIX+"/projects";
 export const CREATE_PROJECT_URL=GLOBAL_PROJECTS_URL+"/create";
 export const IMPORT_PROJECT_URL=GLOBAL_PROJECTS_URL+"/import";
 export function importReceiptUrl(id:string):string {
   if(!isProjectId(id))throw new Error("Invalid import operation");
-  return PREVIEW_ROOT+"/imports/"+id;
+  return ROUTE_PREFIX+"/imports/"+id;
 }
 export const LANES = ["repositories", "services", "jobs", "applications", "configuration"] as const;
 export type Lane = typeof LANES[number];
@@ -39,7 +40,7 @@ export function isLane(value: string): value is Lane {
 }
 export function projectUrl(id: string): string {
   if (!isProjectId(id)) throw new Error("Invalid project identifier");
-  return PREVIEW_ROOT + "/projects/" + id;
+  return ROUTE_PREFIX + "/projects/" + id;
 }
 export function laneUrl(id: string, lane: Lane): string {
   return projectUrl(id) + "/" + lane;
@@ -71,16 +72,16 @@ export function jobsRunUrl(id:string,mode:"task"|"compose"|"adhoc"):string {
 }
 export function operationUrl(id: string): string {
   if (!isProjectId(id)) throw new Error("Invalid operation identifier");
-  return PREVIEW_ROOT + "/runtime/operations/" + id;
+  return ROUTE_PREFIX + "/runtime/operations/" + id;
 }
 export function actionUrl(action: "activate"|"switch", projectId:string):string {
   return projectUrl(projectId) + "/runtime/" + action;
 }
 export function globalActionUrl(action:"deactivate"|"reconcile"):string {
-  return PREVIEW_ROOT + "/runtime/" + action;
+  return ROUTE_PREFIX + "/runtime/" + action;
 }
-export const OPERATIONS_URL=PREVIEW_ROOT+"/runtime/operations";
-export const ADMIN_ROOT=PREVIEW_ROOT+"/administration";
+export const OPERATIONS_URL=ROUTE_PREFIX+"/runtime/operations";
+export const ADMIN_ROOT=ROUTE_PREFIX+"/administration";
 export function adminUrl(screen:"ssh"|"updates"|"diagnostics"):string{return ADMIN_ROOT+"/"+screen;}
 export function configUrl(id:string,screen:"compose"|"definitions"|"webhooks"|"name"):string {
   return laneUrl(id,"configuration")+"/"+screen;
@@ -88,8 +89,8 @@ export function configUrl(id:string,screen:"compose"|"definitions"|"webhooks"|"n
 export function routeFor(pathname: string): AppRoute {
   if(pathname===CREATE_PROJECT_URL)return {kind:"project-create"};
   if(pathname===IMPORT_PROJECT_URL)return {kind:"project-import"};
-  if(pathname.startsWith(PREVIEW_ROOT+"/imports/")){
-    const id=pathname.slice((PREVIEW_ROOT+"/imports/").length);
+  if(pathname.startsWith(ROUTE_PREFIX+"/imports/")){
+    const id=pathname.slice((ROUTE_PREFIX+"/imports/").length);
     return isProjectId(id)?{kind:"project-import-receipt",operationId:id}:{kind:"not-found"};
   }
   if(pathname===ADMIN_ROOT)return {kind:"administration"};
@@ -103,10 +104,10 @@ export function routeFor(pathname: string): AppRoute {
     const id=pathname.slice((OPERATIONS_URL+"/").length);
     return isProjectId(id)?{kind:"runtime-operation",operationId:id}:{kind:"not-found"};
   }
-  if (pathname === PREVIEW_ROOT || pathname === PREVIEW_ROOT + "/") return {kind:"entry"};
-  if (pathname === PREVIEW_ROOT + "/projects") return {kind:"projects"};
-  if (!pathname.startsWith(PREVIEW_ROOT + "/projects/")) return {kind:"not-found"};
-  const segments = pathname.slice((PREVIEW_ROOT + "/projects/").length).split("/");
+  if (pathname === APP_ROOT) return {kind:"entry"};
+  if (pathname === ROUTE_PREFIX + "/projects") return {kind:"projects"};
+  if (!pathname.startsWith(ROUTE_PREFIX + "/projects/")) return {kind:"not-found"};
+  const segments = pathname.slice((ROUTE_PREFIX + "/projects/").length).split("/");
   if (!isProjectId(segments[0])) return {kind:"not-found"};
   const projectId = segments[0];
   if (segments.length === 1) return {kind:"project", projectId};
@@ -145,11 +146,11 @@ export function parentUrl(route: AppRoute): string {
   switch (route.kind) {
     case "project-create":case "project-import":return GLOBAL_PROJECTS_URL;
     case "project-import-receipt":return IMPORT_PROJECT_URL;
-    case "administration":return PREVIEW_ROOT+"/projects";
+    case "administration":return ROUTE_PREFIX+"/projects";
     case "admin-detail":return ADMIN_ROOT;
     case "config-detail":return laneUrl(route.projectId,"configuration");
     case "runtime-operation": return OPERATIONS_URL;
-    case "runtime-operations": case "runtime-global-action": return PREVIEW_ROOT;
+    case "runtime-operations": case "runtime-global-action": return APP_ROOT;
     case "runtime-action": return projectUrl(route.projectId);
     case "service-logs": return laneUrl(route.projectId,"services");
     case "job-logs": return jobUrl(route.projectId,route.jobId);
@@ -158,8 +159,8 @@ export function parentUrl(route: AppRoute): string {
     case "repo-add":case "repo-bulk":case "repo-branch":case "repo-source":
     case "repository": return laneUrl(route.projectId, "repositories");
     case "lane": return projectUrl(route.projectId);
-    case "project": return PREVIEW_ROOT + "/projects";
-    default: return PREVIEW_ROOT;
+    case "project": return ROUTE_PREFIX + "/projects";
+    default: return APP_ROOT;
   }
 }
 export function routeProjectId(route: AppRoute): string | null {

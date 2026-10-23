@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type MouseEvent, type PropsWithChildren } from "react";
-import { parentUrl, PREVIEW_ROOT, routeFor, type AppRoute } from "./routes";
+import { parentUrl, GLOBAL_PROJECTS_URL, routeFor, type AppRoute } from "./routes";
 
 /** Deliberately small History API adapter: URLs own the route, no global store. */
 export function useNavigation() {
@@ -42,8 +42,4 @@ export function NavLink({to, navigate, children, className, current}: PropsWithC
   }
   return <a href={to} onClick={onClick} className={className} aria-current={current ? "page":undefined}>{children}</a>;
 }
-export function OldDashboardLink({projectId, children}: PropsWithChildren<{projectId?:string}>) {
-  // This is a deliberate handoff to still-supported v0.5.3 functionality.
-  return <a href={projectId ? "/projects/" + encodeURIComponent(projectId) : "/"}>{children ?? "Open current dashboard"}</a>;
-}
-export const GLOBAL_PROJECTS = PREVIEW_ROOT + "/projects";
+export const GLOBAL_PROJECTS = GLOBAL_PROJECTS_URL;
