@@ -64,5 +64,7 @@ jobs:
               assert css, "missing stylesheet"
               for asset in (entry["file"], *css):
                   assert prefix + asset in files, f"missing bundled asset: {asset}"
-              assert "devstack/templates/v06_preview.html" in files
+              assert "devstack/templates/app.html" in files
+              assert not any(p.startswith("devstack/templates/v2_") for p in files)
+              assert not any(p.startswith("devstack/static/js/v2_") for p in files)
           PY
