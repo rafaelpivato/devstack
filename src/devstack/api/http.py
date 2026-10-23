@@ -1,4 +1,4 @@
-"""DevStack v2: project-scoped owner dashboard and HTTP API.
+"""DevStack browser entry point and guarded project-scoped HTTP API.
 
 This process owns neither Docker nor the SQLite registry. Every operation
 goes over the controller's restricted Unix socket; selecting a project in
@@ -256,8 +256,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         return render_template("app.html", csrf=csrf(),
                                js_asset=js_asset, css_assets=css_assets)
 
-    @app.get("/<path:frontend_path>")
-    def react_deep_link(frontend_path=""):
+    def valid_frontend_path(frontend_path):
         """Only known project-scoped SPA routes; no generic catch-all."""
         import re
         pattern = (r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
@@ -304,7 +303,11 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
               (len(segments) == 4 and segments[2] == "repositories" and
                re.fullmatch(pattern, segments[3], re.IGNORECASE) is not None)))
         )
-        if not valid:
+        return valid
+
+    @app.get("/<path:frontend_path>")
+    def react_deep_link(frontend_path=""):
+        if not valid_frontend_path(frontend_path):
             abort(404)
         return index()
 
@@ -318,9 +321,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def old_preview_deep_link(frontend_path):
         # Invalid/unrecognized paths must never become an unrestricted redirect.
         # Check the same allowlist against the new canonical URL.
-        if not frontend_path:
+        if not valid_frontend_path(frontend_path):
             abort(404)
-        # Validation uses the same strict SPA route code below.
         return redirect("/" + frontend_path, code=308)
 
     @app.get("/api/v2/projects")
