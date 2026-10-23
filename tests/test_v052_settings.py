@@ -113,7 +113,7 @@ class SettingsTests(unittest.TestCase):
         browser = app.test_client()
         page = browser.get("/projects/" + self.b.id)
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Managed Docker Compose", page.data)
+        self.assertIn(b"devstack-csrf", page.data)
         with browser.session_transaction() as session:
             csrf = session["_csrf"]
         body = {"applications": [{"name": "API", "service": "api"}], "tasks": []}

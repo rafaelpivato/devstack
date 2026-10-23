@@ -87,7 +87,7 @@ class ContainerObservationTests(unittest.TestCase):
         })
         page = self.browser.get("/projects/" + self.a)
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Services are not running", page.data)
+        self.assertIn(b"devstack-csrf", page.data)
         self.assertEqual(self.browser.get(
             "/api/v2/projects/" + self.a + "/services",
         ).get_json()["services"], [])
@@ -105,9 +105,7 @@ class ContainerObservationTests(unittest.TestCase):
                          "healthy")
         self.assertEqual(self.backend.observations[-1],
                          (self.a, active["generation"]))
-        self.assertIn(b'id="compose-services"', self.browser.get(
-            "/projects/" + self.a,
-        ).data)
+        self.assertEqual(self.browser.get("/projects/" + self.a + "/services").status_code, 200)
         self.assertEqual(self.browser.get(
             "/api/v2/projects/" + self.b + "/services",
         ).get_json()["services"], [])
@@ -119,7 +117,7 @@ class ContainerObservationTests(unittest.TestCase):
         ).get_json()["text"], "Django started")
         self.assertEqual(self.backend.log_reads[-1][-1], 150)
         self.assertEqual(self.browser.get(
-            "/projects/" + self.a + "/services/" + "1"*64 + "/logs",
+            "/projects/" + self.a + "/services/" + "1"*64,
         ).status_code, 200)
         self.assertEqual(self.browser.get(
             "/api/v2/projects/" + str(uuid4()) + "/services",

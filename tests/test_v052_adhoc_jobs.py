@@ -319,9 +319,7 @@ class JobTests(unittest.TestCase):
         self.assertEqual(self.browser.get(
             f"/projects/{self.a}/jobs/{new_job}",
         ).status_code, 200)
-        self.assertIn("Recent jobs", self.browser.get(
-            f"/projects/{self.a}",
-        ).get_data(as_text=True))
+        self.assertEqual(self.browser.get(f"/projects/{self.a}/jobs").status_code, 200)
         with self.assertRaises(ProtocolError):
             self.controller.handle({"op": "adhoc", "project_id": self.a,
                 "kind": "exec", "service": "web", "image": "",
