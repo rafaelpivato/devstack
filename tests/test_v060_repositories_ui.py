@@ -33,17 +33,17 @@ class RepoUIContractTests(unittest.TestCase):
             raise AssertionError("Unexpected IPC: "+op)
         self.app=create_app({"TESTING":True,"SECRET_KEY":"test","SESSION_COOKIE_SECURE":False}, transport=transport)
         self.client=self.app.test_client()
-        self.client.get("/__v06")
+        self.client.get("")
         with self.client.session_transaction() as s: self.csrf=s["_csrf"]
 
     def test_readonly_preview_does_not_mutate(self):
         urls=[
-            f"/__v06/projects/{A}/repositories",
-            f"/__v06/projects/{A}/repositories/{B}",
-            f"/__v06/projects/{A}/repositories/branch",
-            f"/__v06/projects/{A}/repositories/source",
-            f"/__v06/projects/{A}/repositories/adds/{O}",
-            f"/__v06/projects/{A}/repositories/updates/{O}",
+            f"/projects/{A}/repositories",
+            f"/projects/{A}/repositories/{B}",
+            f"/projects/{A}/repositories/branch",
+            f"/projects/{A}/repositories/source",
+            f"/projects/{A}/repositories/adds/{O}",
+            f"/projects/{A}/repositories/updates/{O}",
         ]
         for url in urls:
             with self.subTest(url=url):

@@ -16,13 +16,13 @@ class ProjectManagementUITests(unittest.TestCase):
             raise AssertionError(op)
         self.app=create_app({"TESTING":True,"SECRET_KEY":"test","SESSION_COOKIE_SECURE":False},transport=transport)
         self.client=self.app.test_client()
-        self.client.get("/__v06")
+        self.client.get("")
         with self.client.session_transaction() as session:self.csrf=session["_csrf"]
     def test_deep_links_are_contained_and_side_effect_free(self):
-        for url in ("/__v06/projects/create","/__v06/projects/import",f"/__v06/imports/{P}"):
+        for url in ("/projects/create","/projects/import",f"/imports/{P}"):
             self.assertEqual(self.client.get(url).status_code,200)
-        for url in ("/__v06/imports/invalid","/__v06/projects/create/shell",
-                    f"/__v06/imports/{P}/logs"):
+        for url in ("/imports/invalid","/projects/create/shell",
+                    f"/imports/{P}/logs"):
             self.assertEqual(self.client.get(url).status_code,404)
         self.assertEqual(self.calls,[])
     def test_create_requires_csrf_and_exact_payload(self):
