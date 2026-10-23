@@ -3,7 +3,7 @@ import {renderToStaticMarkup} from "react-dom/server";
 import {apiRequest} from "../src/api/client";
 import {projectNameValid,projectSlugValid,githubSourceValid} from "../src/api/projectManagement";
 import {CreateProjectScreen,ImportProjectScreen} from "../src/features/projects/ProjectManagement";
-import {CREATE_PROJECT_URL,IMPORT_PROJECT_URL,importReceiptUrl,routeFor,parentUrl,GLOBAL_PROJECTS_URL,PREVIEW_ROOT} from "../src/navigation/routes";
+import {CREATE_PROJECT_URL,IMPORT_PROJECT_URL,importReceiptUrl,routeFor,parentUrl,GLOBAL_PROJECTS_URL,ROUTE_PREFIX} from "../src/navigation/routes";
 import type {RuntimeSnapshot} from "../src/api/runtime";
 import type {Navigator} from "../src/navigation/useNavigation";
 const A="11111111-1111-4111-8111-111111111111";
@@ -16,8 +16,8 @@ describe("project management parity",()=>{
     expect(routeFor(importReceiptUrl(A))).toEqual({kind:"project-import-receipt",operationId:A});
     expect(parentUrl(routeFor(importReceiptUrl(A)))).toEqual(IMPORT_PROJECT_URL);
     expect(parentUrl(routeFor(CREATE_PROJECT_URL))).toEqual(GLOBAL_PROJECTS_URL);
-    expect(routeFor(PREVIEW_ROOT+"/imports/garbage")).toEqual({kind:"not-found"});
-    expect(routeFor(PREVIEW_ROOT+"/projects/create/shell")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/imports/garbage")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/projects/create/shell")).toEqual({kind:"not-found"});
   });
   it("matches controller slugs and safe supported HTTPS GitHub sources",()=>{
     expect(projectSlugValid("project-12")).toBe(true);

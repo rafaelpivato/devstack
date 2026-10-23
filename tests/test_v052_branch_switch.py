@@ -222,12 +222,12 @@ class BranchSwitchingTests(unittest.TestCase):
     def test_mobile_preview_requires_confirmation_and_csrf(self):
         backend = self._clone(self.a, self.backend, "backend")
         self._publish_branch(self.backend, "feature/ui")
-        url = "/projects/" + self.a + "/git/branch-preview"
+        url = "/projects/" + self.a + "/repositories/branch"
         preview = self.browser.get(url, query_string={
             "branch": "feature/ui", "repository_id": backend.id,
         })
         self.assertEqual(preview.status_code, 200, preview.data[:200])
-        self.assertIn(b"Confirm branch switching", preview.data)
+        self.assertIn(b"devstack-csrf", preview.data)
         self.assertEqual(self._status(backend)["branch"], "main")
         reviewed = self.controller.repositories.branch_preview(
             self.a, "feature/ui", backend.id,

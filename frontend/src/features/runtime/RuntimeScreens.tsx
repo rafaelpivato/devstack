@@ -5,7 +5,7 @@ import { readRuntime, readTransition, readTransitions, submitTransition,
 } from "../../api/runtime";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { useResource } from "../../hooks/useResource";
-import { actionUrl, globalActionUrl, isProjectId, OPERATIONS_URL, operationUrl, PREVIEW_ROOT } from "../../navigation/routes";
+import { actionUrl, globalActionUrl, isProjectId, OPERATIONS_URL, operationUrl, APP_ROOT } from "../../navigation/routes";
 import type { Navigator } from "../../navigation/useNavigation";
 import { NavLink } from "../../navigation/useNavigation";
 
@@ -275,7 +275,7 @@ export function RuntimeOperationDetail({id,navigation}: {id:string;navigation:Na
               :"Review the failure and current runtime state before retrying."}
           </Notice>}
     </>}
-    <p className="actions"><NavLink to={PREVIEW_ROOT} navigate={navigation.navigate}>Current runtime →</NavLink></p>
+    <p className="actions"><NavLink to={APP_ROOT} navigate={navigation.navigate}>Current runtime →</NavLink></p>
     <p className="actions"><NavLink to={OPERATIONS_URL} navigate={navigation.navigate}>Recent operations →</NavLink></p>
   </Shell>;
 }

@@ -83,7 +83,7 @@ class DiagnosticHttpTests(unittest.TestCase):
            return_value={"phase": "idle", "unit_state": "inactive",
                          "last_result": "success", "last_exit_code": "0"})
     def test_only_known_windows_no_mutation_and_order(self, *_):
-        self.assertEqual(self.client.get("/__v06/administration/diagnostics").status_code, 200)
+        self.assertEqual(self.client.get("/administration/diagnostics").status_code, 200)
         self.assertEqual(self.calls, [])
         self.assertEqual(self.client.get("/api/v2/devstack/diagnostics?minutes=2").status_code, 400)
         self.assertEqual(self.calls, [])

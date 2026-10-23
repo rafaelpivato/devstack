@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {Shell} from "../src/components/Shell";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Entry, ProjectDirectory, SECTIONS } from "../src/features/projects/ProjectScreens";
-import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, PREVIEW_ROOT, projectUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl, routeFor } from "../src/navigation/routes";
+import { actionUrl, globalActionUrl, isProjectId, laneUrl, operationUrl, OPERATIONS_URL, parentUrl, APP_ROOT, ROUTE_PREFIX, projectUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl, routeFor } from "../src/navigation/routes";
 import type { Navigator } from "../src/navigation/useNavigation";
 import type { ProjectSummary, RuntimeSnapshot } from "../src/api/runtime";
 
@@ -23,9 +23,9 @@ describe("semantic and accessible shell",()=>{
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('<main');
     expect(html).toContain('id="content"');
-    expect(html).toContain('href="/__v06" class="wordmark"');
+    expect(html).toContain('href="/" class="wordmark"');
     expect(html).toContain("DevStack</a>");
-    expect(html).toContain('href="/__v06/administration"');
+    expect(html).toContain('href="/administration"');
     expect(html).toContain("DevStack administration");
     expect(html).toContain("admin-shortcut");
   });
@@ -38,8 +38,8 @@ describe("restrained workspace accents",()=>{
 });
 describe("project-scoped hierarchical routes",()=>{
   it("keeps stable UUIDs in routes and parent hierarchy",()=>{
-    expect(routeFor(PREVIEW_ROOT)).toEqual({kind:"entry"});
-    expect(routeFor(PREVIEW_ROOT+"/projects")).toEqual({kind:"projects"});
+    expect(routeFor(APP_ROOT)).toEqual({kind:"entry"});
+    expect(routeFor(ROUTE_PREFIX+"/projects")).toEqual({kind:"projects"});
     expect(routeFor(projectUrl(A))).toEqual({kind:"project",projectId:A});
     const lane=routeFor(laneUrl(A,"services"));
     expect(lane).toEqual({kind:"lane", projectId:A,lane:"services"});
@@ -47,11 +47,11 @@ describe("project-scoped hierarchical routes",()=>{
     const repo=routeFor(repoUrl(A,B));
     expect(repo).toEqual({kind:"repository",projectId:A,repositoryId:B});
     expect(parentUrl(repo)).toBe(laneUrl(A,"repositories"));
-    expect(parentUrl(routeFor(projectUrl(A)))).toBe(PREVIEW_ROOT+"/projects");
+    expect(parentUrl(routeFor(projectUrl(A)))).toBe(ROUTE_PREFIX+"/projects");
     expect(routeFor(actionUrl("switch",A))).toEqual({kind:"runtime-action",action:"switch",projectId:A});
     expect(parentUrl(routeFor(actionUrl("activate",A)))).toBe(projectUrl(A));
     expect(routeFor(globalActionUrl("reconcile"))).toEqual({kind:"runtime-global-action",action:"reconcile"});
-    expect(parentUrl(routeFor(globalActionUrl("deactivate")))).toBe(PREVIEW_ROOT);
+    expect(parentUrl(routeFor(globalActionUrl("deactivate")))).toBe(APP_ROOT);
     expect(routeFor(OPERATIONS_URL)).toEqual({kind:"runtime-operations"});
     expect(routeFor(operationUrl(B))).toEqual({kind:"runtime-operation",operationId:B});
     expect(parentUrl(routeFor(operationUrl(B)))).toBe(OPERATIONS_URL);
@@ -65,15 +65,15 @@ describe("project-scoped hierarchical routes",()=>{
   });
   it("rejects invalid/unplanned paths; no implicit current-project alias",()=>{
     expect(isProjectId("not-a-uuid")).toBe(false);
-    expect(routeFor(PREVIEW_ROOT+"/projects/current")).toEqual({kind:"not-found"});
-    expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/terminal")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/projects/current")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/projects/"+A+"/terminal")).toEqual({kind:"not-found"});
     expect(routeFor(laneUrl(A,"repositories")+"/shell")).toEqual({kind:"not-found"});
     expect(routeFor(laneUrl(A,"repositories")+"/adds/not-uuid")).toEqual({kind:"not-found"});
     expect(routeFor(laneUrl(A,"repositories")+"/updates/"+B+"/logs")).toEqual({kind:"not-found"});
-    expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/runtime/execute")).toEqual({kind:"not-found"});
-    expect(routeFor(PREVIEW_ROOT+"/runtime/operations/not-a-uuid")).toEqual({kind:"not-found"});
-    expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/services/"+B)).toEqual({kind:"not-found"});
-    expect(routeFor(PREVIEW_ROOT+"/projects/"+A+"/repositories/"+B+"/logs")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/projects/"+A+"/runtime/execute")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/runtime/operations/not-a-uuid")).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/projects/"+A+"/services/"+B)).toEqual({kind:"not-found"});
+    expect(routeFor(ROUTE_PREFIX+"/projects/"+A+"/repositories/"+B+"/logs")).toEqual({kind:"not-found"});
     expect(routeFor("/api/v2/projects")).toEqual({kind:"not-found"});
     expect(()=>projectUrl("active")).toThrow("Invalid project identifier");
   });
@@ -84,7 +84,7 @@ describe("runtime-defined landing and non-mutating project browsing",()=>{
     const html=renderToStaticMarkup(<Entry runtime={runtime} projects={projects} navigation={navigator}/>);
     expect(html).toContain("No active project");
     expect(html).toContain("Choose a project");
-    expect(html).toContain(PREVIEW_ROOT+"/projects");
+    expect(html).toContain(ROUTE_PREFIX+"/projects");
     expect(html).not.toContain("Running");
     expect(navigator.navigate).not.toHaveBeenCalled();
   });
@@ -92,7 +92,7 @@ describe("runtime-defined landing and non-mutating project browsing",()=>{
     const html=renderToStaticMarkup(<Entry
       runtime={{phase:"inactive",project_id:null}} projects={[]} navigation={navigator}/>);
     expect(html).toContain("Create or import project");
-    expect(html).toContain(PREVIEW_ROOT+"/projects");
+    expect(html).toContain(ROUTE_PREFIX+"/projects");
   });
   it("does not reinterpret transition or error as inactive",()=>{
     for(const phase of ["activating","deactivating","switching","error"] as const){

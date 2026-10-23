@@ -69,31 +69,29 @@ jobs:
           assert len(wheels) == 1, wheels
           with zipfile.ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
-              for path in (
+              assert "devstack/templates/app.html" in names, "React entry template missing"
+              for legacy in (
+                  "devstack/templates/dashboard.html",
+                  "devstack/static/css/dashboard.css",
+                  "devstack/static/js/api.js",
                   "devstack/templates/v2_dashboard.html",
                   "devstack/templates/v2_job.html",
                   "devstack/templates/v2_updates.html",
                   "devstack/static/css/v2.css",
                   "devstack/static/js/v2_dashboard.js",
               ):
-                  assert path in names, f"Missing packaged v2 asset: {path}"
-              for legacy in (
-                  "devstack/templates/dashboard.html",
-                  "devstack/static/css/dashboard.css",
-                  "devstack/static/js/api.js",
-              ):
                   assert legacy not in names, f"Legacy asset still packaged: {legacy}"
           from devstack.api.http import create_app
           app = create_app({"TESTING": True, "SESSION_COOKIE_SECURE": False})
           with app.test_client() as client:
-              assert client.get("/static/css/v2.css").status_code == 200
-              assert client.get("/static/js/v2_dashboard.js").status_code == 200
-              # R1: a pip-installed release must serve the new UI without Node.
-              # The existing '/' dashboard remains the default until owner QA.
-              assert client.get("/__v06").status_code == 200
-              assert client.get("/__v06/projects/create").status_code == 200
-              assert client.get("/__v06/projects/import").status_code == 200
-              assert client.get("/__v06/unknown").status_code == 404
+              assert client.get("/static/css/v2.css").status_code == 404
+              assert client.get("/static/js/v2_dashboard.js").status_code == 404
+              # Pip-installed release must serve the sole React UI at the root.
+              assert client.get("/").status_code == 200
+              assert client.get("/projects/create").status_code == 200
+              assert client.get("/projects/import").status_code == 200
+              assert client.get("/unknown").status_code == 404
+              assert client.get("/__v06").status_code == 308
               import importlib.metadata
               import json
               from pathlib import Path

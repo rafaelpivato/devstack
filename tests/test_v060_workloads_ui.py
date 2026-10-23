@@ -28,27 +28,27 @@ class WorkloadsPreviewTests(unittest.TestCase):
         self.app=create_app({"TESTING":True,"SECRET_KEY":"test",
                              "SESSION_COOKIE_SECURE":False},transport=transport)
         self.client=self.app.test_client()
-        self.client.get("/__v06")
+        self.client.get("/")
         with self.client.session_transaction() as session:self.csrf=session["_csrf"]
     def test_narrow_deep_links_never_touch_controller(self):
         for path in (
-            f"/__v06/projects/{PROJECT}/services",
-            f"/__v06/projects/{PROJECT}/services/{CONTAINER}",
-            f"/__v06/projects/{PROJECT}/applications",
-            f"/__v06/projects/{PROJECT}/jobs",
-            f"/__v06/projects/{PROJECT}/jobs/{JOB}",
-            f"/__v06/projects/{PROJECT}/jobs/{JOB}/logs",
-            f"/__v06/projects/{PROJECT}/jobs/run/task",
-            f"/__v06/projects/{PROJECT}/jobs/run/adhoc",
-            f"/__v06/projects/{PROJECT}/jobs/run/compose",
+            f"/projects/{PROJECT}/services",
+            f"/projects/{PROJECT}/services/{CONTAINER}",
+            f"/projects/{PROJECT}/applications",
+            f"/projects/{PROJECT}/jobs",
+            f"/projects/{PROJECT}/jobs/{JOB}",
+            f"/projects/{PROJECT}/jobs/{JOB}/logs",
+            f"/projects/{PROJECT}/jobs/run/task",
+            f"/projects/{PROJECT}/jobs/run/adhoc",
+            f"/projects/{PROJECT}/jobs/run/compose",
         ):
             with self.subTest(path=path):self.assertEqual(self.client.get(path).status_code,200)
         self.assertEqual(self.calls,[])
         for path in (
-            f"/__v06/projects/{PROJECT}/services/abcdef",
-            f"/__v06/projects/{PROJECT}/services/{CONTAINER}/exec",
-            f"/__v06/projects/{PROJECT}/jobs/run/shell",
-            f"/__v06/projects/{PROJECT}/jobs/{JOB}/interactive",
+            f"/projects/{PROJECT}/services/abcdef",
+            f"/projects/{PROJECT}/services/{CONTAINER}/exec",
+            f"/projects/{PROJECT}/jobs/run/shell",
+            f"/projects/{PROJECT}/jobs/{JOB}/interactive",
         ):
             with self.subTest(path=path):self.assertEqual(self.client.get(path).status_code,404)
         self.assertEqual(self.calls,[])

@@ -326,11 +326,10 @@ class ProjectBulkUpdatesTests(unittest.TestCase):
         status_url = response.headers["Location"]
         self.assertEqual(self.browser.get(status_url).status_code, 200)
         self.assertEqual(self.browser.get(
-            "/projects/" + self.a + "/repository-updates/" + operation["id"],
+            "/projects/" + self.a + "/repositories/updates/" + operation["id"],
         ).status_code, 200)
         dashboard = self.browser.get("/projects/" + self.a)
-        self.assertIn(b"Last repository update", dashboard.data)
-        self.assertIn(operation["id"].encode(), dashboard.data)
+        self.assertIn(b"devstack-csrf", dashboard.data)
         self.assertEqual(self.browser.get(
             "/api/v2/projects/" + self.b +
             "/repository-updates/" + operation["id"],

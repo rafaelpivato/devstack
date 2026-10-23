@@ -28,21 +28,21 @@ class ConfigurationApiTests(unittest.TestCase):
             raise AssertionError("Unexpected controller action: "+op)
         self.app=create_app({"TESTING":True,"SECRET_KEY":"test","SESSION_COOKIE_SECURE":False},transport=transport)
         self.client=self.app.test_client()
-        self.client.get("/__v06")
+        self.client.get("/")
         with self.client.session_transaction() as session:self.csrf=session["_csrf"]
 
     def test_config_and_admin_deep_links_are_narrow_and_side_effect_free(self):
-        for route in ("/__v06/administration","/__v06/administration/ssh",
-                      "/__v06/administration/updates",
-                      f"/__v06/projects/{PROJECT}/configuration",
-                      f"/__v06/projects/{PROJECT}/configuration/compose",
-                      f"/__v06/projects/{PROJECT}/configuration/definitions",
-                      f"/__v06/projects/{PROJECT}/configuration/webhooks",
-                      f"/__v06/projects/{PROJECT}/configuration/name"):
+        for route in ("/administration","/administration/ssh",
+                      "/administration/updates",
+                      f"/projects/{PROJECT}/configuration",
+                      f"/projects/{PROJECT}/configuration/compose",
+                      f"/projects/{PROJECT}/configuration/definitions",
+                      f"/projects/{PROJECT}/configuration/webhooks",
+                      f"/projects/{PROJECT}/configuration/name"):
             with self.subTest(route=route):self.assertEqual(self.client.get(route).status_code,200)
-        for path in ("/__v06/administration/terminal",
-                     f"/__v06/projects/{PROJECT}/configuration/shell",
-                     f"/__v06/projects/{PROJECT}/configuration/compose/exec"):
+        for path in ("/administration/terminal",
+                     f"/projects/{PROJECT}/configuration/shell",
+                     f"/projects/{PROJECT}/configuration/compose/exec"):
             with self.subTest(path=path):self.assertEqual(self.client.get(path).status_code,404)
         self.assertEqual(self.calls,[])
 

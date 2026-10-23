@@ -137,8 +137,8 @@ class SourceReviewTests(unittest.TestCase):
         browser = app.test_client()
         project_url = "/projects/" + self.a.id
         page = browser.get(project_url)
-        self.assertIn(b"Review Git template changes", page.data)
-        self.assertEqual(browser.get(project_url + "/source-review").status_code, 200)
+        self.assertIn(b"devstack-csrf", page.data)
+        self.assertEqual(browser.get(project_url + "/repositories/source").status_code, 200)
         api = browser.get("/api/v2/projects/" + self.a.id + "/source-review")
         self.assertEqual(api.status_code, 200)
         self.assertEqual(api.get_json()["project_id"], self.a.id)
@@ -360,9 +360,9 @@ class SourceReviewTests(unittest.TestCase):
                           "SESSION_COOKIE_SECURE": False}, transport=transport)
         browser = app.test_client()
         self._change_source()
-        page = browser.get("/projects/" + self.a.id + "/source-review")
+        page = browser.get("/projects/" + self.a.id + "/repositories/source")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Apply selected changes", page.data)
+        self.assertIn(b"devstack-csrf", page.data)
         with browser.session_transaction() as session:
             csrf = session["_csrf"]
         url = "/api/v2/projects/" + self.a.id + "/source-review/apply"

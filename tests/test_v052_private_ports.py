@@ -126,9 +126,7 @@ class PrivatePortsAPITests(unittest.TestCase):
             self.assertFalse(wrong.get_json()["active"])
             self.assertEqual(wrong.get_json()["ports"], [])
             self.assertEqual(len(self.backend.lookups), 1)
-            self.assertIn(b'private-application-ports', self.browser.get(
-                "/projects/" + self.a,
-            ).data)
+            self.assertEqual(self.browser.get("/projects/" + self.a + "/applications").status_code, 200)
 
     def test_missing_tailscale_yields_no_links_and_no_docker_queries(self):
         self.controller.coordinator.activate(self.a)

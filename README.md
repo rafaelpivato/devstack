@@ -1,10 +1,10 @@
 # DevStack
 
-**Latest published: v0.6.1. v0.6.2 stabilization candidate is in [PR #85](https://github.com/rafaelpivato/devstack/pull/85) (not released).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.6.2. In progress: v0.6.4 default React UI cutover and legacy UI cleanup (owner-review only).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 
-The redesigned v0.6 project-first mobile interface remains available as an **opt-in preview** at `/__v06` on an existing private DevStack host. Until real-device acceptance and the release cutover decision, the existing dashboard remains at `/`; no browser visit activates a project.
+The released v0.6.2 React project-first mobile UI is staged at `/__v06` while the historic server-rendered dashboard remains at `/`. **v0.6.4 (unreleased)** will make React canonical at `/`, remove legacy-only UI resources, and redirect old preview bookmarks. Browser navigation never activates a project.
 
 ## Architecture
 
@@ -34,9 +34,9 @@ the trusted `devstackipc` group—**not** the Docker group. See
 
 ## Installation and release status
 
-The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. The trusted `scripts/install.sh` installs only the **latest published v0.5.2-or-later release**. v0.6.0 is a published release. v0.6.1 is a proposed patch until owner review, merge into `main`, verification and publication by release CI. Existing v0.5.2 installations may upgrade through their established updater to the latest published stable version; the v0.5.3 transition still requires explicit CLI enrollment and standalone-updater refresh (see [release notes](docs/releases/v0.5.3.md)).
+The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. `scripts/install.sh` selects the latest published stable release; existing supported deployments upgrade using the independent guarded updater. **v0.6.2 is published; v0.6.4 is an unmerged candidate, and v0.6.3 is intentionally skipped.** Installed v0.5.2 users upgrading to newer versions must follow the v0.5.3 CLI operator enrollment and independent updater refresh notes.
 
-For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md). For the CLI patch, see [v0.5.3 release notes](docs/releases/v0.5.3.md). For the released UI, see [v0.6.0 notes](docs/releases/v0.6.0.md); for this patch, see [v0.6.1 notes](docs/releases/v0.6.1.md) and the [acceptance checklist](docs/v0.6-ux-parity-audit.md). Several physical-host checks (especially in-place update/rollback and reboot) remain deferred to live deployment; passing CI is not equivalent to an actual-host acceptance pass.
+For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md); for the CLI setup, see [v0.5.3 notes](docs/releases/v0.5.3.md). For the published UI series, see [v0.6.0](docs/releases/v0.6.0.md), [v0.6.1](docs/releases/v0.6.1.md), and [v0.6.2](docs/releases/v0.6.2.md); [v0.6.4 notes](docs/releases/v0.6.4.md) describe the proposed root cutover. Real-device accessibility, restart/rollback and deferred acceptance are recorded separately in [issue #50](https://github.com/rafaelpivato/devstack/issues/50).
 
 Architecture and acceptance requirements: [ADR-0001](docs/adr/0001-multiple-projects-single-runtime.md) and [v0.5.2 acceptance plan](docs/v0.5.2-acceptance-plan.md).
 
@@ -50,6 +50,6 @@ python3 -m venv .venv
 
 Docker smoke integration and fresh Ubuntu systemd permission tests run in GitHub Actions. Do not grant the web service identity root or Docker group access.
 
-## Deferred beyond v0.5.3
+## Future work
 
-Interactive container/browser terminal and TTY, unrestricted Git operations or host-shell access, automated routing/proxy services and external GPT observability are **not** part of v0.5.3. Individual application and saved-task visual CRUD remain deferred. Any live-host regressions discovered during first-project use will be addressed in later targeted patches.
+Automatic repository synchronization and policy-driven targeted container restart/rebuild are deferred beyond v0.7; GPT/MCP and secure external observability require separate architectural decisions. Neither is part of v0.6.4. History and earlier release documentation remain available for audit.

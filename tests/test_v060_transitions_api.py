@@ -37,7 +37,7 @@ class TransitionHttpTests(unittest.TestCase):
         self.app = create_app({"TESTING": True, "SECRET_KEY": "test",
                                "SESSION_COOKIE_SECURE": False}, transport=transport)
         self.client = self.app.test_client()
-        self.client.get("/__v06")
+        self.client.get("/")
         with self.client.session_transaction() as session:
             self.csrf = session["_csrf"]
 
@@ -96,11 +96,11 @@ class TransitionHttpTests(unittest.TestCase):
             self.assertEqual(response.status_code, 202)
 
     def test_unknown_outcome_not_retried_automatically_by_get(self):
-        self.assertEqual(self.client.get("/__v06/runtime/operations").status_code, 200)
-        self.assertEqual(self.client.get("/__v06/runtime/operations/" + OPERATION).status_code, 200)
-        self.assertEqual(self.client.get("/__v06/runtime/reconcile").status_code, 200)
-        self.assertEqual(self.client.get("/__v06/runtime/deactivate").status_code, 200)
-        self.assertEqual(self.client.get("/__v06/projects/" + B + "/runtime/switch").status_code, 200)
+        self.assertEqual(self.client.get("/runtime/operations").status_code, 200)
+        self.assertEqual(self.client.get("/runtime/operations/" + OPERATION).status_code, 200)
+        self.assertEqual(self.client.get("/runtime/reconcile").status_code, 200)
+        self.assertEqual(self.client.get("/runtime/deactivate").status_code, 200)
+        self.assertEqual(self.client.get("/projects/" + B + "/runtime/switch").status_code, 200)
         self.assertEqual(self.calls, [])
 
 if __name__ == "__main__":

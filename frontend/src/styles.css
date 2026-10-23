@@ -1,30 +1,30 @@
 :root, :root[data-theme="light"] {
   color-scheme:light;
   font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
-  background:#f4f7f8;color:#18242b;
-  --canvas:#f4f7f8;--panel:#ffffff;--card:#eaf0f3;
-  --line:#758b98;--text:#18242b;--muted:#354b57;
-  --accent:#075c70;--accent-blue:#174e9a;--accent-amber:#805000;
-  --warning:#774000;--positive:#155774;--danger:#9a302f;
-  --focus:#164e9e;--code-bg:#e7eef2;--control-text:#ffffff;--selection:#d3eaf0;
+  background:#F4F2EE;color:#302D2C;
+  --canvas:#F4F2EE;--panel:#FCFBF8;--card:#EBE7E1;
+  --line:#877F78;--text:#302D2C;--muted:#5D5955;
+  --accent:#485E7B;--accent-blue:#485E7B;--accent-amber:#8A5C21;
+  --warning:#8A5C21;--positive:#31696B;--danger:#9E4B43;
+  --focus:#485E7B;--code-bg:#EBE7E1;--control-text:#FFFFFF;--selection:#EBE7E1;
 }
 :root[data-theme="dark"] {
   color-scheme:dark;
-  background:#161e26;color:#f9fbfd;
-  --canvas:#161e26;--panel:#202c36;--card:#293945;
-  --line:#788a97;--text:#f9fbfd;--muted:#c6d3db;
-  --accent:#adf0e0;--accent-blue:#b1d1ff;--accent-amber:#f5c878;
-  --warning:#f0c078;--positive:#a1dafa;--danger:#ffa7a1;
-  --focus:#f5ce79;--code-bg:#101920;--control-text:#092c39;--selection:#345163;
+  background:#1D2025;color:#EEEDEB;
+  --canvas:#1D2025;--panel:#2A2D32;--card:#3A3E45;
+  --line:#899097;--text:#EEEDEB;--muted:#C9C6C3;
+  --accent:#B8C6DB;--accent-blue:#B8C6DB;--accent-amber:#D9BB8A;
+  --warning:#D9BB8A;--positive:#AACECB;--danger:#DEA9A4;
+  --focus:#B8C6DB;--code-bg:#181B20;--control-text:#1D2025;--selection:#3A3E45;
 }
 @media(prefers-color-scheme:dark) {
   :root:not([data-theme]) {
-    color-scheme:dark;background:#161e26;color:#f9fbfd;
-    --canvas:#161e26;--panel:#202c36;--card:#293945;
-    --line:#788a97;--text:#f9fbfd;--muted:#c6d3db;
-    --accent:#adf0e0;--accent-blue:#b1d1ff;--accent-amber:#f5c878;
-    --warning:#f0c078;--positive:#a1dafa;--danger:#ffa7a1;
-    --focus:#f5ce79;--code-bg:#101920;--control-text:#092c39;--selection:#345163;
+    color-scheme:dark;background:#1D2025;color:#EEEDEB;
+    --canvas:#1D2025;--panel:#2A2D32;--card:#3A3E45;
+    --line:#899097;--text:#EEEDEB;--muted:#C9C6C3;
+    --accent:#B8C6DB;--accent-blue:#B8C6DB;--accent-amber:#D9BB8A;
+    --warning:#D9BB8A;--positive:#AACECB;--danger:#DEA9A4;
+    --focus:#B8C6DB;--code-bg:#181B20;--control-text:#1D2025;--selection:#3A3E45;
   }
 }
 * { box-sizing:border-box; }

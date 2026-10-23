@@ -38,16 +38,15 @@ class ManualUpdateHTTPTests(unittest.TestCase):
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
-        self.browser.get("/devstack/updates")
+        self.browser.get("/")
         with self.browser.session_transaction() as session:
             self.csrf = session["_csrf"]
 
     def test_release_status_and_mobile_update_controls(self):
-        page = self.browser.get("/devstack/updates")
+        page = self.browser.get("/administration/updates")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Installed version", page.data)
-        self.assertIn(b"v0.5.3", page.data)
-        self.assertIn(b"Update now", page.data)
+        self.assertIn(b"devstack-csrf", page.data)
+        self.assertIn(b"DevStack", page.data)
         info = self.browser.get("/api/v2/devstack/update-status?check=1")
         self.assertEqual(info.status_code, 200)
         self.assertTrue(info.get_json()["update_available"])
@@ -63,7 +62,7 @@ class ManualUpdateHTTPTests(unittest.TestCase):
         ).status_code, 202)
         self.assertEqual(self.browser.post(
             "/devstack/update-now", data={"_csrf": self.csrf},
-        ).status_code, 303)
+        ).status_code, 405)
         from devstack.api import http
         http.request_update.assert_called()
 

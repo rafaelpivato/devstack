@@ -4,7 +4,7 @@ import type { ProjectSummary, RuntimeSnapshot } from "../../api/runtime";
 import { useResource } from "../../hooks/useResource";
 import { isProjectId, laneUrl, projectUrl, CREATE_PROJECT_URL, IMPORT_PROJECT_URL, type Lane } from "../../navigation/routes";
 import type { Navigator } from "../../navigation/useNavigation";
-import { GLOBAL_PROJECTS, OldDashboardLink } from "../../navigation/useNavigation";
+import { GLOBAL_PROJECTS } from "../../navigation/useNavigation";
 import { ItemLink, Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { RuntimeControls } from "../runtime/RuntimeScreens";
 import { OPERATIONS_URL, globalActionUrl, ADMIN_ROOT } from "../../navigation/routes";
@@ -48,7 +48,7 @@ export function Entry({runtime, projects, navigation}:{
   if (!chooseProject(projects, runtime.project_id))
     return <Shell title="Project unavailable" navigation={navigation}>
       <Notice title="Active project not in registry" role="alert">DevStack reported an active ID that is not in the project list. No fallback activation will occur.</Notice>
-      <OldDashboardLink>Inspect current runtime</OldDashboardLink>
+      <p className="actions"><NavLink to={OPERATIONS_URL} navigate={navigation.navigate}>Inspect runtime operations →</NavLink></p>
     </Shell>;
   return <ProjectHome id={runtime.project_id} runtime={runtime} navigation={navigation} projectName={chooseProject(projects,runtime.project_id)?.name}/>;
 }
@@ -128,6 +128,6 @@ export function ProjectFeature({id,lane,navigation,runtime}:{
         <div className="property"><span>Registered applications</span><strong>{detail.data.applications.length}</strong></div>
       </div>}
     </>}
-    <p className="actions"><OldDashboardLink projectId={id}>Open {meta.title.toLowerCase()} in current UI ↗</OldDashboardLink></p>
+    <p className="actions"><NavLink to={projectUrl(id)} navigate={navigation.navigate}>Project overview →</NavLink></p>
   </Shell>;
 }

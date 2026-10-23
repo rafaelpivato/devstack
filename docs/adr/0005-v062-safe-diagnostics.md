@@ -1,6 +1,6 @@
 # ADR-0005 — Read-only DevStack diagnostics without privileged journal disclosure
 
-- Status: accepted design for v0.6.2 candidate; validate on real host before release
+- Status: accepted and implemented in published v0.6.2; real-host limitations remain explicitly tracked separately
 - Context: [#81](https://github.com/rafaelpivato/devstack/issues/81), [#84](https://github.com/rafaelpivato/devstack/issues/84)
 - Invariants: [ADR-0001](0001-multiple-projects-single-runtime.md), [ADR-0003](0003-native-cli-controller-ipc.md)
 
