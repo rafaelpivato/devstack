@@ -41,7 +41,7 @@ class FrontendFoundationTests(unittest.TestCase):
         # never invoke a controller operation or mutate the global runtime.
         uid = "11111111-1111-4111-8111-111111111111"
         repo = "22222222-2222-4222-8222-222222222222"
-        for route in ("/", "/projects",
+        for route in ("/projects",
                       f"/projects/{uid}",
                       f"/projects/{uid}/services",
                       f"/projects/{uid}/repositories/{repo}",
@@ -59,7 +59,7 @@ class FrontendFoundationTests(unittest.TestCase):
                       f"/projects/{uid}/repositories/add/anything",
                       f"/projects/{uid}/repositories/adds/bad",
                       f"/projects/{uid}/repositories/updates/{repo}/logs",
-                      "/unexpected/api/v2/runtime"):
+                      "/__v06/api/v2/runtime"):
             with self.subTest(invalid=route):
                 self.assertEqual(self.client.get(route).status_code, 404)
         self.assertEqual(self.operations, [])

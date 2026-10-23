@@ -23,7 +23,7 @@ describe("semantic and accessible shell",()=>{
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('<main');
     expect(html).toContain('id="content"');
-    expect(html).toContain('href="" class="wordmark"');
+    expect(html).toContain('href="/" class="wordmark"');
     expect(html).toContain("DevStack</a>");
     expect(html).toContain('href="/administration"');
     expect(html).toContain("DevStack administration");
