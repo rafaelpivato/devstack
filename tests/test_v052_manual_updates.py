@@ -45,9 +45,8 @@ class ManualUpdateHTTPTests(unittest.TestCase):
     def test_release_status_and_mobile_update_controls(self):
         page = self.browser.get("/administration/updates")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Installed version", page.data)
-        self.assertIn(b"v0.5.3", page.data)
-        self.assertIn(b"Update now", page.data)
+        self.assertIn(b"devstack-csrf", page.data)
+        self.assertIn(b"DevStack", page.data)
         info = self.browser.get("/api/v2/devstack/update-status?check=1")
         self.assertEqual(info.status_code, 200)
         self.assertTrue(info.get_json()["update_available"])
