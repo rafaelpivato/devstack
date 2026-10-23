@@ -142,15 +142,12 @@ class HttpTests(unittest.TestCase):
         a, b = self.create("alpha"), self.create("beta")
         response = self.client.get("/projects/" + b)
         self.assertEqual(response.status_code, 200)
-        body = response.get_data(as_text=True)
-        self.assertIn("ALPHA", body)
-        self.assertIn("BETA", body)
-        self.assertIn('aria-current="page"', body)
-        self.assertIn("Viewing this project does not activate it", body)
+        self.assertIn(b"devstack-csrf", response.data)
+        projects = self.client.get("/api/v2/projects").get_json()["projects"]
+        self.assertEqual({p["name"] for p in projects}, {"ALPHA", "BETA"})
         self.assertEqual(self.client.get("/api/v2/runtime").get_json()["phase"],
                          "inactive")
         self.assertEqual(self.backend.containers, [])
-        self.assertEqual(len(self.client.get("/api/v2/projects").get_json()["projects"]), 2)
         self.assertFalse(any(op in ("activate", "switch") for op, _ in self.calls))
 
     def test_switching_and_browser_selection_are_independent(self):
@@ -158,11 +155,12 @@ class HttpTests(unittest.TestCase):
         first = self.api_post("/api/v2/projects/" + a + "/activate")
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.get_json()["runtime"]["project_id"], a)
+        before = len(self.calls)
         selection = self.client.get("/projects/" + b)
         self.assertEqual(selection.status_code, 200)
+        self.assertEqual(len(self.calls), before, "Page GET must not call the controller")
         self.assertEqual(self.client.get("/api/v2/runtime").get_json()["project_id"], a)
         self.assertNotIn(("start", b), self.backend.events)
-        self.assertIn("Switch runtime to this project", selection.get_data(as_text=True))
         switched = self.api_post("/api/v2/runtime/switch", {"project_id": b})
         self.assertEqual(switched.status_code, 200)
         self.assertEqual(switched.get_json()["runtime"]["project_id"], b)
@@ -174,25 +172,20 @@ class HttpTests(unittest.TestCase):
     def test_inactive_project_can_be_renamed_without_switching(self):
         a, b = self.create("alpha"), self.create("beta")
         self.api_post("/api/v2/projects/" + a + "/activate")
-        response = self.post("/projects/" + b + "/rename", name="Renamed B")
-        self.assertEqual(response.status_code, 303)
-        self.assertEqual(self.controller.registry.get(b).name, "Renamed B")
-        self.assertEqual(self.controller.coordinator.status()["project_id"], a)
-        self.assertNotIn(("start", b), self.backend.events)
         patched = self.client.patch(
-            "/api/v2/projects/" + b, json={"name": "B Again"},
+            "/api/v2/projects/" + b, json={"name": "Renamed B"},
             headers={"X-CSRF-Token": self.csrf},
         )
         self.assertEqual(patched.status_code, 200)
-        self.assertEqual(self.controller.registry.get(b).name, "B Again")
+        self.assertEqual(self.controller.registry.get(b).name, "Renamed B")
+        self.assertEqual(self.controller.coordinator.status()["project_id"], a)
+        self.assertNotIn(("start", b), self.backend.events)
 
     def test_import_stays_available_after_first_project(self):
         a = self.create("alpha")
         self.api_post("/api/v2/projects/" + a + "/activate")
         before = self.controller.coordinator.status()
-        sample = self.client.get("/?example=smoke")
-        self.assertEqual(sample.status_code, 200)
-        self.assertIn(URL, sample.get_data(as_text=True))
+        self.assertEqual(self.client.get("/projects/import").status_code, 200)
         self.assertEqual(len(self.controller.registry.list()), 1)
         operation = self.submit_import("smoke")
         b = self.await_import(operation)
@@ -234,9 +227,7 @@ class HttpTests(unittest.TestCase):
         a = self.create("alpha")
         b = self.await_import(self.submit_import("smoke"))
         self.api_post("/api/v2/projects/" + a + "/activate")
-        page = self.client.get("/projects/" + b).get_data(as_text=True)
-        self.assertIn("Inactive · cannot run", page)
-        self.assertNotIn("Run</button>", page)
+        self.assertEqual(self.client.get("/projects/" + b + "/jobs").status_code, 200)
         result = self.api_post("/api/v2/projects/" + b + "/tasks/tests/run")
         self.assertEqual(result.status_code, 409, result.get_json())
         self.assertEqual(self.controller.coordinator.status()["project_id"], a)
@@ -246,21 +237,22 @@ class HttpTests(unittest.TestCase):
         self.api_post("/api/v2/projects/" + a + "/activate")
         unknown = str(uuid4())
         self.assertEqual(self.client.get("/api/v2/projects/" + unknown).status_code, 404)
-        self.assertEqual(self.client.get("/projects/" + unknown).status_code, 404)
+        # Validly shaped routes display the SPA; the API then reports 404.
+        self.assertEqual(self.client.get("/projects/" + unknown).status_code, 200)
         self.assertEqual(
             self.api_post("/api/v2/projects/" + unknown + "/activate").status_code, 404
         )
         self.assertEqual(self.controller.coordinator.status()["project_id"], a)
 
-    def test_csrf_on_every_mutation_including_json_and_html(self):
+    def test_csrf_on_every_mutation_including_json(self):
         a = self.create("alpha")
         self.assertEqual(self.client.post("/api/v2/projects",
-                                           json={"slug": "bad", "name": "Bad"}).status_code, 403)
+                                         json={"slug": "bad", "name": "Bad"}).status_code, 403)
         self.assertEqual(self.client.patch(
             "/api/v2/projects/" + a, json={"name": "Bad"},
         ).status_code, 403)
         self.assertEqual(self.client.post(
-            "/projects/" + a + "/activate", data={},
+            "/api/v2/projects/" + a + "/activate", json={},
         ).status_code, 403)
         self.assertEqual(self.client.post(
             "/api/v2/runtime/switch", json={"project_id": a},
@@ -307,7 +299,9 @@ class HttpTests(unittest.TestCase):
                     identifier = created.get_json()["project"]["id"]
                     selected = browser.get("/projects/" + identifier)
                     self.assertEqual(selected.status_code, 200)
-                    self.assertIn(b"Created over IPC", selected.data)
+                    self.assertIn(b"devstack-csrf", selected.data)
+                    detail = browser.get("/api/v2/projects/" + identifier).get_json()
+                    self.assertEqual(detail["project"]["name"], "Created over IPC")
                     state = browser.get("/api/v2/runtime").get_json()
                     self.assertEqual((state["phase"], state["project_id"]),
                                      ("inactive", None))
@@ -325,7 +319,7 @@ class HttpTests(unittest.TestCase):
         client = app.test_client()
         self.assertEqual(client.get("/api/v2/runtime").status_code, 503)
         self.assertEqual(client.get("/healthz").status_code, 503)
-        self.assertEqual(client.get("/").status_code, 503)
+        self.assertEqual(client.get("/").status_code, 200)
 
     def test_project_job_lookup_is_scoped(self):
         a, b = self.create("alpha"), self.create("beta")
