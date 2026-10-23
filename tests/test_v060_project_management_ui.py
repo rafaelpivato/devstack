@@ -16,7 +16,7 @@ class ProjectManagementUITests(unittest.TestCase):
             raise AssertionError(op)
         self.app=create_app({"TESTING":True,"SECRET_KEY":"test","SESSION_COOKIE_SECURE":False},transport=transport)
         self.client=self.app.test_client()
-        self.client.get("")
+        self.client.get("/")
         with self.client.session_transaction() as session:self.csrf=session["_csrf"]
     def test_deep_links_are_contained_and_side_effect_free(self):
         for url in ("/projects/create","/projects/import",f"/imports/{P}"):

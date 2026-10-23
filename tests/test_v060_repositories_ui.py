@@ -33,7 +33,7 @@ class RepoUIContractTests(unittest.TestCase):
             raise AssertionError("Unexpected IPC: "+op)
         self.app=create_app({"TESTING":True,"SECRET_KEY":"test","SESSION_COOKIE_SECURE":False}, transport=transport)
         self.client=self.app.test_client()
-        self.client.get("")
+        self.client.get("/")
         with self.client.session_transaction() as s: self.csrf=s["_csrf"]
 
     def test_readonly_preview_does_not_mutate(self):

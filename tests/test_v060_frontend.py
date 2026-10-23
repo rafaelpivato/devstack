@@ -29,7 +29,7 @@ class FrontendFoundationTests(unittest.TestCase):
         self.assertTrue(css)
         for asset in css:
             self.assertTrue((STATIC / asset).is_file())
-        response = self.client.get("")
+        response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn(entry["file"].encode(), response.data)
         for asset in css:

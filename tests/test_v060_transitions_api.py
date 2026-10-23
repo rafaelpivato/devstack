@@ -37,7 +37,7 @@ class TransitionHttpTests(unittest.TestCase):
         self.app = create_app({"TESTING": True, "SECRET_KEY": "test",
                                "SESSION_COOKIE_SECURE": False}, transport=transport)
         self.client = self.app.test_client()
-        self.client.get("")
+        self.client.get("/")
         with self.client.session_transaction() as session:
             self.csrf = session["_csrf"]
 
