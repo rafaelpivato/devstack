@@ -1,0 +1,42 @@
+# TEMPORARY v0.6.4 release-asset generator. Delete after committing generated assets.
+name: Temporary v0.6.4 frontend asset rebuild
+
+on:
+  push:
+    branches:
+      - integration/v064-root-cutover
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: "!contains(github.event.head_commit.message, '[v064-assets-built]')"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked frontend packages
+        working-directory: frontend
+        run: npm ci --ignore-scripts --no-audit
+      - name: Rebuild versioned React assets
+        working-directory: frontend
+        run: npm run build
+      - name: Commit only deterministically generated release assets
+        run: |
+          set -euo pipefail
+          git add -A -- src/devstack/static/v06
+          if git diff --cached --quiet; then
+            echo "Release assets already reproducible."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(v0.6.4): commit deterministic React bundle [v064-assets-built]"
+          git push origin HEAD:integration/v064-root-cutover
