@@ -1,0 +1,37 @@
+name: Temporary v0.6.4 Warm Stone asset rebuild
+on:
+  push:
+    branches:
+      - integration/v064-root-cutover
+permissions:
+  contents: write
+jobs:
+  regenerate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts --no-audit
+      - name: Validate palette and bundle
+        working-directory: frontend
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Commit reproducible assets and remove one-shot workflow
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- src/devstack/static/v06
+          git rm -- .github/workflows/v064-warm-stone-assets.yml
+          git commit -m "build: generate Warm Stone frontend assets"
+          git push origin "HEAD:integration/v064-root-cutover"

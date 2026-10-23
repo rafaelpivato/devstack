@@ -118,6 +118,21 @@ describe("WCAG 2.2 AA plus deuteranopia simulation",()=>{
       });
     }
   }
+  it("preserves the owner-approved original Warm Stone accents",()=>{
+    expect(token("light","accent")).toBe("#485E7B");
+    expect(token("dark","accent")).toBe("#B8C6DB");
+  });
+  for(const theme of ["light","dark"] as const){
+    for(const simulate of [false,true]){
+      it(theme+(simulate?" simulated-deuteranopia":" standard")+": status labels stay readable and card borders visible",()=>{
+        for(const name of ["positive","warning","danger"]){
+          expect(contrast(token(theme,name),token(theme,"panel"),simulate)).toBeGreaterThanOrEqual(4.5);
+        }
+        expect(contrast(token(theme,"line"),token(theme,"card"),simulate)).toBeGreaterThanOrEqual(3);
+        expect(contrast(token(theme,"focus"),token(theme,"card"),simulate)).toBeGreaterThanOrEqual(3);
+      });
+    }
+  }
   it("never uses colored status indicators without textual/shape cues",()=>{
     const html=renderToStaticMarkup(Status({text:"Completed",kind:"positive"}));
     expect(html).toContain("Completed");
