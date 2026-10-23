@@ -12,4 +12,8 @@
 - Never put controller credentials, secrets, or private host paths into JavaScript bundles. Frontend calls only same-origin `/api/v2`; Flask retains CSRF/session, controller permissions, and typed IPC.
 - Desktop responsiveness matters, but screen structure is mobile-first. I7 adds skip navigation, heading focus, 44px touch targets and constrained text wrapping. Status uses text and icons as well as accessible accents. Project create and GitHub import/receipt now live under Projects. Dependency audit is enforced by CI; the real iPhone and release-candidate acceptance checklist remains in `docs/v0.6-ux-parity-audit.md`.
 
+## Appearance in v0.6.4
+
+The Warm Stone palette is shared by the existing System/Light/Dark appearance modes. Its original light and dark accents are `#485E7B` and `#B8C6DB`. No third palette or server setting is introduced. Semantic statuses retain text and icons, while active/focus states use visible boundaries. Contrast tests include deuteranopia simulation; physical iPhone acceptance is separate.
+
 History: v0.6.0-v0.6.2 staged the React UI at `/__v06`. v0.6.4 is the owner-approved root cutover; its release still requires CI plus separate physical iPhone/Ubuntu acceptance. The main-only publish workflow now calls the full frontend integrity/audit workflow and rejects mismatched Python/frontend versions or missing release notes.
