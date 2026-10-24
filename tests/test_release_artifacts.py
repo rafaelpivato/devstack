@@ -40,7 +40,7 @@ class ArtifactReleaseTests(unittest.TestCase):
                     "digest": "sha256:" + hashlib.sha256(body).hexdigest(),
                     "browser_download_url": prefix + n}
         release = {"tag_name": "v0.6.6", "draft": False, "prerelease": False,
-                   "published_at": "2026-10-24T00:00:00Z",
+                   "published_at": "2026-10-24T00:00:00Z", "immutable": True,
                    "assets": [asset(name, data), asset("SHA256SUMS", checksum)]}
         return release, checksum
 

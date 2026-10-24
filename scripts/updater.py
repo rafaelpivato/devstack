@@ -56,6 +56,8 @@ def execute(*args: str, timeout: int = 180) -> None:
 # v0.6.5 bridge: source-based releases work through v0.6.5 only.
 WHEEL_FROM = (0, 6, 6)
 MAX_WHEEL_BYTES = 64 * 1024 * 1024
+MAX_UNPACKED_BYTES = 128 * 1024 * 1024
+MAX_WHEEL_ENTRIES = 5000
 
 def release_version(tag):
     return tuple(map(int, checked_tag(tag)[1:].split(".")))
@@ -67,7 +69,7 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
         host = (parsed.hostname or "").lower()
         if parsed.scheme != "https" or (
             host not in ("github.com", "api.github.com") and
-            not host.endswith(".githubusercontent.com")
+            host not in ("release-assets.githubusercontent.com", "objects.githubusercontent.com")
         ):
             raise RuntimeError("Unsafe release redirect")
         return super().redirect_request(req, fp, code, msg, headers, url)
@@ -100,7 +102,8 @@ def verified_wheel(repo, tag):
     release = json.loads(download(
         f"https://api.github.com/repos/{repo}/releases/tags/{tag}", 1024 * 1024))
     if (release.get("tag_name") != tag or release.get("draft") or
-            release.get("prerelease") or not release.get("published_at")):
+            release.get("prerelease") or not release.get("published_at") or
+            release.get("immutable") is not True):
         raise RuntimeError("Release is not a published stable version")
     assets = release.get("assets")
     if not isinstance(assets, list) or len(assets) != 2:
@@ -119,7 +122,7 @@ def verified_wheel(repo, tag):
         if len(data) != meta["size"]:
             raise RuntimeError("Release artifact length mismatch")
         digest = "sha256:" + hashlib.sha256(data).hexdigest()
-        if meta.get("digest") is not None and meta["digest"] != digest:
+        if meta.get("digest") != digest:
             raise RuntimeError("Release artifact GitHub digest mismatch")
         return data
     checksums = fetch("SHA256SUMS", 4096)
@@ -132,6 +135,9 @@ def verified_wheel(repo, tag):
     try:
         with ZipFile(io.BytesIO(wheel)) as bundle:
             entries = bundle.namelist()
+            infos = bundle.infolist()
+            if len(infos) > MAX_WHEEL_ENTRIES or sum(i.file_size for i in infos) > MAX_UNPACKED_BYTES:
+                raise RuntimeError("Oversize unpacked wheel")
             if len(entries) != len(set(entries)) or any(
                     path.startswith("/") or ".." in path.split("/") for path in entries):
                 raise RuntimeError("Unsafe wheel archive member names")
