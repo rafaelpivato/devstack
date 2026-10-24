@@ -13,6 +13,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build frontend and verified wheel for integration
+        run: |
+          set -euo pipefail
+          (cd frontend && npm ci --ignore-scripts --no-audit && npm run build)
+          python3 -m pip install 'build==1.3.0'
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          python3 scripts/stage_standalone_updater.py
+          python3 -m build --wheel --outdir dist
+          python3 scripts/verify_release_wheel.py dist
       - name: Check Docker Compose
         run: docker compose version
       - name: Start smoke stack and verify health
@@ -60,8 +77,9 @@ jobs:
           set -euo pipefail
           venv="$RUNNER_TEMP/devstack-fresh-v05"
           python3 -m venv "$venv"
-          "$venv/bin/python" -m pip install -q --disable-pip-version-check .
-          "$venv/bin/python" -m pip wheel -q --no-deps --wheel-dir "$RUNNER_TEMP/devstack-wheels" .
+          "$venv/bin/python" -m pip install -q --disable-pip-version-check dist/*.whl
+          mkdir -p "$RUNNER_TEMP/devstack-wheels"
+          cp dist/*.whl "$RUNNER_TEMP/devstack-wheels/"
           "$venv/bin/python" - <<'PY'
           from pathlib import Path
           import os, zipfile
@@ -367,10 +385,30 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build frontend and verified wheel for integration
+        run: |
+          set -euo pipefail
+          (cd frontend && npm ci --ignore-scripts --no-audit && npm run build)
+          python3 -m pip install 'build==1.3.0'
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          python3 scripts/stage_standalone_updater.py
+          python3 -m build --wheel --outdir dist
+          python3 scripts/verify_release_wheel.py dist
       - name: Verify actual web/controller Linux identities and restart
         env:
           DEVSTACK_EPHEMERAL_CI: "1"
-        run: sudo --preserve-env=DEVSTACK_EPHEMERAL_CI bash scripts/verify-systemd-ci.sh
+        run: |
+          export DEVSTACK_CI_WHEEL="$(find "$PWD/dist" -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$DEVSTACK_CI_WHEEL"
+          sudo --preserve-env=DEVSTACK_EPHEMERAL_CI,DEVSTACK_CI_WHEEL bash scripts/verify-systemd-ci.sh
       - name: Inspect systemd diagnostics on failure
         if: failure()
         run: |

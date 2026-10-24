@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "devstack"
-version = "0.6.5"
+version = "0.6.6"
 description = "Mobile-first controller for remote Linux development projects"
 requires-python = ">=3.11"
 dependencies = ["Flask>=3.0,<4", "gunicorn>=23,<24"]
@@ -19,4 +19,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 devstack = ["templates/app.html",
-    "static/v06/manifest.json", "static/v06/assets/*.js", "static/v06/assets/*.css"]
+    "static/v06/manifest.json", "static/v06/assets/*", "static/v06/assets/**/*", "_standalone_updater.py"]

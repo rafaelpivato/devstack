@@ -34,7 +34,11 @@ trap cleanup EXIT
 
 # A real install into a root-owned location that ProtectHome allows access to.
 python3 -m venv "$root/venv"
-"$root/venv/bin/python" -m pip install -q --disable-pip-version-check .
+if [[ -z "${DEVSTACK_CI_WHEEL:-}" || ! -f "$DEVSTACK_CI_WHEEL" ]]; then
+  echo "Expected verified CI-built wheel path" >&2
+  exit 1
+fi
+"$root/venv/bin/python" -m pip install -q --disable-pip-version-check "$DEVSTACK_CI_WHEEL"
 groupadd --system "$ipc"
 useradd --system --no-create-home --gid "$ipc" \
   --shell /usr/sbin/nologin "$web"

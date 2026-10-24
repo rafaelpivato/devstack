@@ -11,11 +11,11 @@ ROOT=Path(__file__).resolve().parents[1]
 class ReleaseCandidateGateTests(unittest.TestCase):
     def test_published_tag_metadata_and_notes_are_coherent(self):
         version=tomllib.loads((ROOT/"pyproject.toml").read_text())["project"]["version"]
-        self.assertEqual(version,"0.6.5")
+        self.assertEqual(version,"0.6.6")
         frontend=json.loads((ROOT/"frontend/package.json").read_text())
         self.assertEqual(frontend["version"],version)
         self.assertTrue((ROOT/"docs/releases"/f"v{version}.md").is_file())
-        self.assertIn("legacy", (ROOT/"docs/releases"/f"v{version}.md").read_text().lower())
+        self.assertIn("source-only", (ROOT/"docs/releases"/f"v{version}.md").read_text().lower())
     def test_main_only_release_requires_frontend_before_tagging(self):
         release=(ROOT/".github/workflows/release.yml").read_text()
         frontend=(ROOT/".github/workflows/frontend.yml").read_text()

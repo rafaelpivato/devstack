@@ -143,8 +143,11 @@ def verified_wheel(repo, tag):
                 raise RuntimeError("Unsafe wheel archive member names")
             names = set(entries)
             metadata = f"devstack-{version}.dist-info/METADATA"
-            if metadata not in names or "devstack/templates/app.html" not in names:
+            if (metadata not in names or "devstack/templates/app.html" not in names
+                    or "devstack/_standalone_updater.py" not in names):
                 raise RuntimeError("Missing wheel Python metadata or app HTML")
+            if b"Independent, conservative release updater" not in bundle.read("devstack/_standalone_updater.py")[:512]:
+                raise RuntimeError("Release wheel has no trusted updater payload")
             lines = bundle.read(metadata).decode("utf-8").splitlines()
             if "Name: devstack" not in lines or f"Version: {version}" not in lines:
                 raise RuntimeError("Release tag disagrees with wheel metadata")

@@ -56,7 +56,7 @@ class V053CandidateTests(unittest.TestCase):
                       installer)
         readme = (ROOT / "README.md").read_text()
         self.assertIn("v0.5.3", readme)
-        self.assertIn("Latest published: v0.6.2", readme)
+        self.assertIn("Latest published: v0.6.4", readme)
         self.assertIn("v0.6.4", readme)
         self.assertIn("docs/releases/v0.5.3.md", readme)
 

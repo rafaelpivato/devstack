@@ -22,36 +22,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Determine version and check whether already released
+      - name: Determine version and reject partial/invalid releases
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import os
-          import re
-          import subprocess
-          import tomllib
+          import json, os, re, subprocess, tomllib
           from pathlib import Path
-
-          data = tomllib.loads(Path("pyproject.toml").read_text())
-          version = data["project"]["version"]
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
           if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
-              raise SystemExit("Release version must be MAJOR.MINOR.PATCH")
-          tag = f"v{version}"
-          notes = Path("docs/releases") / f"{tag}.md"
-          if not notes.is_file():
-              raise SystemExit(f"Release notes are required: {notes}")
-          import json
-          frontend_version = json.loads(Path("frontend/package.json").read_text())["version"]
-          if frontend_version != version:
-              raise SystemExit(f"Frontend version {frontend_version} disagrees with package {version}")
-          found = subprocess.run(
-              ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"],
-              check=False,
+              raise SystemExit("Stable MAJOR.MINOR.PATCH version required")
+          tag = "v" + version
+          if not (Path("docs/releases") / f"{tag}.md").is_file():
+              raise SystemExit("Matching release notes missing")
+          if json.loads(Path("frontend/package.json").read_text())["version"] != version:
+              raise SystemExit("Frontend/Python version mismatch")
+          existing = subprocess.run(
+              ["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"]
           ).returncode == 0
+          if existing:
+              published = subprocess.run(
+                  ["gh", "release", "view", tag, "--json",
+                   "tagName,isDraft,isPrerelease,assets"],
+                  capture_output=True, text=True)
+              if published.returncode:
+                  raise SystemExit("Existing tag has no valid published GitHub Release; manual recovery required")
+              release = json.loads(published.stdout)
+              asset_names = sorted(asset["name"] for asset in release["assets"])
+              expected = sorted([f"devstack-{version}-py3-none-any.whl", "SHA256SUMS"])
+              if (release["tagName"] != tag or release["isDraft"]
+                      or release["isPrerelease"] or asset_names != expected):
+                  raise SystemExit("Existing tag/release is partial, mismatched or invalid")
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               print(f"tag={tag}", file=output)
-              print(f"publish={'false' if found else 'true'}", file=output)
-          print(f"{tag}: {'already tagged' if found else 'awaiting verification'}")
+              print(f"publish={'false' if existing else 'true'}", file=output)
           PY
 
   frontend-verification:
@@ -74,6 +79,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,16 +89,64 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install application
-        run: python -m pip install -e .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Download CI-built wheel from same workflow run
+        uses: actions/download-artifact@v4
+        with:
+          name: devstack-release-wheel
+          path: dist
+      - name: Reject invalid or mismatched build product
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_release_wheel.py dist
+          (cd dist && sha256sum --check SHA256SUMS)
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+      - name: Rebuild frontend locally for source-tree Python regression tests
+        run: |
+          cd frontend
+          npm ci --ignore-scripts --no-audit
+          npm run build
+      - name: Install application from verified release wheel
+        run: python -m pip install dist/*.whl
       - name: Run full unit tests
         run: python -m unittest discover -s tests -v
-      - name: Publish verified stable release
+      - name: Generate signed GitHub build provenance for wheel
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.whl
+      - name: Publish verified stable release with complete artifact set
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.candidate.outputs.tag }}
         run: |
           set -euo pipefail
           test -s "docs/releases/$TAG.md"
-          gh release create "$TAG" --target "$GITHUB_SHA" \
-            --title "$TAG" --notes-file "docs/releases/$TAG.md"
+          test -z "$(git tag --list "$TAG")"
+          # Explicit draft upload → verify → publish. Never --clobber.
+          gh release create "$TAG" dist/*.whl dist/SHA256SUMS --draft \
+            --target "$GITHUB_SHA" --title "$TAG" \
+            --notes-file "docs/releases/$TAG.md"
+          gh release view "$TAG" --json tagName,isDraft,isPrerelease,assets \
+            --jq '. as $r | [$r.tagName, $r.isDraft, $r.isPrerelease, ([ $r.assets[].name ] | sort)]' > "$RUNNER_TEMP/release.json"
+          python3 - "$RUNNER_TEMP/release.json" "$TAG" <<'PY'
+          import json, sys
+          version = sys.argv[2][1:]
+          name, draft, prerelease, assets = json.load(open(sys.argv[1]))
+          expected = sorted(["SHA256SUMS", f"devstack-{version}-py3-none-any.whl"])
+          if (name, draft, prerelease, assets) != (sys.argv[2], True, False, expected):
+              raise SystemExit("Incomplete draft release; keep unpublished and require operator recovery")
+          PY
+          mkdir -p "$RUNNER_TEMP/roundtrip"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/roundtrip" \
+            --pattern '*.whl' --pattern SHA256SUMS
+          cmp dist/SHA256SUMS "$RUNNER_TEMP/roundtrip/SHA256SUMS"
+          cmp dist/*.whl "$RUNNER_TEMP/roundtrip/"*.whl
+          gh release edit "$TAG" --draft=false
+          # No administration-scoped token needed: read the release metadata
+          # using GITHUB_TOKEN. The standalone updater independently refuses
+          # any wheel-only release that GitHub does not mark immutable.
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .immutable)" = "true"

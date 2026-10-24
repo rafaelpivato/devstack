@@ -12,6 +12,7 @@ import pwd
 import re
 import shutil
 import stat
+import sys
 import subprocess
 import tempfile
 
@@ -84,6 +85,13 @@ def refresh_updater(root: Path = DEFAULT_ROOT,
     """
     root, destination = Path(root), Path(destination)
     source = root / "current" / "source" / "scripts" / "updater.py"
+    if not source.is_file():
+        # Wheel-only releases carry this same standalone stdlib updater.
+        # Refuse a caller running outside the selected release's venv.
+        selected_venv = (root / "current" / "venv").resolve(strict=True)
+        if Path(sys.prefix).resolve() != selected_venv:
+            raise CLIInstallError("Updater refresh requires the selected release's venv")
+        source = Path(__file__).resolve().parents[1] / "_standalone_updater.py"
     if not source.is_file() or source.is_symlink():
         raise CLIInstallError("Trusted release updater source is unavailable")
     if not destination.is_file() or destination.is_symlink():
@@ -126,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Explicitly authorize an existing trusted SSH user for full DevStack administration",
     )
     parser.add_argument("--refresh-updater", action="store_true",
-                        help="Migrate a previously installed v0.5.2 updater to the trusted release version")
+                        help="Refresh the independent root-owned updater from the trusted versioned release")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT,
                         help=argparse.SUPPRESS)  # For CI/development release paths.
     args = parser.parse_args(argv)

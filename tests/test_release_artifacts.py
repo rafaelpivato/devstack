@@ -17,6 +17,8 @@ def wheel_bytes():
         archive.writestr("devstack-0.6.6.dist-info/METADATA",
                          "Name: devstack\nVersion: 0.6.6\n")
         archive.writestr("devstack/templates/app.html", "<html>React</html>")
+        archive.writestr("devstack/_standalone_updater.py",
+                         "# Independent, conservative release updater\\n")
         archive.writestr("devstack/static/v06/manifest.json",
                          json.dumps({"src/main.tsx": {
                              "file": "assets/main-123.js",
