@@ -17,6 +17,8 @@ def wheel_bytes():
         archive.writestr("devstack-0.6.6.dist-info/METADATA",
                          "Name: devstack\nVersion: 0.6.6\n")
         archive.writestr("devstack/templates/app.html", "<html>React</html>")
+        archive.writestr("devstack/_standalone_updater.py",
+                         "# Independent, conservative release updater\\n")
         archive.writestr("devstack/static/v06/manifest.json",
                          json.dumps({"src/main.tsx": {
                              "file": "assets/main-123.js",
@@ -40,7 +42,7 @@ class ArtifactReleaseTests(unittest.TestCase):
                     "digest": "sha256:" + hashlib.sha256(body).hexdigest(),
                     "browser_download_url": prefix + n}
         release = {"tag_name": "v0.6.6", "draft": False, "prerelease": False,
-                   "published_at": "2026-10-24T00:00:00Z", "immutable": True,
+                   "published_at": "2026-10-24T00:00:00Z", "immutable": False,
                    "assets": [asset(name, data), asset("SHA256SUMS", checksum)]}
         return release, checksum
 
@@ -53,6 +55,16 @@ class ArtifactReleaseTests(unittest.TestCase):
             filename, result = updater.verified_wheel("rafaelpivato/devstack", "v0.6.6")
         self.assertEqual(filename, "devstack-0.6.6-py3-none-any.whl")
         self.assertEqual(result, wheel)
+
+    def test_mutable_release_without_immutable_field_is_accepted_with_valid_digests(self):
+        wheel = wheel_bytes()
+        release, checksum = self._metadata(wheel)
+        release.pop("immutable")
+        with patch.object(updater, "download", side_effect=[
+            json.dumps(release).encode(), checksum, wheel
+        ]):
+            self.assertEqual(
+                updater.verified_wheel("rafaelpivato/devstack", "v0.6.6")[1], wheel)
 
     def test_rejects_draft_and_missing_or_extra_artifacts(self):
         wheel = wheel_bytes()

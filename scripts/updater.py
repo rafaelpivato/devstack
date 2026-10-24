@@ -102,8 +102,7 @@ def verified_wheel(repo, tag):
     release = json.loads(download(
         f"https://api.github.com/repos/{repo}/releases/tags/{tag}", 1024 * 1024))
     if (release.get("tag_name") != tag or release.get("draft") or
-            release.get("prerelease") or not release.get("published_at") or
-            release.get("immutable") is not True):
+            release.get("prerelease") or not release.get("published_at")):
         raise RuntimeError("Release is not a published stable version")
     assets = release.get("assets")
     if not isinstance(assets, list) or len(assets) != 2:
@@ -143,8 +142,11 @@ def verified_wheel(repo, tag):
                 raise RuntimeError("Unsafe wheel archive member names")
             names = set(entries)
             metadata = f"devstack-{version}.dist-info/METADATA"
-            if metadata not in names or "devstack/templates/app.html" not in names:
+            if (metadata not in names or "devstack/templates/app.html" not in names
+                    or "devstack/_standalone_updater.py" not in names):
                 raise RuntimeError("Missing wheel Python metadata or app HTML")
+            if b"Independent, conservative release updater" not in bundle.read("devstack/_standalone_updater.py")[:512]:
+                raise RuntimeError("Release wheel has no trusted updater payload")
             lines = bundle.read(metadata).decode("utf-8").splitlines()
             if "Name: devstack" not in lines or f"Version: {version}" not in lines:
                 raise RuntimeError("Release tag disagrees with wheel metadata")

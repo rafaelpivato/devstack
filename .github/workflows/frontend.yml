@@ -1,4 +1,5 @@
 name: Frontend integrity
+
 on:
   push:
   pull_request:
@@ -14,9 +15,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.16.0"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install locked dependencies
         working-directory: frontend
         run: npm ci --ignore-scripts --no-audit
@@ -35,36 +39,46 @@ jobs:
       - name: Rebuild release assets
         working-directory: frontend
         run: npm run build
-      - name: Verify committed build is reproducible
+      - name: Verify deterministic frontend output
         run: |
           set -euo pipefail
-          git diff --exit-code -- src/devstack/static/v06
+          find src/devstack/static/v06 -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/frontend-first.sha"
+          (cd frontend && npm run build)
+          find src/devstack/static/v06 -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/frontend-second.sha"
+          diff -u "$RUNNER_TEMP/frontend-first.sha" "$RUNNER_TEMP/frontend-second.sha"
+      - name: Assert generated assets are not version-controlled
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-files src/devstack/static/v06)"
           test -f src/devstack/static/v06/manifest.json
-          git ls-files --error-unmatch src/devstack/static/v06/manifest.json >/dev/null
-      - name: Verify tagged-source style wheel has all assets
+          git diff --exit-code -- pyproject.toml frontend/package-lock.json
+      - name: Build reproducible wheel from generated output
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet build
-          python3 -m build --wheel --outdir "$RUNNER_TEMP/devstack-wheels"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          from zipfile import ZipFile
-          wheel = next(Path(os.environ["RUNNER_TEMP"], "devstack-wheels").glob("*.whl"))
-          with ZipFile(wheel) as archive:
-              files = set(archive.namelist())
-              prefix = "devstack/static/v06/"
-              manifest = json.loads(archive.read(prefix + "manifest.json"))
-              entry = manifest["src/main.tsx"]
-              css = entry.get("css") or [
-                  item["file"] for item in manifest.values()
-                  if item["file"].endswith(".css")
-              ]
-              assert css, "missing stylesheet"
-              for asset in (entry["file"], *css):
-                  assert prefix + asset in files, f"missing bundled asset: {asset}"
-              assert "devstack/templates/app.html" in files
-              assert not any(p.startswith("devstack/templates/v2_") for p in files)
-              assert not any(p.startswith("devstack/static/js/v2_") for p in files)
-          PY
+          python3 -m pip install 'build==1.3.0'
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          export PYTHONHASHSEED=0
+          export TZ=UTC
+          python3 scripts/stage_standalone_updater.py
+          python3 -m build --wheel --outdir dist
+          mkdir -p "$RUNNER_TEMP/repro-wheel"
+          python3 -m build --wheel --outdir "$RUNNER_TEMP/repro-wheel"
+          cmp "$(find dist -maxdepth 1 -name '*.whl' -print -quit)" \
+              "$(find "$RUNNER_TEMP/repro-wheel" -maxdepth 1 -name '*.whl' -print -quit)"
+          python3 scripts/verify_release_wheel.py dist
+          # Independently rebuild from the same clean source tree and compare wheel bytes.
+          rm -rf build src/devstack.egg-info
+          python3 -m build --wheel --outdir "$RUNNER_TEMP/repro"
+          cmp "dist/$(basename "$(find dist -name '*.whl' -print -quit)")" "$RUNNER_TEMP/repro/$(basename "$(find "$RUNNER_TEMP/repro" -name '*.whl' -print -quit)")"
+          (cd dist && sha256sum *.whl > SHA256SUMS)
+          test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
+      - name: Upload version-matched verified wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: devstack-release-wheel
+          path: |
+            dist/*.whl
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
