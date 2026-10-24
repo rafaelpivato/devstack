@@ -108,6 +108,18 @@ class GitRepositoryTests(unittest.TestCase):
         self.assertEqual(self.controller.coordinator.status()["project_id"], self.b.id)
         self.controller.coordinator.deactivate()
 
+    def test_active_owner_can_fast_forward_without_compose_restart(self):
+        self.controller.coordinator.activate(self.a.id)
+        state = self.controller.coordinator.status()
+        before = self.controller.repositories.status(self.a.id, self.a_repo.id)
+        self._advance()
+        after = self.controller.repositories.update(self.a.id, self.a_repo.id, before["head"])
+        self.assertNotEqual(after["head"], before["head"])
+        self.assertEqual(self.controller.coordinator.status(), state)
+        self.assertEqual(self.docker.running,
+                         [{"project": self.a.id, "generation": state["generation"]}])
+        self.controller.coordinator.deactivate()
+
     def test_unknown_and_cross_project_repo_ids_fail_closed(self):
         with self.assertRaises(RepositoryNotFound):
             self.controller.repositories.status(self.a.id, self.b_repo.id)

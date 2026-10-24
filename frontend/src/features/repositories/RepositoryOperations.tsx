@@ -19,7 +19,7 @@ import {
 } from "../../lib/repositorySubmission";
 
 
-import { Context, WriteBoundary, ActionButton, LinkRow, ActionError, canWriteRepository, verifyInactive, errorMessage, repositoryRoot } from './RepositoryCommon';
+import { Context, WriteBoundary, ActionButton, LinkRow, ActionError, canWriteRepository, canUpdateRepository, verifyInactive, verifyRepositoryUpdate, errorMessage, repositoryRoot } from './RepositoryCommon';
 export function RepositoryAdd({id,runtime,navigation}:{id:string;runtime:RuntimeSnapshot;navigation:Navigator}) {
   const [form,setForm]=useState(()=>loadSubmission(id,"add")?.form??{url:"",name:"",branch:""});
   const [pending,setPending]=useState<SavedRepositorySubmission|null>(()=>loadSubmission(id,"add"));
@@ -74,10 +74,10 @@ export function RepositoryBulk({id,runtime,navigation}:{id:string;runtime:Runtim
   const [error,setError]=useState<string|null>(null);
   const [pending,setPending]=useState<SavedRepositorySubmission|null>(()=>loadSubmission(id,"bulk"));
   const run=async()=>{
-    if(!confirmed||!canWriteRepository(runtime)||busy)return;
+    if(!confirmed||!canUpdateRepository(runtime,id)||busy)return;
     setBusy(true);setError(null);
     try{
-      await verifyInactive();
+      await verifyRepositoryUpdate(id);
       const saved=pending??{mode:"bulk" as const,projectId:id,key:requestKey()};
       saveSubmission(saved);setPending(saved);
       const receipt=await submitRepoBulk(id,saved.key);
@@ -88,13 +88,13 @@ export function RepositoryBulk({id,runtime,navigation}:{id:string;runtime:Runtim
     finally{setBusy(false);}
   };
   return <Context id={id} title="Update repositories" navigation={navigation}>
-    <WriteBoundary runtime={runtime}/>
+    {!canUpdateRepository(runtime,id)&&<Notice title="Update unavailable">Activate this project or deactivate the other active project first.</Notice>}
     <Notice title="Review batch update">Fetch each registered repository and fast-forward eligible clean tracking branches. Dirty, diverged or unsupported repositories are reported per item. This does not switch branches.</Notice>
     {pending?.operationId&&<LinkRow to={repoReceiptUrl(id,"bulk",pending.operationId)}
       label="View saved batch receipt" navigation={navigation}/>}
     <label className="confirm-label"><input type="checkbox" checked={confirmed}
-      onChange={e=>setConfirmed(e.target.checked)}/>Run an inactive-project Git update</label>
-    <ActionButton onClick={()=>void run()} disabled={!confirmed||busy||!canWriteRepository(runtime)}>
+      onChange={e=>setConfirmed(e.target.checked)}/>Run a project-scoped Git update (no Compose restart)</label>
+    <ActionButton onClick={()=>void run()} disabled={!confirmed||busy||!canUpdateRepository(runtime,id)}>
       {busy?"Submitting…":pending?"Retry with saved key":"Update all repositories"}
     </ActionButton>
     <ActionError message={error}/>

@@ -67,10 +67,10 @@ class BulkRepositoryUpdater:
                     ).fetchone()
                 if prior:
                     return self.get(identifier, prior["id"])
-                state = self.coordinator.status()
-                if state["phase"] != "inactive" or state["project_id"] is not None:
-                    raise BulkRepositoryConflict("Deactivate before updating project repositories")
-                self.coordinator._verify_clear()
+                try:
+                    self.repositories._sync_editable(identifier)
+                except RepositoryGitError as exc:
+                    raise BulkRepositoryConflict("Repository updates require matching active project") from exc
                 repositories = self.registry.repositories(identifier)
                 if not repositories:
                     raise BulkRepositoryConflict("Project has no repositories")
@@ -198,11 +198,11 @@ class BulkRepositoryUpdater:
     def _work(self, identifier: str, operation_id: str) -> None:
         try:
             with self.coordinator.locked():
-                state = self.coordinator.status()
-                if state["phase"] != "inactive" or state["project_id"] is not None:
+                try:
+                    self.repositories._sync_editable(identifier)
+                except RepositoryGitError:
                     self._abort(operation_id, "blocked", "runtime_active")
                     return
-                self.coordinator._verify_clear()
                 items = self._snapshot(operation_id)
                 self._save(operation_id, items)
                 for index, item in enumerate(items):

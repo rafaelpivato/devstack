@@ -212,6 +212,17 @@ class ProjectBulkUpdatesTests(unittest.TestCase):
         self.assertEqual(self.controller.coordinator.status()["project_id"], self.b)
         self.controller.coordinator.deactivate()
 
+    def test_active_owner_can_run_batch_without_stopping_services(self):
+        self.controller.coordinator.activate(self.a)
+        state = self.controller.coordinator.status()
+        containers = list(self.docker.containers)
+        self._advance("backend")
+        receipt = self._wait(self._start())
+        self.assertEqual(receipt["status"], "succeeded")
+        self.assertEqual(self.controller.coordinator.status(), state)
+        self.assertEqual(self.docker.containers, containers)
+        self.controller.coordinator.deactivate()
+
     def test_activation_waits_until_bulk_source_update_finishes(self):
         from threading import Event, Thread
         from unittest.mock import patch

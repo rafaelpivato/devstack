@@ -21,6 +21,13 @@ import {
 export const repositoryRoot=(id:string)=>laneUrl(id,"repositories");
 export const canWriteRepository=(runtime:RuntimeSnapshot)=>
   runtime.phase==="inactive" && runtime.project_id===null;
+export const canUpdateRepository=(runtime:RuntimeSnapshot,projectId:string)=>
+  canWriteRepository(runtime) ||
+  (runtime.phase==="active" && runtime.project_id===projectId);
+export async function verifyRepositoryUpdate(projectId:string) {
+  if(!canUpdateRepository(await readRuntime(),projectId))
+    throw new Error("Repository update requires this project to be active or all projects inactive.");
+}
 export const errorMessage=(e:unknown)=>e instanceof Error?e.message:"Request could not be completed.";
 export async function verifyInactive() {
   if(!canWriteRepository(await readRuntime()))
