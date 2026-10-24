@@ -186,6 +186,10 @@ class Database:
                 if not {"projects", "repositories", "project_sources",
                         "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending", "repository_add_operations", "repository_bulk_updates"}.issubset(existing):
                     raise StorageError("Database schema is incomplete")
+                if row[0] == SCHEMA_VERSION and not {
+                    "repository_sync", "repository_sync_events",
+                }.issubset(existing):
+                    raise StorageError("Repository synchronization schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)
             if existing and row[0] == 10:

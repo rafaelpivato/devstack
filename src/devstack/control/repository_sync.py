@@ -184,8 +184,14 @@ class RepositorySyncSupervisor:
                     )
                     outcome = "blocked" if reason else "checked"
             except Exception as exc:
-                self._finish(identifier, repository_id, before, after, "failed",
-                             self._reason(exc))
+                reason = self._reason(exc)
+                # A Git failure during a worktree update can have an unknown
+                # partial outcome. Refuse automatic retries until manual review.
+                interrupted = update and reason in (
+                    "git_error", "git_timeout", "changed_during_update",
+                )
+                self._finish(identifier, repository_id, before, after,
+                             "interrupted" if interrupted else "failed", reason)
                 raise
             self._finish(identifier, repository_id, before, after, outcome, reason)
             return {**after, "sync": self.state(identifier, repository_id)}
@@ -210,6 +216,13 @@ class RepositorySyncSupervisor:
                     "VALUES (?,?,'interrupted','controller_restart',?,?,?)",
                     (row["project_id"], row["repository_id"],
                      row["previous_head"], row["head"], time.time_ns()),
+                )
+                con.execute(
+                    "DELETE FROM repository_sync_events WHERE project_id=? AND repository_id=? "
+                    "AND id NOT IN (SELECT id FROM repository_sync_events "
+                    "WHERE project_id=? AND repository_id=? ORDER BY id DESC LIMIT ?)",
+                    (row["project_id"], row["repository_id"],
+                     row["project_id"], row["repository_id"], MAX_EVENTS),
                 )
         return len(rows)
 

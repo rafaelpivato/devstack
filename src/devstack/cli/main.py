@@ -550,7 +550,7 @@ def _print(payload: object, *, use_json: bool, name: str) -> None:
         print(_render_job_submission(payload))
     elif name == "compose_show":
         print(_render_compose(payload), end="")
-    elif name in {"repo_list", "repo_status", "git_operation",
+    elif name in {"repo_list", "repo_status", "sync_policy", "git_operation",
                   "branch_preview", "branch_apply"}:
         print(git_commands.render(name, payload, _line))
     elif name == "job_list":

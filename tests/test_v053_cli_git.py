@@ -85,6 +85,23 @@ class GitCLIContractTests(unittest.TestCase):
             if "update" in action:
                 self.assertEqual(sender.call_args.kwargs["expected_head"], HEAD)
 
+    def test_sync_policy_and_check_are_explicit_controller_operations(self):
+        receipt = {"policy": "check", "status": "idle",
+                   "last_checked_ns": None, "last_updated_ns": None}
+        rc, out, err, _, sender = self.run_cli(
+            "repo", "sync-policy", REPO, "--project", PROJECT,
+            "--mode", "check", response=receipt)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Policy: check", out)
+        self.assertEqual(sender.call_args.args[1], "repository_sync_policy")
+        self.assertEqual(sender.call_args.kwargs["policy"], "check")
+        status = {"id": REPO, "name": "backend", "head": HEAD, "branch": "main"}
+        rc, out, err, _, sender = self.run_cli(
+            "repo", "check", REPO, "--project", PROJECT, response=status)
+        self.assertEqual(rc, 0, err)
+        self.assertIn(HEAD, out)
+        self.assertEqual(sender.call_args.args[1], "repository_check")
+
     def test_repo_add_and_bulk_require_project_and_idempotency(self):
         receipt = {"id": OP, "status": "queued", "project_id": PROJECT,
                    "repo_id": None, "name": "backend", "error_code": ""}

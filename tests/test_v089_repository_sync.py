@@ -207,6 +207,19 @@ class RepositorySynchronizationTests(unittest.TestCase):
         self.assertEqual(sync.state(self.a, self.ar.id)["status"], "checked")
         self.assertEqual(sync.recover(), 0)
 
+    def test_ambiguous_git_failure_pauses_automatic_updates(self):
+        sync = self.controller.repository_sync
+        sync.set_policy(self.a, self.ar.id, "update")
+        with patch.object(self.controller.repositories, "update_locked",
+                          side_effect=RepositoryGitError("Git operation failed")):
+            self.assertEqual(sync.poll_once(), 0)
+        interrupted = sync.state(self.a, self.ar.id)
+        self.assertEqual(interrupted["status"], "interrupted")
+        self.assertEqual(interrupted["error_code"], "git_error")
+        self.assertEqual(sync.poll_once(), 0)
+        sync.perform(self.a, self.ar.id)
+        self.assertEqual(sync.state(self.a, self.ar.id)["status"], "checked")
+
     def test_update_serializes_runtime_switch(self):
         sync = self.controller.repository_sync
         self.controller.coordinator.activate(self.a)

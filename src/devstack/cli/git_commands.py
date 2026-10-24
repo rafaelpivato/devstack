@@ -208,7 +208,7 @@ def dispatch(args, sender):
                       repository_id=args.repository_id), "repo_status"
     if action == "sync-policy":
         return sender(socket, "repository_sync_policy", project_id=project,
-                      repository_id=args.repository_id, policy=args.mode), "repo_status"
+                      repository_id=args.repository_id, policy=args.mode), "sync_policy"
     if action == "update-all":
         return (_submit(sender, socket, "repository_bulk_submit",
                         {"project_id": project}, wait=args.wait, kind="repo_bulk",
@@ -260,6 +260,13 @@ def render(name: str, payload: object, line) -> str:
                 ("head", "HEAD"), ("upstream", "Upstream"), ("dirty", "Dirty"),
                 ("ahead", "Ahead"), ("behind", "Behind"),
             )
+        ])
+    if name == "sync_policy":
+        return "\n".join([
+            _line(line, "Policy", payload.get("policy")),
+            _line(line, "State", payload.get("status")),
+            _line(line, "Last check", payload.get("last_checked_ns")),
+            _line(line, "Last update", payload.get("last_updated_ns")),
         ])
     if name == "git_operation":
         lines = [
