@@ -1,10 +1,10 @@
 # DevStack
 
-**Latest published: v0.6.4. In review: v0.6.5 updater compatibility bridge and v0.6.6 CI-built release wheels.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.6.6. Next release: v0.6.7 active-project repository synchronization (#89).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 
-The released v0.6.4 React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks redirect to it. Browser navigation never activates a project. Browser navigation never activates a project.
+The React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks redirect to it. Browser navigation never activates a project.
 
 ## Architecture
 
@@ -34,9 +34,9 @@ the trusted `devstackipc` group—**not** the Docker group. See
 
 ## Installation and release status
 
-The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. `scripts/install.sh` selects the latest published stable release; existing supported deployments upgrade using the independent guarded updater. **v0.6.4 is published; v0.6.3 was intentionally skipped. v0.6.5 and v0.6.6 are distinct, ordered release candidates and must not be published together.** Installed v0.5.2 users upgrading to newer versions must follow the v0.5.3 CLI operator enrollment and independent updater refresh notes.
+The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. `scripts/install.sh` selects the latest published stable release; existing supported deployments upgrade using the independent guarded updater. **v0.6.6 is published; v0.6.3 was intentionally skipped. The v0.6.5 compatibility bridge must precede wheel-based updates for older deployments.** Installed v0.5.2 users upgrading to newer versions must follow the v0.5.3 CLI operator enrollment and independent updater refresh notes.
 
-For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md); for the CLI setup, see [v0.5.3 notes](docs/releases/v0.5.3.md). For the published UI series, see [v0.6.0](docs/releases/v0.6.0.md), [v0.6.1](docs/releases/v0.6.1.md), and [v0.6.2](docs/releases/v0.6.2.md); [v0.6.4 notes](docs/releases/v0.6.4.md) document the root cutover. For the next packaging migration, first review the mandatory [v0.6.5 compatibility bridge](docs/releases/v0.6.5.md), then [v0.6.6 verified release wheels](docs/releases/v0.6.6.md). Never bypass the bridge on existing hosts. Real-device accessibility, restart/rollback and deferred acceptance are recorded separately in [issue #50](https://github.com/rafaelpivato/devstack/issues/50).
+For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md); for the CLI setup, see [v0.5.3 notes](docs/releases/v0.5.3.md). For the published UI series, see [v0.6.0](docs/releases/v0.6.0.md), [v0.6.1](docs/releases/v0.6.1.md), and [v0.6.2](docs/releases/v0.6.2.md); [v0.6.4 notes](docs/releases/v0.6.4.md) document the root cutover. For the packaging migration, first review the mandatory [v0.6.5 compatibility bridge](docs/releases/v0.6.5.md), then [v0.6.6 verified release wheels](docs/releases/v0.6.6.md). See [v0.6.7 release notes](docs/releases/v0.6.7.md) for active-project Git synchronization. Never bypass the bridge on existing hosts. Real-device accessibility, restart/rollback and deferred acceptance are recorded separately in [issue #50](https://github.com/rafaelpivato/devstack/issues/50).
 
 Architecture and acceptance requirements: [ADR-0001](docs/adr/0001-multiple-projects-single-runtime.md) and [v0.5.2 acceptance plan](docs/v0.5.2-acceptance-plan.md).
 
@@ -58,7 +58,7 @@ Docker smoke integration and fresh Ubuntu systemd permission tests run in GitHub
 
 ## Future work
 
-Automatic repository synchronization and policy-driven targeted container restart/rebuild are deferred beyond v0.7; GPT/MCP and secure external observability require separate architectural decisions. Neither is part of the 0.6.5/0.6.6 packaging transition. History and earlier release documentation remain available for audit.
+Repository synchronization (#89) is included in v0.6.7; policy-driven targeted application restart/rebuild (#90), GPT/MCP and secure external observability remain separate future work. Updating a repository's files does **not** restart or rebuild its running services. History and earlier release documentation remain available for audit.
 
 
 ## Release packaging since v0.6.6

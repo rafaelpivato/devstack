@@ -11,11 +11,19 @@ ROOT=Path(__file__).resolve().parents[1]
 class ReleaseCandidateGateTests(unittest.TestCase):
     def test_published_tag_metadata_and_notes_are_coherent(self):
         version=tomllib.loads((ROOT/"pyproject.toml").read_text())["project"]["version"]
-        self.assertEqual(version,"0.6.6")
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+        self.assertGreaterEqual(tuple(map(int,version.split("."))),(0,6,6))
         frontend=json.loads((ROOT/"frontend/package.json").read_text())
+        lockfile=json.loads((ROOT/"frontend/package-lock.json").read_text())
         self.assertEqual(frontend["version"],version)
-        self.assertTrue((ROOT/"docs/releases"/f"v{version}.md").is_file())
-        self.assertIn("source-only", (ROOT/"docs/releases"/f"v{version}.md").read_text().lower())
+        self.assertEqual(lockfile["version"],version)
+        self.assertEqual(lockfile["packages"][""]["version"],version)
+        notes=(ROOT/"docs/releases"/f"v{version}.md")
+        self.assertTrue(notes.is_file())
+        self.assertIn(f"# DevStack v{version}",notes.read_text())
+        # Historical source-only packaging guarantee belongs to v0.6.6,
+        # not to whichever patch release happens to be current.
+        self.assertIn("source-only", (ROOT/"docs/releases/v0.6.6.md").read_text().lower())
     def test_main_only_release_requires_frontend_before_tagging(self):
         release=(ROOT/".github/workflows/release.yml").read_text()
         frontend=(ROOT/".github/workflows/frontend.yml").read_text()

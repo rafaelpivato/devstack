@@ -56,7 +56,8 @@ class V053CandidateTests(unittest.TestCase):
                       installer)
         readme = (ROOT / "README.md").read_text()
         self.assertIn("v0.5.3", readme)
-        self.assertIn("Latest published: v0.6.4", readme)
+        # Keep historical release links without pinning the README headline to an old latest tag.
+        self.assertRegex(readme, r"Latest published: v\d+\.\d+\.\d+")
         self.assertIn("v0.6.4", readme)
         self.assertIn("docs/releases/v0.5.3.md", readme)
 
