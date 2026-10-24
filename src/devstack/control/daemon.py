@@ -32,6 +32,7 @@ from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
 from .transitions import TransitionSupervisor
 from .bulk_repositories import BulkRepositoryUpdater
+from .repository_sync import RepositorySyncSupervisor
 from devstack.github_ssh import public_key, generate_key, test_connection
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send_payload
 from devstack.ipc.protocol import (
@@ -57,6 +58,9 @@ class Controller:
         self.imports = ImportSupervisor(database, self.registry, self.provisioner)
         self.configuration = ConfigurationService(self.registry, workspaces, self.provisioner, self.coordinator)
         self.repositories = RepositoryGitService(self.registry, workspaces, self.coordinator)
+        self.repository_sync = RepositorySyncSupervisor(
+            database, self.registry, self.coordinator, self.repositories,
+        )
         self.repository_add = RepositoryAddSupervisor(database, self.registry, workspaces, self.coordinator)
         self.bulk_repositories = BulkRepositoryUpdater(
             database, self.registry, self.coordinator, self.repositories,
@@ -183,10 +187,20 @@ class Controller:
         if operation == "repository_bulk_status":
             return self.bulk_repositories.get(request["project_id"], request["id"])
         if operation == "repository_status":
-            return self.repositories.status(request["project_id"], request["repository_id"])
+            return {**self.repositories.status(request["project_id"], request["repository_id"]),
+                    "sync": self.repository_sync.state(request["project_id"], request["repository_id"])}
+        if operation == "repository_sync_state":
+            return self.repository_sync.state(request["project_id"], request["repository_id"])
+        if operation == "repository_sync_policy":
+            return self.repository_sync.set_policy(
+                request["project_id"], request["repository_id"], request["policy"],
+            )
+        if operation == "repository_check":
+            return self.repository_sync.perform(request["project_id"], request["repository_id"])
         if operation == "repository_update":
-            return self.repositories.update(
-                request["project_id"], request["repository_id"], request["expected_head"],
+            return self.repository_sync.perform(
+                request["project_id"], request["repository_id"],
+                update=True, expected_head=request["expected_head"],
             )
         if operation == "compose_read":
             return self.configuration.compose(request["project_id"])
@@ -323,6 +337,8 @@ class _Handler(socketserver.StreamRequestHandler):
                 "project_create": "project-create",
                 "import_submit": "project-import",
                 "repository_update": "repository-update",
+                "repository_check": "repository-check",
+                "repository_sync_policy": "repository-sync-policy",
                 "repository_add_submit": "repository-add",
                 "repository_bulk_submit": "repository-bulk-update",
                 "branch_apply": "repository-branch",
@@ -460,10 +476,24 @@ def main():
         except Exception:
             pass
         try:
+            controller.repository_sync.recover()
+        except Exception:
+            pass
+        try:
             controller.diagnostics.record("controller", "controller-started")
         except Exception:
             pass
         with ControlServer(args.socket, controller, args.socket_group) as server:
+            sync_stop = threading.Event()
+            def poll_repositories():
+                while not sync_stop.wait(30):
+                    try:
+                        controller.repository_sync.poll_once()
+                    except Exception:
+                        pass
+            sync_thread = threading.Thread(target=poll_repositories,
+                                           name="devstack-git-poll", daemon=True)
+            sync_thread.start()
             with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
                 webhook_thread = threading.Thread(
                     target=public_ingress.serve_forever,
@@ -482,6 +512,8 @@ def main():
                         controller.diagnostics.record("controller", "controller-stopping")
                     except Exception:
                         pass
+                    sync_stop.set()
+                    sync_thread.join(timeout=3)
                     public_ingress.shutdown()
                     webhook_thread.join(timeout=10)
                     try:
