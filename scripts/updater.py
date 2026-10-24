@@ -52,8 +52,126 @@ def execute(*args: str, timeout: int = 180) -> None:
     subprocess.run(list(args), check=True, timeout=timeout)
 
 
+
+# v0.6.5 bridge: source-based releases work through v0.6.5 only.
+WHEEL_FROM = (0, 6, 6)
+MAX_WHEEL_BYTES = 64 * 1024 * 1024
+
+def release_version(tag):
+    return tuple(map(int, checked_tag(tag)[1:].split(".")))
+
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, url):
+        from urllib.parse import urlsplit
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or (
+            host not in ("github.com", "api.github.com") and
+            not host.endswith(".githubusercontent.com")
+        ):
+            raise RuntimeError("Unsafe release redirect")
+        return super().redirect_request(req, fp, code, msg, headers, url)
+
+def download(url, limit):
+    from urllib.parse import urlsplit
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        raise RuntimeError("HTTPS required for release downloads")
+    opener = urllib.request.build_opener(SafeRedirect())
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with opener.open(request, timeout=30) as response:
+        result = response.read(limit + 1)
+    if len(result) > limit:
+        raise RuntimeError("Release artifact size limit exceeded")
+    return result
+
+def verified_wheel(repo, tag):
+    """Verify stable release identity, exact URL, hashes and frontend wheel."""
+    import hashlib
+    import io
+    from zipfile import ZipFile, BadZipFile
+    repo = checked_repo(repo)
+    tag = checked_tag(tag)
+    if release_version(tag) < WHEEL_FROM:
+        raise ValueError("Legacy source release")
+    version = tag[1:]
+    filename = f"devstack-{version}-py3-none-any.whl"
+    base = f"https://github.com/{repo}/releases/download/{tag}/"
+    release = json.loads(download(
+        f"https://api.github.com/repos/{repo}/releases/tags/{tag}", 1024 * 1024))
+    if (release.get("tag_name") != tag or release.get("draft") or
+            release.get("prerelease") or not release.get("published_at")):
+        raise RuntimeError("Release is not a published stable version")
+    assets = release.get("assets")
+    if not isinstance(assets, list) or len(assets) != 2:
+        raise RuntimeError("Missing or unexpected release artifacts")
+    by_name = {item.get("name"): item for item in assets}
+    if set(by_name) != {filename, "SHA256SUMS"}:
+        raise RuntimeError("Duplicate or missing release artifacts")
+    def fetch(name, limit):
+        meta = by_name[name]
+        if (meta.get("browser_download_url") != base + name or
+                meta.get("state") != "uploaded" or
+                type(meta.get("size")) is not int or
+                not 0 < meta["size"] <= limit):
+            raise RuntimeError("Untrusted release artifact metadata")
+        data = download(base + name, limit)
+        if len(data) != meta["size"]:
+            raise RuntimeError("Release artifact length mismatch")
+        digest = "sha256:" + hashlib.sha256(data).hexdigest()
+        if meta.get("digest") is not None and meta["digest"] != digest:
+            raise RuntimeError("Release artifact GitHub digest mismatch")
+        return data
+    checksums = fetch("SHA256SUMS", 4096)
+    match = re.fullmatch(rb"([a-f0-9]{64})  " + filename.encode() + rb"\n", checksums)
+    if not match:
+        raise RuntimeError("Invalid release checksum manifest")
+    wheel = fetch(filename, MAX_WHEEL_BYTES)
+    if hashlib.sha256(wheel).hexdigest().encode() != match.group(1):
+        raise RuntimeError("Wheel SHA256 verification failed")
+    try:
+        with ZipFile(io.BytesIO(wheel)) as bundle:
+            entries = bundle.namelist()
+            if len(entries) != len(set(entries)) or any(
+                    path.startswith("/") or ".." in path.split("/") for path in entries):
+                raise RuntimeError("Unsafe wheel archive member names")
+            names = set(entries)
+            metadata = f"devstack-{version}.dist-info/METADATA"
+            if metadata not in names or "devstack/templates/app.html" not in names:
+                raise RuntimeError("Missing wheel Python metadata or app HTML")
+            lines = bundle.read(metadata).decode("utf-8").splitlines()
+            if "Name: devstack" not in lines or f"Version: {version}" not in lines:
+                raise RuntimeError("Release tag disagrees with wheel metadata")
+            prefix = "devstack/static/v06/"
+            manifest = json.loads(bundle.read(prefix + "manifest.json"))
+            entry = manifest["src/main.tsx"]
+            frontend = {entry["file"], *entry.get("css", ())}
+            frontend.update(item["file"] for item in manifest.values()
+                            if item.get("file", "").endswith(".css"))
+            if not any(a.endswith(".js") for a in frontend) or not any(
+                    a.endswith(".css") for a in frontend):
+                raise RuntimeError("Frontend JS/CSS missing")
+            for asset in frontend:
+                if (not re.fullmatch(r"assets/[A-Za-z0-9._-]+\.(js|css)", asset)
+                        or prefix + asset not in names):
+                    raise RuntimeError("Frontend manifest references invalid asset")
+    except (BadZipFile, KeyError, ValueError, UnicodeError) as error:
+        raise RuntimeError("Invalid release wheel") from error
+    return filename, wheel
+
+def install_wheel(release_dir, tag, repo):
+    filename, data = verified_wheel(repo, tag)
+    folder = release_dir / "artifact"
+    folder.mkdir()
+    wheel = folder / filename
+    wheel.write_bytes(data)
+    execute(sys.executable, "-m", "venv", str(release_dir / "venv"), timeout=90)
+    execute(str(release_dir / "venv/bin/python"), "-m", "pip", "install",
+            "--disable-pip-version-check", "--no-input", "--no-cache-dir",
+            str(wheel), timeout=240)
+
 def prepare_release(root: Path, tag: str, repo: str) -> Path:
-    """Install an immutable-by-convention tagged checkout in its own venv."""
+    """Install legacy tagged source or a verified release wheel in a fresh venv."""
     checked_tag(tag)
     checked_repo(repo)
     releases = root / "releases"
@@ -66,20 +184,23 @@ def prepare_release(root: Path, tag: str, repo: str) -> Path:
         shutil.rmtree(release_dir)
     release_dir.mkdir()
     try:
-        source = release_dir / "source"
-        execute("git", "clone", "--depth", "1", "--single-branch",
-                "--branch", tag, f"https://github.com/{repo}.git",
-                str(source), timeout=180)
-        execute(sys.executable, "-m", "venv", str(release_dir / "venv"), timeout=90)
-        # A release tag must correspond to the checked-out Python package
-        # version, not just a Git ref with an arbitrary name.
-        import tomllib
-        metadata = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))
-        if "v" + metadata["project"]["version"] != tag:
-            raise RuntimeError("Release tag disagrees with pyproject.toml version")
-        execute(str(release_dir / "venv/bin/python"), "-m", "pip", "install",
-                "--disable-pip-version-check", "--no-input", "--no-cache-dir",
-                str(source), timeout=240)
+        if release_version(tag) >= WHEEL_FROM:
+            install_wheel(release_dir, tag, repo)
+        else:
+            source = release_dir / "source"
+            execute("git", "clone", "--depth", "1", "--single-branch",
+                    "--branch", tag, f"https://github.com/{repo}.git",
+                    str(source), timeout=180)
+            execute(sys.executable, "-m", "venv", str(release_dir / "venv"), timeout=90)
+            # A release tag must correspond to the checked-out Python package
+            # version, not just a Git ref with an arbitrary name.
+            import tomllib
+            metadata = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8"))
+            if "v" + metadata["project"]["version"] != tag:
+                raise RuntimeError("Release tag disagrees with pyproject.toml version")
+            execute(str(release_dir / "venv/bin/python"), "-m", "pip", "install",
+                    "--disable-pip-version-check", "--no-input", "--no-cache-dir",
+                    str(source), timeout=240)
         ready.write_text(tag + "\n", encoding="utf-8")
     except BaseException:
         shutil.rmtree(release_dir, ignore_errors=True)
