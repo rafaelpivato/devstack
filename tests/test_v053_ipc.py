@@ -13,7 +13,7 @@ from devstack.ipc.client import (
     ensure_compatible, send, send_payload,
 )
 from devstack.ipc.protocol import (
-    MAX_MESSAGE, OPERATIONS, ProtocolError, validate_request,
+    MAX_MESSAGE, OPERATIONS, PROTOCOL_MINOR, ProtocolError, validate_request,
 )
 from devstack.control.daemon import ControlServer, request as old_request
 
@@ -22,7 +22,7 @@ class FakeController:
     def handle(self, data):
         operation = validate_request(data)
         if operation == "protocol_info":
-            return {"major": 1, "minor": 1}
+            return {"major": 1, "minor": PROTOCOL_MINOR}
         if operation == "status":
             return {"phase": "inactive"}
         if operation == "projects":
@@ -82,9 +82,9 @@ class SharedIPCTests(unittest.TestCase):
             self.assertEqual(send_payload(self.path, {"op": "projects"}), {"projects": []})
             self.assertIs(legacy_client.send, send)
             self.assertIs(legacy_client.ControllerRejected, ControllerRejected)
-            self.assertEqual(ensure_compatible(self.path), {"major": 1, "minor": 1})
+            self.assertEqual(ensure_compatible(self.path), {"major": 1, "minor": PROTOCOL_MINOR})
             with self.assertRaises(ControllerIncompatible):
-                ensure_compatible(self.path, minimum_minor=2)
+                ensure_compatible(self.path, minimum_minor=PROTOCOL_MINOR + 1)
             with self.assertRaises(ProtocolError):
                 old_request(self.path, {"op": "github_ssh_status"})
             with self.assertRaises(ControllerRejected) as exc:

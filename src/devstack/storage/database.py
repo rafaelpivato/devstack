@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -115,6 +115,32 @@ _SCHEMA = (
            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE RESTRICT,
            payload TEXT NOT NULL,
            started_ns INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS repository_sync (
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+           policy TEXT NOT NULL DEFAULT 'manual'
+             CHECK(policy IN ('manual','check','update')),
+           status TEXT NOT NULL DEFAULT 'idle'
+             CHECK(status IN ('idle','running','checked','updated','unchanged',
+                              'blocked','failed','interrupted')),
+           error_code TEXT,
+           last_checked_ns INTEGER,
+           last_updated_ns INTEGER,
+           ahead INTEGER,
+           behind INTEGER,
+           previous_head TEXT,
+           head TEXT,
+           PRIMARY KEY(project_id,repository_id))""",
+    """CREATE TABLE IF NOT EXISTS repository_sync_events (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+           outcome TEXT NOT NULL,
+           reason TEXT,
+           previous_head TEXT,
+           head TEXT,
+           at_ns INTEGER NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS repository_sync_events_by_repo ON repository_sync_events(project_id,repository_id,id)",
     """CREATE TABLE IF NOT EXISTS tasks (
            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
            name TEXT NOT NULL,
@@ -155,13 +181,21 @@ class Database:
                 row = con.execute(
                     "SELECT version FROM schema_version WHERE singleton=1"
                 ).fetchone()
-                if row is None or row[0] != SCHEMA_VERSION:
+                if row is None or row[0] not in (10, SCHEMA_VERSION):
                     raise StorageError("Unsupported database schema version")
                 if not {"projects", "repositories", "project_sources",
                         "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending", "repository_add_operations", "repository_bulk_updates"}.issubset(existing):
                     raise StorageError("Database schema is incomplete")
+                if row[0] == SCHEMA_VERSION and not {
+                    "repository_sync", "repository_sync_events",
+                }.issubset(existing):
+                    raise StorageError("Repository synchronization schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)
+            if existing and row[0] == 10:
+                # Atomic in-place upgrade from the v0.6.6 controller DB.
+                con.execute("UPDATE schema_version SET version=? WHERE singleton=1",
+                            (SCHEMA_VERSION,))
             if not existing:
                 con.execute(
                     "INSERT INTO runtime_state"

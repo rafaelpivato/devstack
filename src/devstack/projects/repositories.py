@@ -115,6 +115,21 @@ class RepositoryGitService:
             raise RepositoryGitError("Deactivate the runtime before changing Git branches")
         self.coordinator._verify_clear()
 
+    def _sync_editable(self, identifier: str) -> None:
+        """Allow only the inactive runtime or the matching active owner.
+
+        Caller holds the coordinator's global source-write lock. This is not
+        the branch-switch permission: branch switching remains inactive-only.
+        """
+        project_id(identifier)
+        state = self.coordinator.status()
+        if state["phase"] == "active" and state["project_id"] == identifier:
+            return
+        if state["phase"] == "inactive" and state["project_id"] is None:
+            self.coordinator._verify_clear()
+            return
+        raise RepositoryGitError("Repository update requires inactive or matching active project")
+
     @staticmethod
     def _ref(checkout: Path, ref: str) -> str | None:
         value = RepositoryGitService._git(
@@ -289,7 +304,7 @@ class RepositoryGitService:
         """Fast-forward while the caller owns the global coordinator lock."""
         if not isinstance(expected_head, str) or not _HEAD.fullmatch(expected_head):
             raise RepositoryGitInvalid("Expected a Git commit hash")
-        self._source_editable()
+        self._sync_editable(identifier)
         current = self.status(identifier, repository_id)
         if current["head"] != expected_head:
             raise RepositoryGitError("Repository changed since inspection")

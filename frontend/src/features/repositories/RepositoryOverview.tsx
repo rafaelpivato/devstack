@@ -2,7 +2,8 @@ import { useCallback, useState, type ReactNode } from "react";
 import { readProject } from "../../api/projects";
 import { readRuntime, type RuntimeSnapshot } from "../../api/runtime";
 import {
-  repositoryStatus, updateRepository, previewBranch, applyBranch, reviewSource, applySource,
+  repositoryStatus, updateRepository, checkRepository, saveRepositorySyncPolicy,
+  type RepositorySyncPolicy, previewBranch, applyBranch, reviewSource, applySource,
   submitRepoAdd, submitRepoBulk, repoAddReceipt, repoBulkReceipt,
   type RepositoryStatus, type BranchPreview, type BranchApplyResult, type SourceReviewResult,
   type SourceApplyResult, type RepositoryAddReceipt, type RepositoryBulkReceipt,
@@ -19,7 +20,7 @@ import {
 } from "../../lib/repositorySubmission";
 
 
-import { Context, WriteBoundary, ActionButton, LinkRow, ActionError, canWriteRepository, verifyInactive, errorMessage, repositoryRoot } from './RepositoryCommon';
+import { Context, WriteBoundary, ActionButton, LinkRow, ActionError, canWriteRepository, canUpdateRepository, verifyRepositoryUpdate, errorMessage, repositoryRoot } from './RepositoryCommon';
 export function RepositoryScreen({id,repositoryId,runtime,navigation}:{
   id:string;repositoryId?:string;runtime:RuntimeSnapshot;navigation:Navigator;
 }) {
@@ -61,14 +62,34 @@ function RepositoryDetail({id,repositoryId,runtime,navigation}:{
   const [result,setResult]=useState<RepositoryStatus|null>(null);
   const [error,setError]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
+  const [selection,setSelection]=useState<RepositorySyncPolicy|null>(null);
   const state=result??(resource.kind==="ready"?resource.data:null);
-  const ready=canWriteRepository(runtime) && state && !state.dirty && !!state.branch &&
+  const selectedPolicy=selection??state?.sync?.policy??"manual";
+  const check=async()=>{
+    if(!canUpdateRepository(runtime,id)||busy)return;
+    setBusy(true);setError(null);
+    try{
+      await verifyRepositoryUpdate(id);
+      setResult(await checkRepository(id,repositoryId));
+    }catch(e){setError(errorMessage(e)+" Inspect the repository before retrying.");}
+    finally{setBusy(false);}
+  };
+  const savePolicy=async()=>{
+    if(!state||busy||selection===null)return;
+    setBusy(true);setError(null);
+    try{
+      const sync=await saveRepositorySyncPolicy(id,repositoryId,selectedPolicy);
+      setResult({...state,sync});setSelection(null);
+    }catch(e){setError(errorMessage(e));}
+    finally{setBusy(false);}
+  };
+  const ready=canUpdateRepository(runtime,id) && state && !state.dirty && !!state.branch &&
     state.upstream?.startsWith("origin/") && !((state.ahead??0)>0&&(state.behind??0)>0);
   const update=async()=>{
     if(!ready||!state||busy)return;
     setBusy(true);setError(null);setResult(null);
     try{
-      await verifyInactive();
+      await verifyRepositoryUpdate(id);
       const value=await updateRepository(id,repositoryId,state.head);
       setResult(value);
     }catch(e){setError(errorMessage(e)+" Inspect repository status before another update.");}
@@ -84,11 +105,33 @@ function RepositoryDetail({id,repositoryId,runtime,navigation}:{
       <div className="property"><span>Ahead / behind</span><strong>{state.ahead??"—"} / {state.behind??"—"}</strong></div>
       <div className="property"><span>HEAD</span><code>{state.head.slice(0,12)}</code></div>
     </section>}
-    <WriteBoundary runtime={runtime}/>
+    {!canUpdateRepository(runtime,id)&&<Notice title="Repository update unavailable">Activate this project or deactivate the other active project to update its files.</Notice>}
+    {state&&<section className="card">
+      <h3>Repository synchronization</h3>
+      <p className="text-muted">Fetch remote changes without switching projects. Synchronization never restarts Compose services or imports managed configuration.</p>
+      <label>Automatic synchronization
+        <select value={selectedPolicy} onChange={e=>setSelection(e.target.value as RepositorySyncPolicy)} disabled={busy}>
+          <option value="manual">Manual only (default)</option>
+          <option value="check">Check automatically every 5 minutes</option>
+          <option value="update">Fast-forward automatically every 5 minutes when safe</option>
+        </select>
+      </label>
+      <div className="repo-actions">
+        <ActionButton onClick={()=>void savePolicy()} disabled={busy||selection===null||selectedPolicy===state.sync?.policy}>Save policy</ActionButton>
+        <ActionButton onClick={()=>void check()} disabled={busy||!canUpdateRepository(runtime,id)}>{busy?"Working…":"Check remote now"}</ActionButton>
+      </div>
+      <div className="property"><span>Last result</span><strong>{state.sync?.status??"idle"}{state.sync?.error_code?" ("+state.sync.error_code+")":""}</strong></div>
+      <div className="property"><span>Last check</span><span>{state.sync?.last_checked_ns?new Date(state.sync.last_checked_ns/1e6).toLocaleString():"Never"}</span></div>
+      <div className="property"><span>Last fast-forward</span><span>{state.sync?.last_updated_ns?new Date(state.sync.last_updated_ns/1e6).toLocaleString():"Never"}</span></div>
+      {(state.sync?.events??[]).slice(0,3).map((event,i)=><div className="property" key={event.at_ns+"-"+i}>
+        <span>{event.outcome}{event.reason?" / "+event.reason:""}</span><code>{event.head?.slice(0,12)??"—"}</code>
+      </div>)}
+      {state.sync?.status==="interrupted"&&<Notice title="Manual review required">Automatic updates remain paused for this repository until an explicit check or update.</Notice>}
+    </section>}
     {state&&<ActionButton onClick={()=>void update()} disabled={!ready||busy}>
       {busy?"Checking Git…":"Fetch and fast-forward"}
     </ActionButton>}
-    {state&&canWriteRepository(runtime)&&!ready&&<p className="text-muted">Requires a clean branch tracking origin without diverged history.</p>}
+    {state&&canUpdateRepository(runtime,id)&&!ready&&<p className="text-muted">Requires a clean branch tracking origin without diverged history.</p>}
     {result&&<Notice title="Repository checked">Current HEAD: {result.head.slice(0,12)}. Reload status before another change.</Notice>}
     <ActionError message={error}/>
     <LinkRow to={repoBranchUrl(id)} label="Review branch change" navigation={navigation}/>

@@ -106,6 +106,8 @@ def register(project_actions, root_commands, common, project_flag, uuid, request
         ("list", "List repositories registered to an explicit project."),
         ("status", "Read a repository's Git HEAD/branch and dirty state."),
         ("update", "Safely fast-forward one repository from an observed HEAD."),
+        ("check", "Fetch remote refs without updating working files."),
+        ("sync-policy", "Configure opt-in checks or safe auto-fast-forward."),
         ("update-all", "Submit a controller-owned batch fast-forward."),
         ("update-status", "Inspect a controller-owned batch update receipt."),
         ("add", "Add a GitHub repository to an inactive project."),
@@ -116,11 +118,13 @@ def register(project_actions, root_commands, common, project_flag, uuid, request
         command = actions.add_parser(action, help=description)
         common(command)
         project_flag(command)
-        if action in {"status", "update"}:
+        if action in {"status", "update", "check", "sync-policy"}:
             command.add_argument("repository_id", type=uuid, metavar="REPO_UUID")
         if action == "update":
             command.add_argument("--expected-head", type=_sha, required=True,
                                  metavar="SHA40")
+        if action == "sync-policy":
+            command.add_argument("--mode", choices=("manual", "check", "update"), required=True)
         if action == "add":
             command.add_argument("url", type=_url, metavar="GITHUB_URL")
             command.add_argument("--name", type=_repo_name, required=True)
@@ -199,6 +203,12 @@ def dispatch(args, sender):
         return sender(socket, "repository_update", project_id=project,
                       repository_id=args.repository_id,
                       expected_head=args.expected_head), "repo_status"
+    if action == "check":
+        return sender(socket, "repository_check", project_id=project,
+                      repository_id=args.repository_id), "repo_status"
+    if action == "sync-policy":
+        return sender(socket, "repository_sync_policy", project_id=project,
+                      repository_id=args.repository_id, policy=args.mode), "sync_policy"
     if action == "update-all":
         return (_submit(sender, socket, "repository_bulk_submit",
                         {"project_id": project}, wait=args.wait, kind="repo_bulk",
@@ -250,6 +260,13 @@ def render(name: str, payload: object, line) -> str:
                 ("head", "HEAD"), ("upstream", "Upstream"), ("dirty", "Dirty"),
                 ("ahead", "Ahead"), ("behind", "Behind"),
             )
+        ])
+    if name == "sync_policy":
+        return "\n".join([
+            _line(line, "Policy", payload.get("policy")),
+            _line(line, "State", payload.get("status")),
+            _line(line, "Last check", payload.get("last_checked_ns")),
+            _line(line, "Last update", payload.get("last_updated_ns")),
         ])
     if name == "git_operation":
         lines = [

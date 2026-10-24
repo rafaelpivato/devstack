@@ -1,8 +1,18 @@
 import { apiRequest } from "./client";
 import { isProjectId } from "../navigation/routes";
+export type RepositorySyncPolicy = "manual"|"check"|"update";
+export interface RepositorySyncEvent {
+  outcome:string;reason:string|null;previous_head:string|null;head:string|null;at_ns:number;
+}
+export interface RepositorySyncState {
+  policy:RepositorySyncPolicy;status:string;error_code:string|null;
+  last_checked_ns:number|null;last_updated_ns:number|null;
+  ahead:number|null;behind:number|null;previous_head:string|null;head:string|null;
+  events:RepositorySyncEvent[];
+}
 export interface RepositoryStatus {
   id:string;project_id:string;name:string;branch:string|null;head:string;upstream:string|null;
-  dirty:boolean;ahead:number|null;behind:number|null;
+  dirty:boolean;ahead:number|null;behind:number|null;sync?:RepositorySyncState;
 }
 export interface BranchEntry {
   repository_id:string;name:string;current_branch:string|null;head:string;dirty:boolean;
@@ -31,6 +41,14 @@ export const repositoryStatus=(projectId:string,repositoryId:string,signal?:Abor
 export const updateRepository=(projectId:string,repositoryId:string,expected_head:string)=>
   apiRequest<RepositoryStatus>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/update",
     {method:"POST",body:{expected_head}});
+export const checkRepository=(projectId:string,repositoryId:string)=>
+  apiRequest<RepositoryStatus>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/check",
+    {method:"POST",body:{}});
+export const saveRepositorySyncPolicy=(projectId:string,repositoryId:string,policy:RepositorySyncPolicy)=>
+  apiRequest<RepositorySyncState>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/sync",
+    {method:"PUT",body:{policy}});
+export const readRepositorySyncPolicy=(projectId:string,repositoryId:string,signal?:AbortSignal)=>
+  apiRequest<RepositorySyncState>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/sync",{signal});
 export const previewBranch=(id:string,branch:string,repositoryId:string|null,signal?:AbortSignal)=>
   apiRequest<BranchPreview>(base(id)+"/git/branch-preview?"+
     new URLSearchParams({...{branch},...(repositoryId?{repository_id:uuid(repositoryId)}:{})}).toString(),{signal});

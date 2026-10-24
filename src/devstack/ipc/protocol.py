@@ -7,7 +7,7 @@ from __future__ import annotations
 
 MAX_MESSAGE = 64 * 1024
 PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 1
+PROTOCOL_MINOR = 2
 
 # Request shapes are intentionally exact, not permissive. Optional values
 # still occupy their named fields (typically as JSON null).
@@ -26,6 +26,9 @@ _OPERATION_FIELDS = {
     "source_apply": ("project_id", "revision", "selected", "overwrites"),
     "repository_status": ("project_id", "repository_id"),
     "repository_update": ("project_id", "repository_id", "expected_head"),
+    "repository_check": ("project_id", "repository_id"),
+    "repository_sync_state": ("project_id", "repository_id"),
+    "repository_sync_policy": ("project_id", "repository_id", "policy"),
     "repository_bulk_submit": ("project_id", "request_key"),
     "repository_bulk_status": ("project_id", "id"),
     "branch_preview": ("project_id", "branch", "repository_id"),

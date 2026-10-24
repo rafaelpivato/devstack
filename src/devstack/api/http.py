@@ -30,7 +30,7 @@ from devstack.update_control import (
 SAFE_READ = {"GET", "HEAD", "OPTIONS"}
 NOT_FOUND = {"TransitionNotFound", "WebhookNotFound", "ProjectNotFound", "ImportNotFound", "RepositoryNotFound", "RepositoryAddNotFound", "BulkRepositoryNotFound"}
 INVALID = {"WebhookInvalid", "ConfigurationInvalid", "DomainError", "ProtocolError", "GitHubSourceError",
-           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError", "JobInvalid"}
+           "ManifestError", "ProjectProvisionError", "WorkspaceError", "RepositoryGitInvalid", "SourceReviewInvalid", "GitHubSSHError", "JobInvalid", "RepositorySyncInvalid"}
 CONFLICT = {"TransitionConflict", "WebhookBusy", "ConfigurationConflict", "ControlError", "ProjectConflict", "JobError", "DockerControlError", "ImportConflict", "RepositoryGitError", "SourceSyncConflict", "RepositoryAddConflict", "BulkRepositoryConflict"}
 
 
@@ -608,6 +608,33 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
     def repository_status_api(identifier, repository_id):
         try:
             return jsonify(call("repository_status", project_id=identifier,
+                                repository_id=repository_id))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.get("/api/v2/projects/<identifier>/repositories/<repository_id>/sync")
+    def repository_sync_state_api(identifier, repository_id):
+        try:
+            return jsonify(call("repository_sync_state", project_id=identifier,
+                                repository_id=repository_id))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.put("/api/v2/projects/<identifier>/repositories/<repository_id>/sync")
+    def repository_sync_policy_api(identifier, repository_id):
+        payload = json_input({"policy"})
+        try:
+            return jsonify(call("repository_sync_policy", project_id=identifier,
+                                repository_id=repository_id, **payload))
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            return json_error(exc)
+
+    @app.post("/api/v2/projects/<identifier>/repositories/<repository_id>/check")
+    def repository_check_api(identifier, repository_id):
+        if not request.is_json or request.get_json(silent=True) != {}:
+            abort(400)
+        try:
+            return jsonify(call("repository_check", project_id=identifier,
                                 repository_id=repository_id))
         except (ControllerUnavailable, ControllerRejected) as exc:
             return json_error(exc)
