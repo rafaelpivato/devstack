@@ -11,7 +11,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class ReleaseCandidateGateTests(unittest.TestCase):
     def test_published_tag_metadata_and_notes_are_coherent(self):
         version=tomllib.loads((ROOT/"pyproject.toml").read_text())["project"]["version"]
-        self.assertEqual(version,"0.6.4")
+        self.assertEqual(version,"0.6.5")
         frontend=json.loads((ROOT/"frontend/package.json").read_text())
         self.assertEqual(frontend["version"],version)
         self.assertTrue((ROOT/"docs/releases"/f"v{version}.md").is_file())
