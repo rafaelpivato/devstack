@@ -24,7 +24,7 @@ class PromoteUpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             destination = Path(folder) / "updater.py"
             destination.write_text("different vendor\n")
-            with patch.object(Path, "stat", self.root_stat):
+            with patch.object(Path, "stat", autospec=True, side_effect=self.root_stat):
                 with self.assertRaisesRegex(RuntimeError, "Unrecognized"):
                     replace_owned_updater(destination, IDENTITY + b"\n")
             self.assertEqual(destination.read_text(), "different vendor\n")
@@ -36,7 +36,7 @@ class PromoteUpdaterTests(unittest.TestCase):
             original = b'"""Independent, conservative release updater"""\n'
             destination.write_bytes(original)
             payload = original + b"!syntaxerror"
-            with patch.object(Path, "stat", self.root_stat):
+            with patch.object(Path, "stat", autospec=True, side_effect=self.root_stat):
                 with self.assertRaises(SyntaxError):
                     replace_owned_updater(destination, payload)
             self.assertEqual(destination.read_bytes(), original)
@@ -48,7 +48,7 @@ class PromoteUpdaterTests(unittest.TestCase):
             previous = b'"""Independent, conservative release updater"""\nMARKER = 1\n'
             current = b'"""Independent, conservative release updater"""\nMARKER = 2\n'
             destination.write_bytes(previous)
-            with patch.object(Path, "stat", self.root_stat):
+            with patch.object(Path, "stat", autospec=True, side_effect=self.root_stat):
                 replace_owned_updater(destination, current)
                 self.assertEqual(destination.read_bytes(), current)
                 backup = destination.with_name("updater.py.pre-mutable-backup")
