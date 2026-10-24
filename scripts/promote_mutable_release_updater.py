@@ -31,7 +31,7 @@ def assert_published_checkout(root: Path = ROOT) -> None:
     """Do not accept arbitrary source branches, untracked replacement code."""
     def git(*args: str) -> str:
         result = subprocess.run(
-            ["git", "-C", str(root), *args],
+            ["git", "-c", f"safe.directory={root.resolve()}", "-C", str(root), *args],
             capture_output=True, text=True, check=True, timeout=15)
         return result.stdout.strip()
     if git("describe", "--tags", "--exact-match", "HEAD") != TAG:

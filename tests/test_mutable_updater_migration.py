@@ -67,6 +67,7 @@ class PromoteUpdaterTests(unittest.TestCase):
         self.assertIn('TAG = "v0.6.6"', source)
         self.assertIn('"v0.6.5"', source)
         self.assertIn("verified_wheel", source)
+        self.assertIn("safe.directory=", source)
         self.assertIn("replace_owned_updater", source)
         self.assertNotIn("systemctl", source)
 
