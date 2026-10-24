@@ -26,7 +26,10 @@ describe("repository safety and navigation",()=>{
     expect(inactive).toContain("disabled");
     const active=renderToStaticMarkup(<RepositoryBulk id={A}
       runtime={state("active",B)} navigation={nav}/>);
-    expect(active).toContain("Deactivate the active runtime");
+    expect(active).toContain("Activate this project or deactivate the other active project");
+    const owner=renderToStaticMarkup(<RepositoryBulk id={A}
+      runtime={state("active",A)} navigation={nav}/>);
+    expect(owner).not.toContain("Update unavailable");
     expect(active).toContain("disabled");
     expect(repoBranchUrl(A)).toContain("/repositories/branch");
     expect(repoReceiptUrl(A,"add",B)).toContain("/repositories/adds/");
