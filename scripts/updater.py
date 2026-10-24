@@ -102,8 +102,7 @@ def verified_wheel(repo, tag):
     release = json.loads(download(
         f"https://api.github.com/repos/{repo}/releases/tags/{tag}", 1024 * 1024))
     if (release.get("tag_name") != tag or release.get("draft") or
-            release.get("prerelease") or not release.get("published_at") or
-            release.get("immutable") is not True):
+            release.get("prerelease") or not release.get("published_at")):
         raise RuntimeError("Release is not a published stable version")
     assets = release.get("assets")
     if not isinstance(assets, list) or len(assets) != 2:

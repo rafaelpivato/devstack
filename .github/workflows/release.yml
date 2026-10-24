@@ -146,7 +146,5 @@ jobs:
           cmp dist/SHA256SUMS "$RUNNER_TEMP/roundtrip/SHA256SUMS"
           cmp dist/*.whl "$RUNNER_TEMP/roundtrip/"*.whl
           gh release edit "$TAG" --draft=false
-          # No administration-scoped token needed: read the release metadata
-          # using GITHUB_TOKEN. The standalone updater independently refuses
-          # any wheel-only release that GitHub does not mark immutable.
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .immutable)" = "true"
+          # Do not overwrite previously published assets or reuse a tag.
+          # Operators may opt into GitHub immutable releases separately.
