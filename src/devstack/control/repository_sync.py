@@ -227,15 +227,26 @@ class RepositorySyncSupervisor:
         return len(rows)
 
     def poll_once(self):
-        """Bounded single-pass polling; called only by existing controller daemon."""
-        now = time.time_ns()
+        """Bounded polling, choosing eligible repositories before applying LIMIT."""
+        state = self.coordinator.status()
+        if state["phase"] not in ("active", "inactive"):
+            return 0
+        # Filtering only after LIMIT can permanently starve the active owner
+        # when other projects have older unchecked repositories.
+        active_scope = state["phase"] == "active"
+        predicate = " AND project_id=?" if active_scope else ""
+        args = [time.time_ns() - POLL_INTERVAL_NS]
+        if active_scope:
+            args.append(state["project_id"])
+        args.append(MAX_PER_TICK)
         with self.database.transaction() as con:
             due = con.execute(
                 "SELECT project_id,repository_id,policy FROM repository_sync "
                 "WHERE policy IN ('check','update') AND status!='interrupted' "
                 "AND (last_checked_ns IS NULL OR last_checked_ns<=?) "
-                "ORDER BY COALESCE(last_checked_ns,0),repository_id LIMIT ?",
-                (now - POLL_INTERVAL_NS, MAX_PER_TICK),
+                + predicate +
+                " ORDER BY COALESCE(last_checked_ns,0),repository_id LIMIT ?",
+                tuple(args),
             ).fetchall()
         count = 0
         for row in due:

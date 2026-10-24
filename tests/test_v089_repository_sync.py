@@ -142,6 +142,20 @@ class RepositorySynchronizationTests(unittest.TestCase):
         self.assertEqual(self.docker.stops, 0)
         self.controller.coordinator.deactivate()
 
+    def test_active_project_polling_cannot_be_starved_by_foreign_repos(self):
+        sync = self.controller.repository_sync
+        sync.set_policy(self.b, self.br.id, "check")
+        sync.set_policy(self.a, self.ar.id, "check")
+        with self.db.transaction(write=True) as con:
+            con.execute("UPDATE repository_sync SET last_checked_ns=1 "
+                        "WHERE repository_id=?", (self.ar.id,))
+        self.controller.coordinator.activate(self.a)
+        with patch("devstack.control.repository_sync.MAX_PER_TICK", 1):
+            self.assertEqual(sync.poll_once(), 1)
+        self.assertEqual(sync.state(self.a, self.ar.id)["status"], "checked")
+        self.assertEqual(sync.state(self.b, self.br.id)["status"], "idle")
+        self.controller.coordinator.deactivate()
+
     def test_dirty_checkout_never_overwritten_and_receipts_are_bounded(self):
         sync = self.controller.repository_sync
         self.advance()
