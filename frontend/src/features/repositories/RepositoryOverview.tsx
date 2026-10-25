@@ -3,6 +3,8 @@ import { readProject } from "../../api/projects";
 import { readRuntime, type RuntimeSnapshot } from "../../api/runtime";
 import {
   repositoryStatus, updateRepository, checkRepository, saveRepositorySyncPolicy,
+  readRepositoryReactions, setRepositoryReaction, type ServiceReaction,
+  type RepositoryReactions,
   type RepositorySyncPolicy, previewBranch, applyBranch, reviewSource, applySource,
   submitRepoAdd, submitRepoBulk, repoAddReceipt, repoBulkReceipt,
   type RepositoryStatus, type BranchPreview, type BranchApplyResult, type SourceReviewResult,
@@ -13,7 +15,7 @@ import { useResource } from "../../hooks/useResource";
 import type { Navigator } from "../../navigation/useNavigation";
 import { NavLink } from "../../navigation/useNavigation";
 import {
-  laneUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl,
+  laneUrl, repoUrl, repoAddUrl, repoBulkUrl, repoBranchUrl, repoSourceUrl, repoReceiptUrl, jobUrl,
 } from "../../navigation/routes";
 import {
   requestKey, loadSubmission, saveSubmission, clearSubmission, type SavedRepositorySubmission,
@@ -59,6 +61,19 @@ function RepositoryDetail({id,repositoryId,runtime,navigation}:{
 }) {
   const load=useCallback((signal:AbortSignal)=>repositoryStatus(id,repositoryId,signal),[id,repositoryId]);
   const resource=useResource(load,20000);
+  const reactionLoad=useCallback((signal:AbortSignal)=>readRepositoryReactions(id,repositoryId,signal),[id,repositoryId]);
+  const reactionResource=useResource(reactionLoad,20000);
+  const [reactionResult,setReactionResult]=useState<RepositoryReactions|null>(null);
+  const [reactionBusy,setReactionBusy]=useState<string|null>(null);
+  const [reactionError,setReactionError]=useState<string|null>(null);
+  const reactions=reactionResult??(reactionResource.kind==="ready"?reactionResource.data:null);
+  const saveReaction=async(service:string,action:ServiceReaction)=>{
+    if(reactionBusy!==null)return;
+    setReactionBusy(service);setReactionError(null);
+    try{setReactionResult(await setRepositoryReaction(id,repositoryId,service,action));}
+    catch(e){setReactionError(errorMessage(e));}
+    finally{setReactionBusy(null);}
+  };
   const [result,setResult]=useState<RepositoryStatus|null>(null);
   const [error,setError]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
@@ -108,7 +123,7 @@ function RepositoryDetail({id,repositoryId,runtime,navigation}:{
     {!canUpdateRepository(runtime,id)&&<Notice title="Repository update unavailable">Activate this project or deactivate the other active project to update its files.</Notice>}
     {state&&<section className="card">
       <h3>Repository synchronization</h3>
-      <p className="text-muted">Fetch remote changes without switching projects. Synchronization never restarts Compose services or imports managed configuration.</p>
+      <p className="text-muted">Fetch remote changes without switching projects. Only explicitly configured service reactions may restart or redeploy Compose; managed configuration is not imported.</p>
       <label>Automatic synchronization
         <select value={selectedPolicy} onChange={e=>setSelection(e.target.value as RepositorySyncPolicy)} disabled={busy}>
           <option value="manual">Manual only (default)</option>
@@ -127,6 +142,32 @@ function RepositoryDetail({id,repositoryId,runtime,navigation}:{
         <span>{event.outcome}{event.reason?" / "+event.reason:""}</span><code>{event.head?.slice(0,12)??"—"}</code>
       </div>)}
       {state.sync?.status==="interrupted"&&<Notice title="Manual review required">Automatic updates remain paused for this repository until an explicit check or update.</Notice>}
+    </section>}
+    {state&&<section className="card">
+      <h3>After source update</h3>
+      <p className="text-muted">Bind this repository to actual Compose services. None is the default. Only a changed Git HEAD triggers an automatic reaction while this project is active.</p>
+      {reactionResource.kind==="loading"&&!reactions&&<Skeleton/>}
+      {reactionResource.kind==="error"&&!reactions&&
+        <Notice title="Service reactions unavailable" role="alert">{reactionResource.error.message}</Notice>}
+      {reactions&&reactions.services.length===0&&<p className="text-muted">No Compose services configured.</p>}
+      {reactions?.services.map(item=><label key={item.name} className="field-inline">
+        {item.name}
+        <select aria-label={"Reaction for "+item.name} value={item.action}
+          disabled={reactionBusy!==null}
+          onChange={e=>void saveReaction(item.name,e.target.value as ServiceReaction)}>
+          <option value="none">None</option>
+          <option value="restart">Restart</option>
+          <option value="redeploy">Redeploy</option>
+        </select>
+      </label>)}
+      {reactionBusy&&<p className="text-muted">Saving {reactionBusy}…</p>}
+      {reactionError&&<Notice title="Reaction was not saved" role="alert">{reactionError}</Notice>}
+      {(reactions?.events??[]).slice(0,5).map((event,i)=>
+        <div className="property" key={event.at_ns+"-"+i}>
+          <span>{event.service} · {event.action} · {event.job_status??event.status}</span>
+          {event.job_id?<NavLink navigate={navigation.navigate} to={jobUrl(id,event.job_id)}>Job details</NavLink>:
+            <small>{event.reason??event.head.slice(0,12)}</small>}
+        </div>)}
     </section>}
     {state&&<ActionButton onClick={()=>void update()} disabled={!ready||busy}>
       {busy?"Checking Git…":"Fetch and fast-forward"}
