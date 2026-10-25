@@ -60,6 +60,21 @@ class ReactionSupervisor:
             if service not in self.backend.configured_services(identifier):
                 raise ReactionInvalid("Unknown Compose service")
             with self.database.transaction(write=True) as con:
+                previous = con.execute(
+                    "SELECT action FROM service_reaction_policies "
+                    "WHERE project_id=? AND repository_id=? AND service=?",
+                    (identifier, repository_id, service),
+                ).fetchone()
+                old_action = previous["action"] if previous else "none"
+                if old_action != action:
+                    # Explicit opt-out/change disarms work that has not yet
+                    # been handed to a controller-owned Compose job.
+                    con.execute(
+                        "UPDATE service_reaction_events SET status='skipped',"
+                        "reason='policy_changed' WHERE project_id=? AND "
+                        "repository_id=? AND service=? AND status='pending'",
+                        (identifier, repository_id, service),
+                    )
                 con.execute(
                     "DELETE FROM service_reaction_policies "
                     "WHERE project_id=? AND repository_id=? AND service=?",
