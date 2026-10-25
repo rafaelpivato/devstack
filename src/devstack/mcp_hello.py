@@ -19,7 +19,7 @@ from pydantic import Field
 
 DEFAULT_PORT = 8768
 MAX_VALUE_LENGTH = 80
-_HOST_RE = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\\Z")
+_HOST_RE = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\Z")
 
 
 class HelloState:
