@@ -198,6 +198,22 @@ class ReactionsTests(unittest.TestCase):
         self.assertEqual(c.reactions.get(self.a, self.repo.id)["events"][0]["reason"],
                          "stale_activation")
 
+    def test_policy_opt_out_disarms_not_yet_admitted_intents(self):
+        c = self.controller
+        c.coordinator.activate(self.a)
+        c.reactions.set_policy(self.a, self.repo.id, "api", "redeploy")
+        before = c.repositories.status(self.a, self.repo.id)["head"]
+        self.push()
+        c.repository_sync.perform(self.a, self.repo.id, update=True, expected_head=before)
+        self.assertEqual(c.reactions.get(self.a, self.repo.id)["events"][0]["status"],
+                         "pending")
+        c.reactions.set_policy(self.a, self.repo.id, "api", "none")
+        self.assertFalse(c.reactions.dispatch_pending())
+        self.assertFalse(self.submissions)
+        self.assertEqual(c.reactions.get(self.a, self.repo.id)["events"][0]["reason"],
+                         "policy_changed")
+        c.coordinator.deactivate()
+
     def test_source_update_is_fenced_by_running_compose_job(self):
         c = self.controller
         c.coordinator.activate(self.a)
