@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from devstack import mcp_management as manage
+from devstack import mcp_diagnostics
 from devstack.api.http import create_app
 
 
@@ -139,3 +140,56 @@ class WebAPIContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class DiagnosticSnapshotTests(unittest.TestCase):
+    def test_mcp_events_are_bounded_structured_and_private(self):
+        now = manage.time.time_ns() // 1_000_000
+        def entry(msg, source="devstack-mcp.service", priority="6"):
+            return json.dumps({
+                "__REALTIME_TIMESTAMP": str(now*1000),
+                "_SYSTEMD_UNIT": source, "PRIORITY": priority,
+                "MESSAGE": msg,
+            })
+        journal = "\\n".join([
+            entry("DEVSTACK_MCP gateway_started"),
+            entry("DEVSTACK_MCP ping_ok"),
+            entry("DEVSTACK_MCP funnel_error_funnel_permission_required",
+                  "devstack-mcp-apply.service"),
+            entry("private secret=ABC123 should never be in Web output",
+                  "devstack-mcp.service", "3"),
+            entry("error from unrelated host service", "ssh.service", "3"),
+            entry("DEVSTACK_MCP ping_ok", "ssh.service"),
+        ])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "mcp-log.json"
+            with patch.object(manage, "SNAPSHOT_FILE", path), patch.object(
+                    manage, "run_command", return_value=journal):
+                manage.capture_diagnostics()
+            parsed = json.loads(path.read_text())
+            self.assertEqual(len(parsed["events"]), 4)
+            self.assertNotIn("ABC123", str(parsed))
+            self.assertNotIn("ssh.service", str(parsed))
+            values = mcp_diagnostics.snapshot(5, path)
+            self.assertTrue(values["available"])
+            self.assertEqual(len(values["events"]), 4)
+            self.assertIn("mcp-funnel-error-funnel-permission-required",
+                          [e["code"] for e in values["events"]])
+            self.assertEqual(manage.ENV_FILE, Path("/etc/devstack-mcp.env"))
+            self.assertIn("EnvironmentFile=/etc/devstack-mcp.env",
+                          manage.UNIT_FILES["devstack-mcp.service"])
+
+    def test_snapshot_absence_or_staleness_is_reported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            p = Path(folder) / "missing.json"
+            self.assertFalse(mcp_diagnostics.snapshot(5, p)["available"])
+            p.write_text(json.dumps({"generated_at": 1, "events": []}))
+            self.assertFalse(mcp_diagnostics.snapshot(5, p)["available"])
+
+    def test_action_result_is_valid_json_and_no_payload_leaks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / "last.json"
+            with patch.object(manage, "RESULT_FILE", file):
+                manage.result_record("enabled", url="https://mynode.ts.net:10000/mcp")
+                self.assertEqual(json.loads(file.read_text())["code"], "enabled")

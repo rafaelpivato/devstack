@@ -71,3 +71,9 @@ The root diagnostic collector samples only the two dedicated MCP systemd
 units once per minute, emitting fixed-schema events, without exposing arbitrary
 journal entries or request parameters. SDK/internal crashes appear as generic
 MCP process-error events; explicit gateway and Funnel failures use safe codes.
+
+The new diagnostic unit is a root-owned **read-only journal collector**, limited
+to the MCP gateway and MCP apply services. It refreshes its safe JSON snapshot
+every minute. If the collector fails or becomes stale, source coverage becomes
+`mcp=unavailable` rather than quietly hiding failures. The browser never
+requests arbitrary host logs and never needs shell access to collect them.

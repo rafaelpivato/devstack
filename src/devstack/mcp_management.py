@@ -118,7 +118,7 @@ class MCPManagementError(RuntimeError):
         super().__init__(code)
 
 
-def log_event(code: str, *, error: bool = False) -> None:
+def log_event(code: str) -> None:
     """Only allowlisted fixed-shape codes are emitted; no request payloads."""
     if not re.fullmatch(r"[a-z_]{3,55}", code):
         code = "invalid_event"
@@ -163,6 +163,8 @@ def capture_diagnostics() -> None:
         match = re.fullmatch(r"DEVSTACK_MCP ([a-z_]{3,55})", message)
         if match:
             code = match.group(1)
+            if code.startswith(("funnel_error_", "gateway_process_error", "status_unavailable")):
+                level = "error"
         elif level == "error":
             code = "gateway_process_error" if unit == "devstack-mcp.service" else "funnel_broker_error"
         else:
@@ -184,7 +186,7 @@ def atomic_result_file(path: Path, payload: dict) -> None:
     ) as stream:
         name = stream.name
         json.dump(payload, stream, separators=(",", ":"))
-        stream.write("\\n")
+        stream.write("\n")
         stream.flush()
         os.fchmod(stream.fileno(), 0o644)
     os.replace(name, path)
@@ -195,7 +197,24 @@ def run_command(*args: str, timeout: int = 12) -> str:
         result = subprocess.run(args, capture_output=True, text=True,
                                 check=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
-        raise MCPManagementError("host_command_failed") from exc
+        if args and args[0] == "tailscale":
+            detail = str(getattr(exc, "stderr", "") or "").lower()
+            if "not running" in detail or "not connected" in detail:
+                code = "tailscale_disconnected"
+            elif any(s in detail for s in ("not allowed", "not enabled",
+                                           "permission", "not authorized")):
+                code = "funnel_permission_required"
+            elif args[1:2] == ("funnel",):
+                code = "funnel_command_failed"
+            else:
+                code = "tailscale_command_failed"
+        elif args and args[0] == "systemctl":
+            code = "systemd_command_failed"
+        elif args and args[0] == "journalctl":
+            code = "mcp_journal_unavailable"
+        else:
+            code = "host_command_failed"
+        raise MCPManagementError(code) from exc
     return result.stdout
 
 
