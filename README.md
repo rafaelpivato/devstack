@@ -1,6 +1,6 @@
 # DevStack
 
-**Latest published: v0.6.6. Next release: v0.6.7 active-project repository synchronization (#89).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.6.7. Next release: v0.6.8 targeted Compose reactions (#90).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 
@@ -18,7 +18,7 @@ The React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks 
 
 Create or import projects from GitHub, register multiple repositories per project, inspect repository status, safely update them individually or in a single background batch, and preview/confirm per-repository or project-wide Git branch switches. If a requested branch does not exist in a repository, switching falls back to that repository's **verified remote default branch**; unsafe local changes are never discarded.
 
-Configure a project's Compose files, applications and saved tasks; review/selectively apply managed `.devstack/` source configuration; activate/deactivate/switch the runtime. See service/container state, health, bounded logs and private Tailscale links on mobile. Queue independent background container commands with history and cancellation.
+Configure each repository's optional service reactions (None / Restart / Redeploy), manually restart or redeploy individual services without switching projects, and maintain a project's Compose files, applications and saved tasks; review/selectively apply managed `.devstack/` source configuration; activate/deactivate/switch the runtime. See service/container state, health, bounded logs and private Tailscale links on mobile. Queue independent background container commands with history and cancellation.
 
 Check for published stable DevStack releases or request **Update now** through a restricted systemd marker handoff. The independent root-owned updater validates an inactive healthy controller, installs verified release tags and rolls back a failed deployment. The periodic timer is unchanged.
 
@@ -34,7 +34,7 @@ the trusted `devstackipc` group—**not** the Docker group. See
 
 ## Installation and release status
 
-The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. `scripts/install.sh` selects the latest published stable release; existing supported deployments upgrade using the independent guarded updater. **v0.6.6 is published; v0.6.3 was intentionally skipped. The v0.6.5 compatibility bridge must precede wheel-based updates for older deployments.** Installed v0.5.2 users upgrading to newer versions must follow the v0.5.3 CLI operator enrollment and independent updater refresh notes.
+The original v0.5.2 cutover **requires a clean Ubuntu host** and does not support v0.5.1 migration. `scripts/install.sh` selects the latest published stable release; existing supported deployments upgrade using the independent guarded updater. **v0.6.7 is published; v0.6.3 was intentionally skipped. The v0.6.5 compatibility bridge must precede wheel-based updates for older deployments.** Installed v0.5.2 users upgrading to newer versions must follow the v0.5.3 CLI operator enrollment and independent updater refresh notes.
 
 For the original clean-host cutover, see [v0.5.2 release notes](docs/releases/v0.5.2.md); for the CLI setup, see [v0.5.3 notes](docs/releases/v0.5.3.md). For the published UI series, see [v0.6.0](docs/releases/v0.6.0.md), [v0.6.1](docs/releases/v0.6.1.md), and [v0.6.2](docs/releases/v0.6.2.md); [v0.6.4 notes](docs/releases/v0.6.4.md) document the root cutover. For the packaging migration, first review the mandatory [v0.6.5 compatibility bridge](docs/releases/v0.6.5.md), then [v0.6.6 verified release wheels](docs/releases/v0.6.6.md). See [v0.6.7 release notes](docs/releases/v0.6.7.md) for active-project Git synchronization. Never bypass the bridge on existing hosts. Real-device accessibility, restart/rollback and deferred acceptance are recorded separately in [issue #50](https://github.com/rafaelpivato/devstack/issues/50).
 
