@@ -26,6 +26,7 @@ class RepositorySyncSupervisor:
         self.registry = registry
         self.coordinator = coordinator
         self.repositories = repositories
+        self.reactions = None
 
     def _verify(self, identifier, repository_id):
         project_id(identifier)
@@ -133,6 +134,8 @@ class RepositorySyncSupervisor:
                 "WHERE project_id=? AND repository_id=? ORDER BY id DESC LIMIT ?)",
                 (identifier, repository_id, identifier, repository_id, MAX_EVENTS),
             )
+            if outcome == "updated" and self.reactions is not None:
+                self.reactions.capture(con, identifier, repository_id, head)
 
     def perform(self, identifier, repository_id, *, update=False,
                 expected_head=None, automatic=False):
@@ -156,6 +159,8 @@ class RepositorySyncSupervisor:
                     return {**self.repositories.status(identifier, repository_id),
                             "sync": old}
             self.repositories._sync_editable(identifier)
+            if update and self.reactions is not None and self.reactions.maintenance_busy_locked(identifier):
+                raise RepositoryGitError("Compose maintenance or reaction is in progress")
             before = self.repositories.status(identifier, repository_id)
             if expected_head is not None and before["head"] != expected_head:
                 raise RepositoryGitError("Repository changed since inspection")

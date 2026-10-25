@@ -33,6 +33,7 @@ from .repository_add import RepositoryAddSupervisor
 from .transitions import TransitionSupervisor
 from .bulk_repositories import BulkRepositoryUpdater
 from .repository_sync import RepositorySyncSupervisor
+from .reactions import ReactionSupervisor
 from devstack.github_ssh import public_key, generate_key, test_connection
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send_payload
 from devstack.ipc.protocol import (
@@ -61,10 +62,15 @@ class Controller:
         self.repository_sync = RepositorySyncSupervisor(
             database, self.registry, self.coordinator, self.repositories,
         )
+        self.reactions = ReactionSupervisor(
+            database, self.registry, self.coordinator, self.backend, self.jobs,
+        )
+        self.repository_sync.reactions = self.reactions
         self.repository_add = RepositoryAddSupervisor(database, self.registry, workspaces, self.coordinator)
         self.bulk_repositories = BulkRepositoryUpdater(
             database, self.registry, self.coordinator, self.repositories,
         )
+        self.bulk_repositories.reactions = self.reactions
         self.source_review = SourceReviewService(self.registry, workspaces, self.provisioner, self.configuration)
         self.ingress = WebhookIngress(self.coordinator, self.registry, self.backend)
         self.coordinator.ingress = self.ingress
@@ -189,6 +195,13 @@ class Controller:
         if operation == "repository_status":
             return {**self.repositories.status(request["project_id"], request["repository_id"]),
                     "sync": self.repository_sync.state(request["project_id"], request["repository_id"])}
+        if operation == "repository_reactions":
+            return self.reactions.get(request["project_id"], request["repository_id"])
+        if operation == "repository_reaction_policy":
+            return self.reactions.set_policy(
+                request["project_id"], request["repository_id"],
+                request["service"], request["action"],
+            )
         if operation == "repository_sync_state":
             return self.repository_sync.state(request["project_id"], request["repository_id"])
         if operation == "repository_sync_policy":
@@ -198,10 +211,12 @@ class Controller:
         if operation == "repository_check":
             return self.repository_sync.perform(request["project_id"], request["repository_id"])
         if operation == "repository_update":
-            return self.repository_sync.perform(
+            result = self.repository_sync.perform(
                 request["project_id"], request["repository_id"],
                 update=True, expected_head=request["expected_head"],
             )
+            self.reactions.dispatch_pending()
+            return result
         if operation == "compose_read":
             return self.configuration.compose(request["project_id"])
         if operation == "compose_save":
@@ -257,6 +272,10 @@ class Controller:
         if operation == "compose":
             return {"job_id": self.jobs.submit_compose(
                 request["project_id"], request["action"])}
+        if operation == "compose_service":
+            return {"job_id": self.jobs.submit_service(
+                request["project_id"], request["service"], request["action"],
+            )}
         if operation == "adhoc":
             return {"job_id": self.jobs.submit_adhoc(
                 request["project_id"], request["kind"], request["service"],
@@ -477,6 +496,7 @@ def main():
             pass
         try:
             controller.repository_sync.recover()
+            controller.reactions.recover()
         except Exception:
             pass
         try:
@@ -489,6 +509,7 @@ def main():
                 while not sync_stop.wait(30):
                     try:
                         controller.repository_sync.poll_once()
+                        controller.reactions.dispatch_pending()
                     except Exception:
                         pass
             sync_thread = threading.Thread(target=poll_repositories,

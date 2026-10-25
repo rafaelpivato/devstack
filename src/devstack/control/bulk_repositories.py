@@ -31,6 +31,7 @@ class BulkRepositoryUpdater:
         self.registry = registry
         self.coordinator = coordinator
         self.repositories = repositories
+        self.reactions = None
         self._guard = threading.Lock()
         self._threads = {}
 
@@ -71,6 +72,8 @@ class BulkRepositoryUpdater:
                     self.repositories._sync_editable(identifier)
                 except RepositoryGitError as exc:
                     raise BulkRepositoryConflict("Repository updates require matching active project") from exc
+                if self.reactions is not None and self.reactions.maintenance_busy_locked(identifier):
+                    raise BulkRepositoryConflict("Compose maintenance or reaction is in progress")
                 repositories = self.registry.repositories(identifier)
                 if not repositories:
                     raise BulkRepositoryConflict("Project has no repositories")
@@ -209,6 +212,13 @@ class BulkRepositoryUpdater:
                     items[index] = {**item, "status": "running"}
                     self._save(operation_id, items)
                     items[index] = self._update_item(identifier, item)
+                    if (items[index]["status"] == "updated"
+                            and self.reactions is not None):
+                        with self.database.transaction(write=True) as con:
+                            self.reactions.capture(
+                                con, identifier, item["repository_id"],
+                                items[index]["head"],
+                            )
                     self._save(operation_id, items)
                 completed = all(item["status"] in ("updated", "unchanged")
                                 for item in items)
@@ -220,6 +230,11 @@ class BulkRepositoryUpdater:
         finally:
             with self._guard:
                 self._threads.pop(operation_id, None)
+            if self.reactions is not None:
+                try:
+                    self.reactions.dispatch_pending()
+                except Exception:
+                    pass
 
     def recover(self) -> int:
         """After daemon restart, surface interrupted state without rerunning Git."""
