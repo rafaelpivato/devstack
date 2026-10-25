@@ -121,12 +121,18 @@ class DockerBackend:
             "--project-directory", str(source), "-f", str(compose),
         ], root)
 
-    def validate(self, identifier: str) -> None:
+    def configured_services(self, identifier: str) -> list[str]:
+        """Allowlisted Compose names, resolved from the managed project definition."""
         argv, _ = self._base(identifier)
         _execute(argv + ["config", "--quiet"], 40)
         services = _execute(argv + ["config", "--services"], 40).splitlines()
-        if not services or any(not _SERVICE.fullmatch(x) for x in services):
+        if (not services or len(services) > 96 or len(set(services)) != len(services)
+                or any(not _SERVICE.fullmatch(x) for x in services)):
             raise DockerControlError("Compose must define valid services")
+        return services
+
+    def validate(self, identifier: str) -> None:
+        self.configured_services(identifier)
 
     def _overlay(self, identifier: str, generation: str) -> Path:
         argv, root = self._base(identifier)
