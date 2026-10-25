@@ -156,6 +156,30 @@ class ReactionsTests(unittest.TestCase):
         self.assertEqual(len(c.reactions.get(self.a, self.repo.id)["events"]), 1)
         c.coordinator.deactivate()
 
+    def test_multiple_repositories_coalesce_to_one_service_job(self):
+        c = self.controller
+        checkout = c.provisioner.workspaces.path(self.a) / "repos" / "second"
+        git("clone", self.origin, checkout)
+        second = c.registry.add_repository(self.a, "second", "repos/second",
+                                           str(self.origin))
+        c.reactions.set_policy(self.a, self.repo.id, "api", "restart")
+        c.reactions.set_policy(self.a, second.id, "api", "redeploy")
+        c.coordinator.activate(self.a)
+        self.push()
+        for repo_id in (self.repo.id, second.id):
+            before = c.repositories.status(self.a, repo_id)["head"]
+            c.repository_sync.perform(self.a, repo_id, update=True, expected_head=before)
+        self.assertFalse(self.submissions)
+        self.assertTrue(c.reactions.dispatch_pending())
+        job = self.wait_job()
+        self.assertEqual(job[3][-1], "api")
+        self.assertIn("--force-recreate", job[3])
+        self.assertEqual(len(self.submissions), 1)
+        ids = [c.reactions.get(self.a, repo_id)["events"][0]["job_id"]
+               for repo_id in (self.repo.id, second.id)]
+        self.assertEqual(ids, [job[0], job[0]])
+        c.coordinator.deactivate()
+
     def test_stale_generation_and_inactive_updates_never_run(self):
         c = self.controller
         c.reactions.set_policy(self.a, self.repo.id, "worker", "restart")
