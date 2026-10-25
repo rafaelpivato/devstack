@@ -98,7 +98,7 @@ def make_server(
         title="DevStack status",
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
-    def devstack_status() -> dict:
+    def devstack_status() -> dict[str, str | None]:
         """Get the installed gateway version, live controller health and last ping.
 
         Controller health follows the existing web /healthz -> controller IPC
@@ -119,7 +119,7 @@ def make_server(
     )
     def devstack_ping(
         value: Annotated[str, Field(min_length=1, max_length=MAX_PING_LENGTH)],
-    ) -> dict:
+    ) -> dict[str, str | bool]:
         """Store an ephemeral diagnostic ping and immediately return its pong.
 
         Ping modifies only in-memory diagnostic state. devstack_status can
