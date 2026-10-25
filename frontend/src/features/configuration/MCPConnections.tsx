@@ -3,7 +3,7 @@ import { readMCPStatus, requestMCPAction } from "../../api/configuration";
 import { useResource } from "../../hooks/useResource";
 import { Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { NavLink, type Navigator } from "../../navigation/useNavigation";
-import { ADMIN_ROOT } from "../../navigation/routes";
+import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
 import { Feedback, message } from "./Common";
 
 export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
@@ -74,6 +74,19 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
         Refresh status</button>
     </div>
     <Feedback error={error} success={feedback}/>
+    <section className="card">
+      <h2>MCP troubleshooting</h2>
+      <p>Gateway requests, controller health checks and Funnel lifecycle errors are
+        included in DevStack diagnostics. Choose a 1, 5 or 30 minute window and copy
+        the snapshot directly from the browser.</p>
+      <p className="actions"><NavLink to={adminUrl("diagnostics")}
+        navigate={navigation.navigate}>View and copy MCP diagnostics →</NavLink></p>
+      {current?.last_result && !["enabled","disabled"].includes(current.last_result) &&
+        <Notice title="Last MCP action failed" role="alert">
+          {current.last_result.replaceAll("_"," ")}. Open diagnostics for the
+          matching event and its error code. SSH is not required for ordinary troubleshooting.
+        </Notice>}
+    </section>
     <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL and add it
       as a custom MCP server in ChatGPT web, choosing No authentication when available.
       Test devstack_status and devstack_ping. Plugin availability and public HTTPS port

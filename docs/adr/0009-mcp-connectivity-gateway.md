@@ -55,3 +55,14 @@ Manual acceptance additionally requires cloud ChatGPT connectivity (not just
 local Inspector), including mobile availability if supported. ChatGPT account
 capability and port 10000 access remain empirical. No merge or release without
 owner approval.
+
+## Web-first observability invariant
+
+The gateway emits fixed-shape, payload-free lifecycle and health codes.
+A root-owned, read-only systemd timer snapshots only the MCP gateway and
+Funnel-helper journal units, converting safe codes (and generic unit errors)
+into bounded structured events readable by the unprivileged Web diagnostics
+aggregator. No raw journald or arbitrary host logs are disclosed. MCP events
+are included in the existing 1/5/30-minute copied diagnostic snapshot.
+No normal MCP/Funnel repair requires SSH; SSH is reserved for recovery when
+the Web console and its diagnostics fail.

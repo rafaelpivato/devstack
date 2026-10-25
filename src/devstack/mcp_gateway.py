@@ -13,6 +13,7 @@ from importlib.metadata import version
 import json
 import os
 import re
+import sys
 from threading import Lock
 from typing import Annotated
 
@@ -104,9 +105,12 @@ def make_server(
         Controller health follows the existing web /healthz -> controller IPC
         path. It does not include project names, logs, file paths or secrets.
         """
+        health = probe_controller(web_port)
+        log_code = "status_ok" if health == "connected" else "status_" + health
+        print("DEVSTACK_MCP " + log_code, file=sys.stderr, flush=True)
         return {
             "version": version("devstack"),
-            "controller": probe_controller(web_port),
+            "controller": health,
             "last_ping": state.read(),
         }
 
@@ -125,7 +129,9 @@ def make_server(
         Ping modifies only in-memory diagnostic state. devstack_status can
         read it back. It never changes DevStack runtime state or a file.
         """
-        return {"pong": state.ping(value), "persistent": False}
+        result = state.ping(value)
+        print("DEVSTACK_MCP ping_ok", file=sys.stderr, flush=True)
+        return {"pong": result, "persistent": False}
 
     return mcp
 
@@ -144,6 +150,7 @@ def main() -> None:
         security = transport_security(args.public_host)
     except ValueError as exc:
         parser.error(str(exc))
+    print("DEVSTACK_MCP gateway_started", file=sys.stderr, flush=True)
     make_server(web_port=args.web_port).run(
         transport="streamable-http", host="127.0.0.1", port=args.port,
         stateless_http=True, json_response=True,

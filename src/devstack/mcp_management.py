@@ -7,6 +7,7 @@ and never replaces the tailnet-only dashboard or webhook configuration.
 from __future__ import annotations
 
 import json
+import sys
 import os
 from pathlib import Path
 import pwd
@@ -20,6 +21,7 @@ REQUEST_DIR = Path("/var/lib/devstack-web/mcp-request")
 REQUEST_FILE = REQUEST_DIR / "action"
 RESULT_FILE = Path("/run/devstack-mcp-result.json")
 ENV_FILE = Path("/etc/devstack-mcp.env")
+SNAPSHOT_FILE = Path("/run/devstack-mcp-diagnostics.json")
 PORT = 10000
 TARGET = "http://127.0.0.1:8768"
 PIN_FILE = Path("/var/lib/devstack/tailscale-identity.json")
@@ -37,7 +39,7 @@ Requires=devstack-web-v2.service
 [Service]
 Type=simple
 DynamicUser=yes
-EnvironmentFile=/run/devstack-mcp.env
+EnvironmentFile=/etc/devstack-mcp.env
 ExecStart=/opt/devstack/current/venv/bin/devstack-mcp
 Restart=on-failure
 RestartSec=3
@@ -67,6 +69,32 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 TimeoutStartSec=90
 """,
+    "devstack-mcp-diagnostics.service": """# Managed by DevStack v0.7+
+[Unit]
+Description=Collect bounded MCP-specific diagnostic events
+After=systemd-journald.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/devstack/current/venv/bin/python -m devstack.mcp_management --capture
+NoNewPrivileges=yes
+PrivateTmp=yes
+TimeoutStartSec=20
+""",
+    "devstack-mcp-diagnostics.timer": """# Managed by DevStack v0.7+
+[Unit]
+Description=Refresh MCP support diagnostics for the private Web console
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=10s
+Unit=devstack-mcp-diagnostics.service
+
+[Install]
+WantedBy=timers.target
+""",
     "devstack-mcp-apply.path": """# Managed by DevStack v0.7+
 [Unit]
 Description=Watch private MCP exposure requests
@@ -88,6 +116,78 @@ class MCPManagementError(RuntimeError):
     def __init__(self, code: str):
         self.code = code
         super().__init__(code)
+
+
+def log_event(code: str, *, error: bool = False) -> None:
+    """Only allowlisted fixed-shape codes are emitted; no request payloads."""
+    if not re.fullmatch(r"[a-z_]{3,55}", code):
+        code = "invalid_event"
+    print("DEVSTACK_MCP " + code, file=sys.stderr, flush=True)
+
+
+def capture_diagnostics() -> None:
+    """Root snapshots exact MCP units only, never arbitrary host-journal text.
+
+    Store at most 120 structured events. Unrecognized/variable messages are
+    never copied into the Web-readable file; generic unit errors are signaled.
+    """
+    try:
+        output = run_command(
+            "journalctl", "--no-pager", "--output=json", "--since=-30min",
+            "--lines=240", "--unit=devstack-mcp.service",
+            "--unit=devstack-mcp-apply.service", timeout=8,
+        )
+        available = True
+    except MCPManagementError:
+        output, available = "", False
+    now = time.time_ns() // 1_000_000
+    events = []
+    for line in output.splitlines()[-240:]:
+        if len(line) > 8192:
+            continue
+        try:
+            entry = json.loads(line)
+            microseconds = int(entry.get("__REALTIME_TIMESTAMP", 0))
+        except (ValueError, TypeError):
+            continue
+        when = microseconds // 1000
+        if not (now - 30*60*1000 <= when <= now + 30000):
+            continue
+        level = "error" if str(entry.get("PRIORITY")) in ("0", "1", "2", "3") else "info"
+        unit = str(entry.get("_SYSTEMD_UNIT") or entry.get("UNIT") or "")
+        if unit not in {"devstack-mcp.service", "devstack-mcp-apply.service"}:
+            continue
+        message = entry.get("MESSAGE", "")
+        if not isinstance(message, str):
+            continue
+        match = re.fullmatch(r"DEVSTACK_MCP ([a-z_]{3,55})", message)
+        if match:
+            code = match.group(1)
+        elif level == "error":
+            code = "gateway_process_error" if unit == "devstack-mcp.service" else "funnel_broker_error"
+        else:
+            continue
+        # Each line has only an allowlisted structure and a fixed unit identity.
+        events.append({"at": when, "source": "mcp",
+                       "level": level, "code": "mcp-" + code.replace("_", "-")})
+    events.sort(key=lambda e: e["at"])
+    truncated = len(events) > 120
+    doc = {"generated_at": now, "available": available,
+           "events": events[-120:], "truncated": truncated}
+    atomic_result_file(SNAPSHOT_FILE, doc)
+
+
+def atomic_result_file(path: Path, payload: dict) -> None:
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent,
+        prefix=".devstack-mcp-", delete=False,
+    ) as stream:
+        name = stream.name
+        json.dump(payload, stream, separators=(",", ":"))
+        stream.write("\\n")
+        stream.flush()
+        os.fchmod(stream.fileno(), 0o644)
+    os.replace(name, path)
 
 
 def run_command(*args: str, timeout: int = 12) -> str:
@@ -175,16 +275,7 @@ def result_record(code: str, *, url: str | None = None) -> None:
     if not re.fullmatch(r"[a-z_]{1,45}", code):
         code = "unknown_error"
     record = {"code": code, "url": url}
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=RESULT_FILE.parent,
-        prefix=".devstack-mcp-", delete=False,
-    ) as stream:
-        name = stream.name
-        json.dump(record, stream)
-        stream.write("\n")
-        stream.flush()
-        os.fchmod(stream.fileno(), 0o644)
-    os.replace(name, RESULT_FILE)
+    atomic_result_file(RESULT_FILE, record)
 
 
 def verify_state(host: str) -> tuple[bool, bool]:
@@ -260,11 +351,14 @@ def apply_pending() -> None:
         if data not in (b"enable", b"disable"):
             raise MCPManagementError("request_invalid")
         action = data.decode("ascii")
+        log_event("funnel_" + action + "_requested")
         url = apply_action(action)
         result_record("enabled" if action == "enable" else "disabled",
                       url=url if action == "enable" else None)
+        log_event("funnel_" + action + "_succeeded")
     except MCPManagementError as exc:
         result_record(exc.code)
+        log_event("funnel_error_" + exc.code)
         raise
 
 
@@ -378,16 +472,22 @@ def install_units(root: Path = Path("/opt/devstack"),
         run_command("systemctl", "daemon-reload", timeout=25)
         run_command("systemctl", "enable", "--now", "devstack-mcp-apply.path",
                     timeout=25)
+        run_command("systemctl", "enable", "--now", "devstack-mcp-diagnostics.timer",
+                    timeout=25)
 
 
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="DevStack MCP restricted host broker")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--capture", action="store_true")
     args = parser.parse_args()
-    if not args.apply or os.geteuid() != 0:
-        parser.error("Only the root-owned fixed-purpose systemd service may apply")
-    apply_pending()
+    if os.geteuid() != 0 or args.apply == args.capture:
+        parser.error("Only root-owned fixed-purpose systemd services may apply or capture")
+    if args.capture:
+        capture_diagnostics()
+    else:
+        apply_pending()
 
 
 if __name__ == "__main__":

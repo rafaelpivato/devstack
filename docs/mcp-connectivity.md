@@ -52,8 +52,10 @@ The browser displays queued state and bounded result codes from the host
 broker. If Tailscale reports `host_command_failed`, check device connectivity,
 Funnel eligibility/policy and whether the tailnet's HTTPS feature is enabled.
 If you have manually edited Tailscale Serve/Funnel, an unknown-route error
-means DevStack refused to replace foreign configuration. Manual SSH remains
-an escape hatch for broken systemd/Tailscale installations, not a routine step.
+means DevStack refused to replace foreign configuration. MCP lifecycle, health and failure events appear in Administration →
+DevStack diagnostics, which offers 1/5/30-minute views and a copyable
+snapshot. Do not request SSH for routine MCP/Tailscale troubleshooting.
+Only use host recovery when the Web diagnostic surface itself cannot function.
 
 ## Development
 
@@ -64,3 +66,8 @@ Real public ingress still needs a host with Tailscale and a supported ChatGPT
 client; CI does not assert cloud ChatGPT connectivity.
 
 Official Tailscale documentation: https://tailscale.com/docs/reference/tailscale-cli/funnel
+
+The root diagnostic collector samples only the two dedicated MCP systemd
+units once per minute, emitting fixed-schema events, without exposing arbitrary
+journal entries or request parameters. SDK/internal crashes appear as generic
+MCP process-error events; explicit gateway and Funnel failures use safe codes.

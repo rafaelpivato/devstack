@@ -22,6 +22,7 @@ from werkzeug.exceptions import HTTPException
 
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
 from devstack.diagnostics import DiagnosticStore, MAX_EVENTS
+from devstack.mcp_diagnostics import snapshot as mcp_diagnostics_snapshot, DEFAULT_SNAPSHOT as MCP_DIAGNOSTICS_PATH
 from devstack.mcp_management import MCPManagementError, request_action as request_mcp_action, status as mcp_status
 from devstack.update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
@@ -45,6 +46,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         MAX_CONTENT_LENGTH=64 * 1024,
         WEB_DIAGNOSTICS_PATH=os.environ.get(
             "DEVSTACK_WEB_DIAGNOSTICS_PATH", "/var/lib/devstack-web/diagnostics.sqlite3"),
+        MCP_DIAGNOSTICS_PATH=os.environ.get("DEVSTACK_MCP_DIAGNOSTICS_PATH", str(MCP_DIAGNOSTICS_PATH)),
         CONTROLLER_SOCKET=os.environ.get(
             "DEVSTACK_CONTROL_SOCKET", "/run/devstack-control/control.sock"),
     )
@@ -171,7 +173,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             return jsonify({"ok": False, "message": "Window must be 1, 5 or 30 minutes"}), 400
         minutes = int(raw)
         sources = {"controller": "unavailable", "runtime": "unavailable",
-                   "web": "unavailable", "updater": "unavailable"}
+                   "web": "unavailable", "updater": "unavailable", "mcp": "unavailable"}
         events = []
         truncated = False
         try:
@@ -206,6 +208,11 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             sources["updater"] = "available" if history["available"] else "partial (status only)"
         except (OSError, ValueError, TypeError):
             sources["updater"] = "unavailable"
+        mcp = mcp_diagnostics_snapshot(
+            minutes, Path(app.config["MCP_DIAGNOSTICS_PATH"]))
+        events.extend(mcp["events"])
+        truncated = truncated or mcp["truncated"]
+        sources["mcp"] = "available" if mcp["available"] else "unavailable"
         # Always sort chronologically and clearly report clipping/partial sources.
         events = [event for event in events if isinstance(event, dict) and
                   isinstance(event.get("at"), int)]
@@ -235,7 +242,9 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             abort(415)
         try:
             request_mcp_action(action)
+            record_web("web-mcp-" + action + "-requested")
         except MCPManagementError as exc:
+            record_web("web-mcp-request-failed", level="warning")
             return jsonify({"ok": False, "message": "MCP request not queued: " + exc.code}), 409
         return jsonify({"message": "MCP " + action + " queued", "request_pending": True}), 202
 

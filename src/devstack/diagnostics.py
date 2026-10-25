@@ -18,6 +18,7 @@ CODES = frozenset({
     "compose-operation", "job-submit",
     "web-started", "web-error", "web-update-check", "web-update-check-failed",
     "web-update-request", "web-update-rejected",
+    "web-mcp-enable-requested", "web-mcp-disable-requested", "web-mcp-request-failed",
 })
 LEVELS = frozenset({"info", "warning", "error"})
 WINDOWS = frozenset({1, 5, 30})
