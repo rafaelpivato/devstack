@@ -7,6 +7,7 @@ No GET or branch preview can run Docker mutations.
 import time
 
 from devstack.domain.models import project_id
+from devstack.projects.repositories import RepositoryNotFound
 from devstack.control.jobs import JobError, JobInvalid
 
 
@@ -26,7 +27,7 @@ class ReactionSupervisor:
         project_id(identifier)
         project_id(repository_id)
         if not any(repo.id == repository_id for repo in self.registry.repositories(identifier)):
-            raise LookupError("Repository not registered for this project")
+            raise RepositoryNotFound("Repository not registered for this project")
 
     def get(self, identifier, repository_id):
         self._repository(identifier, repository_id)
@@ -73,23 +74,17 @@ class ReactionSupervisor:
         return self.get(identifier, repository_id)
 
     def maintenance_busy_locked(self, identifier):
-        """Guard Git source mutations while a service build/redeploy is pending."""
+        """Block Git changes only while an admitted Compose job is in progress.
+
+        Pending intents may accumulate across repositories and coalesce before
+        the first job starts; they do not execute Docker by themselves.
+        """
         with self.database.transaction() as con:
-            return bool(
-                con.execute(
-                    "SELECT 1 FROM service_reaction_events e "
-                    "LEFT JOIN jobs j ON j.id=e.job_id "
-                    "WHERE e.project_id=? AND (e.status='pending' OR "
-                    "(e.status='submitted' AND j.status IN "
-                    "('queued','running','cancelling'))) LIMIT 1",
-                    (identifier,),
-                ).fetchone()
-                or con.execute(
-                    "SELECT 1 FROM jobs WHERE project_id=? AND kind='compose' "
-                    "AND status IN ('queued','running','cancelling') LIMIT 1",
-                    (identifier,),
-                ).fetchone()
-            )
+            return bool(con.execute(
+                "SELECT 1 FROM jobs WHERE project_id=? AND kind='compose' "
+                "AND status IN ('queued','running','cancelling') LIMIT 1",
+                (identifier,),
+            ).fetchone())
 
     def capture(self, con, identifier, repository_id, head):
         """Called in the same SQLite transaction as a successful sync receipt.
@@ -150,15 +145,13 @@ class ReactionSupervisor:
                     or state["generation"] != oldest["generation"]):
                 self._finish(ids, "skipped", "stale_activation")
                 return False
-            if self.maintenance_busy_locked(oldest["project_id"]):
-                # Ignore our own pending intents; check only already-admitted jobs.
-                with self.database.transaction() as con:
-                    busy = con.execute(
-                        "SELECT 1 FROM jobs WHERE status IN "
-                        "('queued','running','cancelling') LIMIT 1",
-                    ).fetchone()
-                if busy:
-                    return False
+            with self.database.transaction() as con:
+                busy = con.execute(
+                    "SELECT 1 FROM jobs WHERE status IN "
+                    "('queued','running','cancelling') LIMIT 1",
+                ).fetchone()
+            if busy:
+                return False
             action = ("redeploy" if any(row["action"] == "redeploy" for row in grouped)
                       else "restart")
             try:
