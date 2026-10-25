@@ -19,7 +19,7 @@ import time
 REQUEST_DIR = Path("/var/lib/devstack-web/mcp-request")
 REQUEST_FILE = REQUEST_DIR / "action"
 RESULT_FILE = Path("/run/devstack-mcp-result.json")
-ENV_FILE = Path("/run/devstack-mcp.env")
+ENV_FILE = Path("/etc/devstack-mcp.env")
 PORT = 10000
 TARGET = "http://127.0.0.1:8768"
 PIN_FILE = Path("/var/lib/devstack/tailscale-identity.json")
