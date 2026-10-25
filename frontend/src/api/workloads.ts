@@ -35,6 +35,7 @@ export interface JobList {jobs:JobRow[]}
 export interface JobLogChunk {text:string;offset:number;next_offset:number;complete:boolean}
 export interface JobSubmission {job_id:string}
 export type ComposeAction="build"|"restart";
+export type ServiceAction="restart"|"redeploy";
 export type AdhocKind="run"|"image";
 export interface AdhocSpec {
   kind:AdhocKind;service:string;image:string;network:"none"|"project";command:string[];
@@ -57,6 +58,9 @@ export const runTask=(id:string,name:string)=>
   apiRequest<JobSubmission>(project(id)+"/tasks/"+encodeURIComponent(name)+"/run",{method:"POST"});
 export const runCompose=(id:string,action:ComposeAction)=>
   apiRequest<JobSubmission>(project(id)+"/compose/"+action,{method:"POST"});
+export const runService=(id:string,service:string,action:ServiceAction)=>
+  apiRequest<JobSubmission>(project(id)+"/services/"+encodeURIComponent(service)+"/actions/"+action,
+    {method:"POST"});
 export const runAdhoc=(id:string,spec:AdhocSpec)=>
   apiRequest<JobSubmission>(project(id)+"/adhoc",{method:"POST",body:spec});
 export const cancelJob=(id:string,job:string)=>
