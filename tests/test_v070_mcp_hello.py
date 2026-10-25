@@ -1,6 +1,5 @@
 """MCP v0.7 hello: isolated state, safe schema, real HTTP protocol."""
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -21,7 +20,7 @@ class HelloStateTests(unittest.TestCase):
 
     def test_reject_unsafe_values(self):
         state = HelloState()
-        for value in ("", "x" * 81, "a\\nb", "\\x00"):
+        for value in ("", "x" * 81, "a" + chr(10) + "b", chr(0)):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 state.write(value)
         self.assertEqual(state.read(), "world")
