@@ -142,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("root is required for CLI setup (use sudo)")
     try:
         created = install_command(root=args.root)
+        if args.root == DEFAULT_ROOT:
+            # The already-authorized root release updater calls this hook on
+            # every wheel activation; install fixed MCP units once, disabled.
+            from devstack.mcp_management import install_units
+            install_units()
         if args.user:
             authorize_operator(args.user)
         refreshed = refresh_updater(args.root) if args.refresh_updater else False

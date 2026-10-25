@@ -22,6 +22,7 @@ from werkzeug.exceptions import HTTPException
 
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
 from devstack.diagnostics import DiagnosticStore, MAX_EVENTS
+from devstack.mcp_management import MCPManagementError, request_action as request_mcp_action, status as mcp_status
 from devstack.update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
     request_update, updater_service_events,
@@ -220,6 +221,24 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             "partial": any(value != "available" for value in sources.values()),
         })
 
+    @app.get("/api/v2/devstack/mcp")
+    def mcp_status_api():
+        return jsonify(mcp_status())
+
+    @app.post("/api/v2/devstack/mcp/<action>")
+    def mcp_action_api(action):
+        if action not in {"enable", "disable"}:
+            abort(404)
+        if request.is_json and request.get_json(silent=True) != {}:
+            abort(400)
+        if request.content_length and not request.is_json:
+            abort(415)
+        try:
+            request_mcp_action(action)
+        except MCPManagementError as exc:
+            return jsonify({"ok": False, "message": "MCP request not queued: " + exc.code}), 409
+        return jsonify({"message": "MCP " + action + " queued", "request_pending": True}), 202
+
     @app.get("/healthz")
     def healthz():
         try:
@@ -270,7 +289,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
              re.fullmatch(pattern,segments[1],re.IGNORECASE) is not None) or
             segments == ["administration"] or
             segments in (["administration", "ssh"], ["administration", "updates"],
-                         ["administration", "diagnostics"]) or
+                         ["administration", "diagnostics"], ["administration", "mcp"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
                          ["runtime", "operations"]) or
             (len(segments) == 3 and segments[:2] == ["runtime", "operations"]

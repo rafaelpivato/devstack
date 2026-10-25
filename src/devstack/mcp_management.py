@@ -23,7 +23,7 @@ ENV_FILE = Path("/run/devstack-mcp.env")
 PORT = 10000
 TARGET = "http://127.0.0.1:8768"
 PIN_FILE = Path("/var/lib/devstack/tailscale-identity.json")
-HOST_PATTERN = re.compile(r"(?:[a-z0-9-]+\\.)+ts\\.net\\Z")
+HOST_PATTERN = re.compile(r"(?:[a-z0-9-]+\.)+ts\.net\Z")
 
 # Literal units, installed only from a verified release wheel by the root
 # updater's existing CLI-install hook. Nothing below is supplied by MCP clients.

@@ -24,9 +24,17 @@ controller interaction for this milestone, and uses loopback HTTP with
 short timeout, no redirects, fixed destination and bounded response.
 
 No new controller, socket, database, authorization schema or privileged
-operations are necessary. Manual, separate Tailscale Funnel HTTPS port 10000
-exposes only the gateway, not the dashboard. No authentication is required
-for this deliberately narrow public test.
+operations are necessary. A private Administration screen enables/disables a **separate** Tailscale
+Funnel HTTPS route on port 10000. The Web process can only create a marker
+containing exactly 'enable' or 'disable' in a private owned directory. A
+root-owned systemd.path watcher invokes a fixed-purpose root broker packaged
+with the wheel, validates the pinned Tailscale identity and complete known
+Serve/Funnel port map before modifying only port 10000. The broker starts a
+separate unprivileged systemd MCP service and leaves dashboard port 443 and
+optional webhook 8443 unchanged. The existing root release hook
+`devstack.cli.install` installs these inactive units on upgrade, so routine
+testing requires no SSH.
+No authentication is required for this deliberately narrow public test.
 
 ## Deliberate deferrals
 

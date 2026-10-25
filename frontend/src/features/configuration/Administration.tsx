@@ -21,6 +21,8 @@ export function AdministrationHome({navigation}:{navigation:Navigator}) {
         href={adminUrl("ssh")} navigation={navigation}/>
       <ItemLink icon="↻" title="Published updates" detail="Installed release and guarded updater"
         href={adminUrl("updates")} navigation={navigation}/>
+      <ItemLink icon="↔" title="ChatGPT / MCP" detail="Securely manage a temporary public connection"
+        href={adminUrl("mcp")} navigation={navigation}/>
       <ItemLink icon="≡" title="DevStack diagnostics" detail="Recent safe system events and copyable snapshots"
         href={adminUrl("diagnostics")} navigation={navigation}/>
     </div>

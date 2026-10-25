@@ -1,102 +1,66 @@
-# DevStack 0.7 MCP connectivity — first live ChatGPT test
+# DevStack 0.7 MCP — managed ChatGPT connectivity
 
-This is a two-tool, **opt-in public connectivity experiment** packaged with
-DevStack. It provides a real health check via the existing
-`MCP gateway -> web /healthz -> controller IPC` path. It does **not** give
-unauthenticated callers controller IPC credentials. No project data, repository
-information, logs, Docker commands, configuration or secrets are exposed.
+The private DevStack Administration → ChatGPT / MCP screen now provisions
+a bounded opt-in connectivity session. A verified release's existing root
+updater invokes the established CLI installation hook to register a disabled
+MCP gateway systemd unit and a private marker→root one-shot watcher.
+No remote SSH commands are necessary for routine enable/disable.
 
-The stable MCP tool names are:
-- `devstack_status`: installed gateway version, controller health
-  (`connected`, `unavailable`, or `recovery_required`), last diagnostic ping.
-- `devstack_ping(value)`: store a printable 1-80 character diagnostic payload
-  in volatile memory and return `pong: <value>`. This is a harmless MCP write;
-  `devstack_status` reads the latest value back. It doesn't write to disk or
-  mutate the running project.
+## Browser steps
 
-**The status tool is real; the ping write is intentionally non-privileged.**
-These are stable long-term names: future status fields can expand while ping
-remains a simple connectivity diagnostic.
+1. Install v0.7.0 through the normal DevStack update UI (the existing inactive
+   project/update safety gate still applies).
+2. In **Administration → ChatGPT / MCP**, verify the gateway/Funnel status.
+3. Acknowledge that this first two-tool MCP server is public and unauthenticated,
+   and choose **Enable MCP connection**. The browser queues one literal action
+   in a private directory; the privileged watcher starts only the dedicated
+   gateway and Funnel HTTPS 10000, without touching the private dashboard 443
+   or optional webhook Funnel 8443. The browser polls status automatically.
+4. Copy the displayed public URL ending in `/mcp`.
+5. On ChatGPT web, add a personal custom MCP server, choose **No authentication**,
+   and provide the copied URL. Try `devstack_status` and
+   `devstack_ping(value="connected")`, then `devstack_status` again to verify
+   `last_ping` is `connected`. Also test tool visibility in ChatGPT mobile.
+6. Use **Disable public connection** after testing. Disabling removes only the
+   verified MCP route on HTTPS port 10000 and stops/disables its gateway.
+   It does not change private Serve or webhook settings.
 
-## Run on a deployed v0.7.0 host
-
-Upgrade using the existing approved DevStack release/updater process. No public
-listener is automatically enabled by the v0.7.0 package.
-
-1. Find the exact `<machine>.<tailnet>.ts.net` Tailscale hostname.
-2. Start MCP as an isolated account **without `devstackipc` or `docker` group
-   membership**. It needs only local HTTP access to the existing DevStack Web
-   listener (`127.0.0.1:8765/healthz`):
-
-   ```sh
-   sudo systemd-run --unit=devstack-mcp \
-     --property=DynamicUser=yes --property=NoNewPrivileges=yes \
-     --property=ProtectSystem=strict --property=ProtectHome=yes \
-     --setenv=DEVSTACK_MCP_PUBLIC_HOST=<machine>.<tailnet>.ts.net \
-     /opt/devstack/current/venv/bin/devstack-mcp
-   ```
-
-3. Inspect the service and verify the private health path:
-
-   ```sh
-   curl -i http://127.0.0.1:8765/healthz
-   sudo systemctl status devstack-mcp
-   sudo journalctl -u devstack-mcp -n 40 --no-pager
-   ```
-
-4. Enable a **separate** Tailscale Funnel listener, leaving private Serve port
-   443 and any webhook Funnel at port 8443 unchanged:
-
-   ```sh
-   sudo tailscale funnel --bg --https=10000 http://127.0.0.1:8768
-   sudo tailscale funnel status
-   ```
-
-   MCP URL: `https://<machine>.<tailnet>.ts.net:10000/mcp`. A public HTTPS URL
-   is **not authentication**, and anyone with the URL can ping and read status.
-   The tool intentionally reveals only the gateway version, a coarse controller
-   health state, and a shared diagnostic test value. Don't send secrets as ping
-   values.
-
-   Whether ChatGPT can connect to port 10000 is to be verified in the actual
-   client; if blocked, consider another isolated HTTPS path or Secure MCP Tunnel.
-   Never expose the private dashboard for this experiment.
-
-5. In ChatGPT web, use the available custom MCP/plugin creation interface.
-   Enter the full HTTPS `/mcp` URL and choose **No authentication**. The setup
-   UI and eligibility vary by account. After installation, try:
-
-   - "Using DevStack, check its installed version and controller status."
-   - "Use DevStack ping with value connected, then read DevStack status."
-   - Confirm that `controller` is `connected`, `pong` is `connected`, and
-     `last_ping` is `connected`.
-   - If practical, stop `devstack-control` temporarily and verify that
-     `devstack_status` reports `unavailable`; restart immediately and confirm
-     recovery. Do not interrupt active development workloads just for this test.
-
-   Also check if the installed custom plugin is selectable from the mobile app.
-   Record actual client availability separately from server-side test success.
-
-6. Disable public access when the test ends:
-
-   ```sh
-   sudo tailscale funnel --https=10000 off
-   sudo systemctl stop devstack-mcp
-   ```
+First-time Tailscale Funnel permission may require approval on the Tailscale
+admin site. ChatGPT may also reject nonstandard HTTPS port 10000 even though
+Tailscale supports it; that remains a manual acceptance test, not a guarantee.
 
 ## Boundaries
 
-- Streamable HTTP, process-local diagnostics, and one fixed, loopback health URL;
-  the MCP client cannot choose a destination URL or controller operation.
-- No authorization, persistence, credentials, project list, private logs,
-  Docker access, controller Unix-socket group membership, or filesystem writes.
-- Public clients share the last ping value. It is reset when the gateway
-  process restarts, and other callers can overwrite it while Funnel is on.
-- `version` is the installed MCP gateway wheel version, not proof that every
-  DevStack service is running the same wheel. Controller health reports a
-  live response from the existing Web->IPC path.
-- Do not add real read/write controller operations to this unauthenticated
-  prototype. Revisit authentication before exposing privileged tools.
+- No new controller daemon or Unix IPC permissions for MCP. The unauthenticated
+  gateway calls **only** local Web `/healthz`, which already reaches controller
+  IPC; no project names, logs, repository config or shell commands are exposed.
+- `devstack_status` returns installed gateway wheel version, coarse live
+  controller state, and the last short ping. `devstack_ping(value)` returns
+  a matching pong and stores value **only in process memory**, shared with
+  other public callers and lost on restart. Never send secrets.
+- A root helper accepts only `enable` and `disable` request markers; it
+  validates pinned Tailscale identity and exact known Serve/Funnel routes
+  before making changes. On unknown routes, it fails closed.
+- The persistent background route and systemd gateway restart automatically
+  across host restarts **until disabled**. The user controls exposure in the UI.
+- The first release does not provide OAuth, per-user permissions or a centrally
+  hosted plugin. Do not add privileged real DevStack tools without authentication.
 
-Official docs: https://developers.openai.com/api/docs/guides/custom-mcp-server
-and https://tailscale.com/docs/reference/tailscale-cli/funnel
+## Troubleshooting
+
+The browser displays queued state and bounded result codes from the host
+broker. If Tailscale reports `host_command_failed`, check device connectivity,
+Funnel eligibility/policy and whether the tailnet's HTTPS feature is enabled.
+If you have manually edited Tailscale Serve/Funnel, an unknown-route error
+means DevStack refused to replace foreign configuration. Manual SSH remains
+an escape hatch for broken systemd/Tailscale installations, not a routine step.
+
+## Development
+
+Unit tests cover the fixed action request contract and the verified
+Serve/Funnel configuration state machine using mocked Tailscale/systemd commands.
+End-to-end CI exercises the real MCP → Web → controller IPC health path.
+Real public ingress still needs a host with Tailscale and a supported ChatGPT
+client; CI does not assert cloud ChatGPT connectivity.
+
+Official Tailscale documentation: https://tailscale.com/docs/reference/tailscale-cli/funnel
