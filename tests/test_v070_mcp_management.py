@@ -138,11 +138,6 @@ class WebAPIContractTests(unittest.TestCase):
             self.assertEqual(response.get_json(), safe)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 class DiagnosticSnapshotTests(unittest.TestCase):
     def test_mcp_events_are_bounded_structured_and_private(self):
         now = manage.time.time_ns() // 1_000_000
@@ -152,7 +147,7 @@ class DiagnosticSnapshotTests(unittest.TestCase):
                 "_SYSTEMD_UNIT": source, "PRIORITY": priority,
                 "MESSAGE": msg,
             })
-        journal = "\\n".join([
+        journal = "\n".join([
             entry("DEVSTACK_MCP gateway_started"),
             entry("DEVSTACK_MCP ping_ok"),
             entry("DEVSTACK_MCP funnel_error_funnel_permission_required",
@@ -193,3 +188,7 @@ class DiagnosticSnapshotTests(unittest.TestCase):
             with patch.object(manage, "RESULT_FILE", file):
                 manage.result_record("enabled", url="https://mynode.ts.net:10000/mcp")
                 self.assertEqual(json.loads(file.read_text())["code"], "enabled")
+
+
+if __name__ == "__main__":
+    unittest.main()
