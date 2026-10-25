@@ -88,9 +88,9 @@ class ReactionsTests(unittest.TestCase):
         git("-C", self.source, "commit", "-am", "update")
         git("-C", self.source, "push", "origin", "main")
 
-    def wait_job(self):
+    def wait_job(self, count=1):
         for _ in range(100):
-            if self.submissions:
+            if len(self.submissions) >= count:
                 return self.submissions[-1]
             time.sleep(.01)
         self.fail("Targeted job not dispatched")
@@ -113,13 +113,13 @@ class ReactionsTests(unittest.TestCase):
 
     def test_manual_redeploy_and_restart_are_targeted(self):
         self.controller.coordinator.activate(self.a)
-        for action, suffix in [
+        for index, (action, suffix) in enumerate([
             ("restart", ["restart", "--no-deps", "api"]),
             ("redeploy", ["up", "-d", "--no-deps", "--build",
                           "--force-recreate", "--wait", "--wait-timeout", "150", "api"]),
-        ]:
+        ], 1):
             self.controller.jobs.submit_service(self.a, "api", action)
-            self.assertEqual(self.wait_job()[3][-len(suffix):], suffix)
+            self.assertEqual(self.wait_job(index)[3][-len(suffix):], suffix)
             # Fake worker does not execute Compose; finalize its queued receipt.
             with self.db.transaction(write=True) as con:
                 con.execute("UPDATE jobs SET status='succeeded' "
