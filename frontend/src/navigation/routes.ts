@@ -82,7 +82,7 @@ export function globalActionUrl(action:"deactivate"|"reconcile"):string {
 }
 export const OPERATIONS_URL=ROUTE_PREFIX+"/runtime/operations";
 export const ADMIN_ROOT=ROUTE_PREFIX+"/administration";
-export function adminUrl(screen:"ssh"|"updates"|"diagnostics"):string{return ADMIN_ROOT+"/"+screen;}
+export function adminUrl(screen:"ssh"|"updates"|"diagnostics"|"mcp"):string{return ADMIN_ROOT+"/"+screen;}
 export function configUrl(id:string,screen:"compose"|"definitions"|"webhooks"|"name"):string {
   return laneUrl(id,"configuration")+"/"+screen;
 }
