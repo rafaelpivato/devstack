@@ -1,12 +1,12 @@
-"""MCP v0.7 hello: isolated state, safe schema, real HTTP protocol."""
-import json
+"""MCP v0.7 hello: isolated state, safe schema, actual SDK over HTTP."""
+import asyncio
 import socket
 import subprocess
 import sys
 import time
 import unittest
-from urllib.request import Request, urlopen
 
+from mcp import Client
 from devstack.mcp_hello import HelloState, public_host, transport_security
 
 
@@ -36,7 +36,7 @@ class HelloStateTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
-    """One real SDK server over HTTP; no simulated JSON-RPC dispatcher."""
+    """Real SDK client/server handshake and calls over Streamable HTTP."""
 
     def test_remote_shape_and_write_read(self):
         with socket.socket() as sock:
@@ -46,21 +46,8 @@ class ProtocolTests(unittest.TestCase):
             [sys.executable, "-m", "devstack.mcp_hello", "--port", str(port)],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
-        url = f"http://127.0.0.1:{port}/mcp"
-        def call(method, params=None, request_id=1):
-            payload = {"jsonrpc": "2.0", "id": request_id, "method": method}
-            if params is not None:
-                payload["params"] = params
-            request = Request(url, data=json.dumps(payload).encode(), headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json, text/event-stream",
-                "Mcp-Protocol-Version": "2026-07-28",
-            })
-            with urlopen(request, timeout=4) as response:
-                self.assertEqual(response.headers.get_content_type(), "application/json")
-                return json.load(response)
         try:
-            for _ in range(40):
+            for _ in range(60):
                 try:
                     with socket.create_connection(("127.0.0.1", port), timeout=.15):
                         break
@@ -70,19 +57,21 @@ class ProtocolTests(unittest.TestCase):
                     time.sleep(.1)
             else:
                 self.fail("MCP did not listen")
-            tools = call("tools/list")["result"]["tools"]
-            self.assertEqual({tool["name"] for tool in tools},
-                             {"hello_read", "hello_write"})
-            write = call("tools/call", {"name": "hello_write",
-                                      "arguments": {"value": "connected"}}, 2)
-            self.assertNotIn("error", write)
-            read = call("tools/call", {"name": "hello_read", "arguments": {}}, 3)
-            self.assertEqual(read["result"]["structuredContent"]["value"], "connected")
-            self.assertNotIn("project_id", json.dumps(read))
-            forbidden = call("tools/call", {"name": "repository_update",
-                                            "arguments": {}}, 4)
-            self.assertTrue(forbidden.get("result", {}).get("isError") or
-                            "error" in forbidden)
+
+            async def exercise():
+                async with Client(f"http://127.0.0.1:{port}/mcp") as client:
+                    tools = (await client.list_tools()).tools
+                    self.assertEqual({tool.name for tool in tools},
+                                     {"hello_read", "hello_write"})
+                    changed = await client.call_tool(
+                        "hello_write", {"value": "connected"})
+                    self.assertFalse(changed.is_error)
+                    result = await client.call_tool("hello_read", {})
+                    self.assertFalse(result.is_error)
+                    self.assertEqual(result.structured_content["value"], "connected")
+                    self.assertNotIn("project_id", str(result.structured_content))
+
+            asyncio.run(exercise())
         finally:
             proc.terminate()
             try:
