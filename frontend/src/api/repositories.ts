@@ -1,6 +1,13 @@
 import { apiRequest } from "./client";
 import { isProjectId } from "../navigation/routes";
 export type RepositorySyncPolicy = "manual"|"check"|"update";
+export type ServiceReaction = "none"|"restart"|"redeploy";
+export interface ReactionService { name:string; action:ServiceReaction }
+export interface ReactionEvent {
+  service:string;action:Exclude<ServiceReaction,"none">;head:string;
+  status:string;reason:string|null;at_ns:number;job_id:string|null;job_status:string|null;
+}
+export interface RepositoryReactions {services:ReactionService[];events:ReactionEvent[]}
 export interface RepositorySyncEvent {
   outcome:string;reason:string|null;previous_head:string|null;head:string|null;at_ns:number;
 }
@@ -49,6 +56,11 @@ export const saveRepositorySyncPolicy=(projectId:string,repositoryId:string,poli
     {method:"PUT",body:{policy}});
 export const readRepositorySyncPolicy=(projectId:string,repositoryId:string,signal?:AbortSignal)=>
   apiRequest<RepositorySyncState>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/sync",{signal});
+export const readRepositoryReactions=(projectId:string,repositoryId:string,signal?:AbortSignal)=>
+  apiRequest<RepositoryReactions>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/reactions",{signal});
+export const setRepositoryReaction=(projectId:string,repositoryId:string,service:string,action:ServiceReaction)=>
+  apiRequest<RepositoryReactions>(base(projectId)+"/repositories/"+uuid(repositoryId)+"/reactions",
+    {method:"PUT",body:{service,action}});
 export const previewBranch=(id:string,branch:string,repositoryId:string|null,signal?:AbortSignal)=>
   apiRequest<BranchPreview>(base(id)+"/git/branch-preview?"+
     new URLSearchParams({...{branch},...(repositoryId?{repository_id:uuid(repositoryId)}:{})}).toString(),{signal});
