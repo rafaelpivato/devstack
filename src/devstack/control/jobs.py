@@ -5,6 +5,7 @@ One active project admits concurrent, generation-fenced jobs. No host shell
 or arbitrary Docker/host argv is available over controller IPC.
 """
 import json
+from contextlib import nullcontext
 import os
 from pathlib import Path
 import stat
@@ -67,6 +68,14 @@ class JobSupervisor:
             raise JobError("Unsupported Compose action")
         return self._submit(identifier, "compose", action)
 
+    def submit_service(self, identifier: str, service: str, action: str,
+                       *, reaction_ids: tuple[int, ...] = (),
+                       already_locked: bool = False) -> str:
+        if action not in ("restart", "redeploy"):
+            raise JobInvalid("Unsupported service action")
+        return self._submit(identifier, "compose", action, service=service,
+                            reaction_ids=reaction_ids, already_locked=already_locked)
+
     @staticmethod
     def _adhoc_spec(kind: str, service: str, image: str,
                     network: str, command: list) -> dict:
@@ -107,9 +116,11 @@ class JobSupervisor:
                             kind + ": " + (service or image), adhoc=spec)
 
     def _submit(self, identifier: str, kind: str, action: str,
-                adhoc: dict | None = None) -> str:
+                adhoc: dict | None = None, service: str | None = None,
+                reaction_ids: tuple[int, ...] = (),
+                already_locked: bool = False) -> str:
         project_id(identifier)
-        with self.coordinator.locked():
+        with (nullcontext() if already_locked else self.coordinator.locked()):
             state = self.coordinator.status()
             self.coordinator.admit(identifier, state["generation"] or "")
             job_id = str(uuid4())
@@ -123,7 +134,21 @@ class JobSupervisor:
                 )
                 independent = True
             else:
-                argv = self.backend.command(identifier) + [action]
+                if service is not None:
+                    if (not isinstance(service, str)
+                            or service not in self.backend.configured_services(identifier)):
+                        raise JobInvalid("Unknown Compose service")
+                    if action == "restart":
+                        argv = self.backend.command(identifier) + [
+                            "restart", "--no-deps", service,
+                        ]
+                    else:
+                        argv = self.backend.command(identifier) + [
+                            "up", "-d", "--no-deps", "--build", "--force-recreate",
+                            "--wait", "--wait-timeout", "150", service,
+                        ]
+                else:
+                    argv = self.backend.command(identifier) + [action]
                 independent = False
             if not all(isinstance(arg, str) and arg for arg in argv):
                 raise JobError("Invalid worker command")
@@ -141,9 +166,19 @@ class JobSupervisor:
                     "INSERT INTO jobs(id,project_id,generation,kind,status,"
                     "action,cancel_policy,started_ns) VALUES (?,?,?,?,?,?,?,?)",
                     (job_id, identifier, state["generation"], kind, "queued",
-                     action, "independent" if independent else "project",
+                     (action + " " + service) if service else action,
+                     "independent" if independent else "project",
                      time.time_ns()),
                 )
+                if reaction_ids:
+                    placeholders = ",".join("?" for _ in reaction_ids)
+                    changed = con.execute(
+                        "UPDATE service_reaction_events SET status='submitted',job_id=? "
+                        "WHERE status='pending' AND id IN (" + placeholders + ")",
+                        (job_id, *reaction_ids),
+                    )
+                    if changed.rowcount != len(reaction_ids):
+                        raise JobError("Stale reaction reservation")
             thread = threading.Thread(
                 target=self._worker, args=(job_id, identifier, state["generation"],
                                            tuple(argv)), daemon=True,
