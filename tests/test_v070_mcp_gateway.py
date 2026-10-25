@@ -111,6 +111,7 @@ class ProtocolTests(unittest.TestCase):
                             # Emulate controller loss with web still running.
                             controller.shutdown()
                             ipc_thread.join(3)
+                            controller.server_close()
                             disconnected = await client.call_tool("devstack_status", {})
                             self.assertEqual(
                                 disconnected.structured_content["controller"], "unavailable"
