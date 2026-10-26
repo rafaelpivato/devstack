@@ -6,6 +6,15 @@ import { NavLink, type Navigator } from "../../navigation/useNavigation";
 import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
 import { message } from "./Common";
 
+const FUNNEL_FIXES: Record<string,string> = {
+  funnel_setup_timeout: "Funnel setup did not finish within 45 seconds. This may be a first-time tailnet approval or HTTPS certificate delay. Review the Tailscale admin console and retry here; no SSH is needed.",
+  funnel_permission_required: "Approve Funnel access in the Tailscale admin console and retry here. Check the tailnet Funnel policy and node permissions.",
+  funnel_https_required: "Enable MagicDNS and HTTPS certificates for your tailnet in the Tailscale admin console, then retry.",
+  funnel_certificate_failed: "Tailscale could not issue its HTTPS certificate. Check the tailnet HTTPS settings and certificate rate limits before retrying.",
+  funnel_port_in_use: "Tailscale reports that the MCP port is already occupied. DevStack will not overwrite another service or an unknown route.",
+  funnel_command_failed: "Tailscale rejected the Funnel operation for an unclassified reason. Copy the MCP diagnostic snapshot to report it; DevStack does not disclose raw host logs.",
+};
+
 export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const [serial, setSerial] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -94,8 +103,12 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
         navigate={navigation.navigate}>View and copy MCP diagnostics →</NavLink></p>
       {current?.last_result && !["enabled","disabled"].includes(current.last_result) &&
         <Notice title="Last MCP action failed" role="alert">
-          {current.last_result.replaceAll("_"," ")}. Open diagnostics for the
-          matching event and its error code. SSH is not required for ordinary troubleshooting.
+          <p>Error code: <code>{current.last_result}</code></p>
+          <p>{FUNNEL_FIXES[current.last_result] ??
+            "Open diagnostics for the matching event and share the copied snapshot. No SSH is required."}</p>
+          {["funnel_setup_timeout","funnel_permission_required","funnel_https_required","funnel_certificate_failed"].includes(current.last_result)
+            && <p><a href="https://login.tailscale.com/admin" target="_blank" rel="noreferrer">
+              Open Tailscale administration</a></p>}
         </Notice>}
     </section>
     <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL and add it
