@@ -119,11 +119,11 @@ class FunnelErrorTests(unittest.TestCase):
             if args[:2] == ("systemctl", "disable"):
                 raise manage.MCPManagementError("systemd_command_failed")
             return ""
-        with patch.object(manage, "pinned_hostname", return_value=HOST), \
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(manage, "ENV_FILE", Path(folder) / "gateway.env"), \
+             patch.object(manage, "pinned_hostname", return_value=HOST), \
              patch.object(manage, "verify_state", return_value=(False, False)), \
              patch.object(manage, "run_command", side_effect=run), \
-             patch.object(manage.ENV_FILE, "write_text"), \
-             patch.object(manage.ENV_FILE, "chmod"), \
              patch("socket.create_connection") as connection, \
              patch.object(manage, "log_event") as logger:
             connection.return_value.__enter__.return_value = None
