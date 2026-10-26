@@ -216,20 +216,22 @@ def classified_command_error(args: tuple[str, ...], exc: BaseException) -> str:
         if any(s in detail for s in ("not running", "not connected", "logged out")):
             return "tailscale_disconnected"
         if funnel:
+            # HTTPS and certificate errors may also say "not enabled".
+            # Classify these specific failures before broad permission text.
+            if any(s in detail for s in (
+                "https is not enabled", "https must be enabled", "magicdns",
+            )):
+                return "funnel_https_required"
+            if any(s in detail for s in (
+                "certificate", "acme", "let's encrypt", "lets encrypt", "rate limit",
+            )):
+                return "funnel_certificate_failed"
             if any(s in detail for s in (
                 "not allowed", "permission", "not authorized", "not permitted",
                 "funnel is disabled", "funnel is not enabled", "enable funnel",
                 "requires approval", "not enabled for",
             )):
                 return "funnel_permission_required"
-            if any(s in detail for s in (
-                "certificate", "acme", "let's encrypt", "lets encrypt", "rate limit",
-            )):
-                return "funnel_certificate_failed"
-            if any(s in detail for s in (
-                "https is not enabled", "https must be enabled", "magicdns",
-            )):
-                return "funnel_https_required"
             if any(s in detail for s in (
                 "port already in use", "listener already exists", "address already in use",
             )):
