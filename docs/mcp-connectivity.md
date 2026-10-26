@@ -94,3 +94,22 @@ unavailable. The MCP Web screen identifies queue-readiness and reports
 permission, read-only storage or capacity errors instead of a generic
 request failure. The marker path and underlying operator checks are covered
 by automated host permission tests.
+
+## v0.7.2 — First live Funnel failure diagnosis
+
+The first deployed v0.7.1 connection successfully queued the Web action and
+started the MCP gateway, but the subsequent `tailscale funnel` command ended
+with `funnel_command_failed` after approximately 45 seconds. The existing
+45-second subprocess timeout was not distinguished from an ordinary CLI
+rejection, so this is consistent with a setup timeout **but not proof of the
+underlying cause**.
+
+Funnel setup now reports separate safe error codes for timeout, missing Funnel
+permission, HTTPS configuration, certificate issuance, occupied port, and
+other CLI failures. The Administration screen shows actionable advice and a
+link to the Tailscale admin console when appropriate. The diagnostic snapshot
+includes the bounded error code; no raw CLI stderr, tokens, certificate data,
+or privileged system journal is exposed. Failed startup still attempts to
+remove only the verified MCP route and stops the MCP gateway. The original
+failure category is preserved even if cleanup also fails. No SSH is required
+to inspect failures or retry the Web UI action.

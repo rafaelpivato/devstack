@@ -193,29 +193,64 @@ def atomic_result_file(path: Path, payload: dict) -> None:
     os.replace(name, path)
 
 
+def classified_command_error(args: tuple[str, ...], exc: BaseException) -> str:
+    """Categorize known host errors; never expose raw stderr or command output.
+
+    Funnel may wait on first-use tailnet approval or HTTPS certificate setup.
+    Timeouts and policy failures must be independently actionable in the Web
+    console; generic failures must not be mistaken for missing permissions.
+    """
+    tailscale = args[:1] == ("tailscale",)
+    funnel = args[:2] == ("tailscale", "funnel")
+    if isinstance(exc, subprocess.TimeoutExpired):
+        if funnel:
+            return "funnel_setup_timeout"
+        return "tailscale_command_timeout" if tailscale else "host_command_timeout"
+
+    # Some clients write bytes, others text. Only classify fixed, safe phrases.
+    stderr = getattr(exc, "stderr", "") or ""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", "replace")
+    detail = str(stderr).lower()
+    if tailscale:
+        if any(s in detail for s in ("not running", "not connected", "logged out")):
+            return "tailscale_disconnected"
+        if funnel:
+            if any(s in detail for s in (
+                "not allowed", "permission", "not authorized", "not permitted",
+                "funnel is disabled", "funnel is not enabled", "enable funnel",
+                "requires approval", "not enabled for",
+            )):
+                return "funnel_permission_required"
+            if any(s in detail for s in (
+                "certificate", "acme", "let's encrypt", "lets encrypt", "rate limit",
+            )):
+                return "funnel_certificate_failed"
+            if any(s in detail for s in (
+                "https is not enabled", "https must be enabled", "magicdns",
+            )):
+                return "funnel_https_required"
+            if any(s in detail for s in (
+                "port already in use", "listener already exists", "address already in use",
+            )):
+                return "funnel_port_in_use"
+            if any(s in detail for s in ("deadline exceeded", "timed out", "timeout")):
+                return "funnel_setup_timeout"
+            return "funnel_command_failed"
+        return "tailscale_command_failed"
+    if args[:1] == ("systemctl",):
+        return "systemd_command_failed"
+    if args[:1] == ("journalctl",):
+        return "mcp_journal_unavailable"
+    return "host_command_failed"
+
+
 def run_command(*args: str, timeout: int = 12) -> str:
     try:
         result = subprocess.run(args, capture_output=True, text=True,
-                                check=True, timeout=timeout)
+                                check=True, timeout=timeout, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as exc:
-        if args and args[0] == "tailscale":
-            detail = str(getattr(exc, "stderr", "") or "").lower()
-            if "not running" in detail or "not connected" in detail:
-                code = "tailscale_disconnected"
-            elif any(s in detail for s in ("not allowed", "not enabled",
-                                           "permission", "not authorized")):
-                code = "funnel_permission_required"
-            elif args[1:2] == ("funnel",):
-                code = "funnel_command_failed"
-            else:
-                code = "tailscale_command_failed"
-        elif args and args[0] == "systemctl":
-            code = "systemd_command_failed"
-        elif args and args[0] == "journalctl":
-            code = "mcp_journal_unavailable"
-        else:
-            code = "host_command_failed"
-        raise MCPManagementError(code) from exc
+        raise MCPManagementError(classified_command_error(args, exc)) from exc
     return result.stdout
 
 
@@ -330,15 +365,19 @@ def apply_action(action: str) -> str:
                 if not verify_state(host)[1]:
                     raise MCPManagementError("funnel_not_verified")
             except MCPManagementError:
-                # Never leave the public tunnel configured if verification failed.
+                # Preserve the original Tailscale error even if rollback fails.
+                # Never clobber a route whose ownership cannot be verified.
                 try:
                     if verify_state(host)[1]:
                         run_command("tailscale", "funnel", "--https=10000",
-                                    "off", timeout=30)
+                                    "off", timeout=12)
                 except MCPManagementError:
-                    pass  # Unknown route: never clobber it, show failure.
-                run_command("systemctl", "disable", "--now", "devstack-mcp.service",
-                            timeout=30)
+                    log_event("funnel_rollback_unverified")
+                try:
+                    run_command("systemctl", "disable", "--now",
+                                "devstack-mcp.service", timeout=12)
+                except MCPManagementError:
+                    log_event("gateway_rollback_failed")
                 raise
         else:
             # Restart a previously configured gateway after a host reboot.

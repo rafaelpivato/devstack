@@ -6,6 +6,7 @@ import errno
 import json
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 
@@ -71,6 +72,65 @@ class ServeStateTests(unittest.TestCase):
                 path.write_text(json.dumps({"node_id": "another", "tailnet": "tailnet"}))
                 with self.assertRaises(manage.MCPManagementError):
                     manage.pinned_hostname()
+
+
+class FunnelErrorTests(unittest.TestCase):
+    """Field regression: 45-second gap before funnel_command_failed."""
+
+    def test_timeout_has_distinct_diagnostic_code(self):
+        with patch.object(manage.subprocess, "run",
+                          side_effect=subprocess.TimeoutExpired(
+                              ["tailscale", "funnel"], 45)):
+            with self.assertRaises(manage.MCPManagementError) as ctx:
+                manage.run_command("tailscale", "funnel", "--yes", "--bg",
+                                   "--https=10000", manage.TARGET, timeout=45)
+        self.assertEqual(ctx.exception.code, "funnel_setup_timeout")
+
+    def test_funnel_errors_are_safe_and_actionable(self):
+        cases = [
+            ("To enable Funnel, go to your tailnet's access controls",
+             "funnel_permission_required"),
+            ("permission denied: node attribute funnel not permitted",
+             "funnel_permission_required"),
+            ("unable to create certificate: ACME rate limit",
+             "funnel_certificate_failed"),
+            ("HTTPS is not enabled for this tailnet", "funnel_https_required"),
+            ("port already in use", "funnel_port_in_use"),
+            ("context deadline exceeded", "funnel_setup_timeout"),
+            ("sensitive-token=abc123 unknown problem", "funnel_command_failed"),
+        ]
+        for stderr, expected in cases:
+            with self.subTest(stderr=expected), patch.object(
+                manage.subprocess, "run",
+                side_effect=subprocess.CalledProcessError(
+                    1, ["tailscale", "funnel"], stderr=stderr),
+            ):
+                with self.assertRaises(manage.MCPManagementError) as ctx:
+                    manage.run_command("tailscale", "funnel", "--https=10000",
+                                       manage.TARGET)
+                self.assertEqual(ctx.exception.code, expected)
+                self.assertNotIn("abc123", str(ctx.exception))
+
+    def test_rollback_does_not_hide_funnel_failure(self):
+        # The gateway is live, and the first attempted Funnel action fails.
+        def run(*args, **_):
+            if args[:2] == ("tailscale", "funnel") and "off" not in args:
+                raise manage.MCPManagementError("funnel_setup_timeout")
+            if args[:2] == ("systemctl", "disable"):
+                raise manage.MCPManagementError("systemd_command_failed")
+            return ""
+        with patch.object(manage, "pinned_hostname", return_value=HOST), \
+             patch.object(manage, "verify_state", return_value=(False, False)), \
+             patch.object(manage, "run_command", side_effect=run), \
+             patch.object(manage.ENV_FILE, "write_text"), \
+             patch.object(manage.ENV_FILE, "chmod"), \
+             patch("socket.create_connection") as connection, \
+             patch.object(manage, "log_event") as logger:
+            connection.return_value.__enter__.return_value = None
+            with self.assertRaises(manage.MCPManagementError) as ctx:
+                manage.apply_action("enable")
+            self.assertEqual(ctx.exception.code, "funnel_setup_timeout")
+            logger.assert_any_call("gateway_rollback_failed")
 
 
 class MarkerTests(unittest.TestCase):
