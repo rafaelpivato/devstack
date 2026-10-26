@@ -1,6 +1,6 @@
 # DevStack
 
-**Latest published: v0.6.8. Next planned: v0.7.0 managed MCP connectivity (PR #97).** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.7.0. Next planned: v0.7.1 MCP request and diagnostics hotfix.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 

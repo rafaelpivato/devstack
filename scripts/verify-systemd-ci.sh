@@ -130,6 +130,22 @@ test -f /run/devstack-ci-update-sentinel
 test ! -e /run/devstack-update-request/trigger
 echo "Manual update systemd path handoff exercised successfully"
 
+# The v0.7.0 field failure: the web user could not queue the MCP marker in
+# /var/lib. Exercise its replacement in the *existing* sandboxed Web
+# RuntimeDirectory with the exact service UID and protections.
+test "$(stat -c '%a' /run/devstack-update-request)" = "700"
+runuser -u "$web" -- env PYTHONPATH="$PWD/src" "$root/venv/bin/python" - <<'PY'
+from pathlib import Path
+from unittest.mock import patch
+from devstack import mcp_management as mcp
+runtime = Path("/run/devstack-update-request")
+with patch.object(mcp, "REQUEST_DIR", runtime):
+    mcp.request_action("enable")
+    assert (runtime / "mcp-action").read_bytes() == b"enable"
+    (runtime / "mcp-action").unlink()
+PY
+echo "MCP request writable from real Web user in verified RuntimeDirectory: PASS"
+
 # Verify permissions using the actual web user, not a mock or text inspection.
 if runuser -u "$web" -- test -r "$state/control.sqlite3"; then
   echo "Security violation: web can read controller SQLite state" >&2

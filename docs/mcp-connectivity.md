@@ -77,3 +77,20 @@ to the MCP gateway and MCP apply services. It refreshes its safe JSON snapshot
 every minute. If the collector fails or becomes stale, source coverage becomes
 `mcp=unavailable` rather than quietly hiding failures. The browser never
 requests arbitrary host logs and never needs shell access to collect them.
+
+## v0.7.1 field hotfix
+
+The v0.7.0 Enable MCP action could fail before Funnel with
+`request_failed`, accompanied by `web=unavailable` diagnostic coverage.
+The MCP request is now queued in the existing, verified private Web
+RuntimeDirectory (`/run/devstack-update-request/mcp-action`), separate from
+the updater's `trigger` marker. The installer replaces the fixed systemd.path
+unit to watch the new marker. No operator SSH or manual permission repair.
+
+The Web diagnostics ring prefers its persistent state and falls back to
+`/run/devstack-update-request/web-diagnostics.sqlite3` when unavailable.
+The UI reports `partial (volatile fallback)` when its persistent storage is
+unavailable. The MCP Web screen identifies queue-readiness and reports
+permission, read-only storage or capacity errors instead of a generic
+request failure. The marker path and underlying operator checks are covered
+by automated host permission tests.

@@ -6,6 +6,7 @@ and never replaces the tailnet-only dashboard or webhook configuration.
 """
 from __future__ import annotations
 
+import errno
 import json
 import sys
 import os
@@ -17,8 +18,8 @@ import subprocess
 import tempfile
 import time
 
-REQUEST_DIR = Path("/var/lib/devstack-web/mcp-request")
-REQUEST_FILE = REQUEST_DIR / "action"
+REQUEST_DIR = Path("/run/devstack-update-request")
+REQUEST_FILE = REQUEST_DIR / "mcp-action"
 RESULT_FILE = Path("/run/devstack-mcp-result.json")
 ENV_FILE = Path("/etc/devstack-mcp.env")
 SNAPSHOT_FILE = Path("/run/devstack-mcp-diagnostics.json")
@@ -101,7 +102,7 @@ Description=Watch private MCP exposure requests
 After=devstack-web-v2.service
 
 [Path]
-PathExists=/var/lib/devstack-web/mcp-request/action
+PathExists=/run/devstack-update-request/mcp-action
 Unit=devstack-mcp-apply.service
 
 [Install]
@@ -381,28 +382,64 @@ def apply_pending() -> None:
         raise
 
 
+def check_request_directory(directory: Path = REQUEST_DIR) -> Path:
+    """Existing web RuntimeDirectory is already exercised in Ubuntu CI."""
+    try:
+        metadata = directory.lstat()
+    except FileNotFoundError as exc:
+        raise MCPManagementError("request_directory_missing") from exc
+    except OSError as exc:
+        raise MCPManagementError("request_directory_unavailable") from exc
+    if (not stat.S_ISDIR(metadata.st_mode) or
+            stat.S_IMODE(metadata.st_mode) != 0o700 or
+            metadata.st_uid != os.getuid()):
+        raise MCPManagementError("request_directory_unsafe")
+    if not os.access(directory, os.W_OK | os.X_OK):
+        raise MCPManagementError("request_permission_denied")
+    return directory
+
+
 def request_action(action: str) -> None:
     """Existing web CSRF is the request authority; no user commands or URLs."""
     if action not in ("enable", "disable"):
         raise MCPManagementError("invalid_action")
     directory = REQUEST_DIR
+    check_request_directory(directory)
+    temp = None
     try:
-        metadata = directory.lstat()
-        if (not stat.S_ISDIR(metadata.st_mode) or
-                stat.S_IMODE(metadata.st_mode) != 0o700 or
-                metadata.st_uid != os.getuid()):
-            raise MCPManagementError("request_directory_unsafe")
-    except FileNotFoundError as exc:
-        raise MCPManagementError("mcp_setup_missing") from exc
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(directory / "action", flags, 0o600)
+        # PathExists must not wake the root watcher until all bytes are
+        # durable and closed. A same-directory hard link is atomic and refuses
+        # to overwrite an existing action from another tab or Web worker.
+        descriptor, name = tempfile.mkstemp(prefix=".mcp-pending-", dir=directory)
+        temp = Path(name)
         with os.fdopen(descriptor, "wb") as output:
             output.write(action.encode("ascii"))
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(temp, directory / "mcp-action")
     except FileExistsError as exc:
         raise MCPManagementError("request_pending") from exc
     except OSError as exc:
-        raise MCPManagementError("request_failed") from exc
+        code = {
+            errno.EACCES: "request_permission_denied",
+            errno.EPERM: "request_permission_denied",
+            errno.EROFS: "request_read_only",
+            errno.ENOSPC: "request_disk_full",
+            errno.EDQUOT: "request_disk_full",
+            errno.ENOENT: "request_directory_missing",
+        }.get(exc.errno, "request_failed")
+        raise MCPManagementError(code) from exc
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+
+
+def request_state() -> str:
+    try:
+        check_request_directory()
+        return "ready"
+    except MCPManagementError as exc:
+        return exc.code
 
 
 def status() -> dict:
@@ -437,8 +474,9 @@ def status() -> dict:
         "funnel": tunnel,
         "url": connected_url,
         "request_pending": REQUEST_FILE.exists(),
+        "request_state": request_state(),
         "last_result": last_code,
-        "installed": REQUEST_DIR.is_dir(),
+        "installed": Path("/etc/systemd/system/devstack-mcp-apply.path").is_file(),
     }
 
 
@@ -467,6 +505,10 @@ def install_units(root: Path = Path("/opt/devstack"),
                 or stat.S_IMODE(data.st_mode) != 0o700):
             raise MCPManagementError("request_directory_unsafe")
     else:
+        # The Web service owns this existing RuntimeDirectory. Never synthesize
+        # it on a deployed host: the service must own its writable sandbox.
+        if run_systemd:
+            raise MCPManagementError("request_directory_missing")
         request_dir.mkdir(parents=True, mode=0o700)
         os.chown(request_dir, account.pw_uid, account.pw_gid)
         request_dir.chmod(0o700)

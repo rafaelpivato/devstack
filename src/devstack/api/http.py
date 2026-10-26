@@ -46,6 +46,9 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         MAX_CONTENT_LENGTH=64 * 1024,
         WEB_DIAGNOSTICS_PATH=os.environ.get(
             "DEVSTACK_WEB_DIAGNOSTICS_PATH", "/var/lib/devstack-web/diagnostics.sqlite3"),
+        WEB_DIAGNOSTICS_FALLBACK_PATH=os.environ.get(
+            "DEVSTACK_WEB_DIAGNOSTICS_FALLBACK_PATH",
+            "/run/devstack-update-request/web-diagnostics.sqlite3"),
         MCP_DIAGNOSTICS_PATH=os.environ.get("DEVSTACK_MCP_DIAGNOSTICS_PATH", str(MCP_DIAGNOSTICS_PATH)),
         CONTROLLER_SOCKET=os.environ.get(
             "DEVSTACK_CONTROL_SOCKET", "/run/devstack-control/control.sock"),
@@ -62,12 +65,23 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         return send(Path(app.config["CONTROLLER_SOCKET"]), op,
                     timeout=timeout, **fields)
 
+    def web_stores():
+        # RuntimeDirectory was previously exercised with the real web UID in
+        # Ubuntu CI. Use it if the persistent StateDirectory is unavailable.
+        for name in ("WEB_DIAGNOSTICS_PATH", "WEB_DIAGNOSTICS_FALLBACK_PATH"):
+            path = Path(app.config[name])
+            if name == "WEB_DIAGNOSTICS_FALLBACK_PATH" and path == Path(app.config["WEB_DIAGNOSTICS_PATH"]):
+                continue
+            yield name, DiagnosticStore(path)
+
     def record_web(code: str, *, source: str = "web", level: str = "info"):
-        try:
-            DiagnosticStore(Path(app.config["WEB_DIAGNOSTICS_PATH"])).record(
-                source, code, level)
-        except Exception:
-            pass  # Diagnostics failure never elevates privileges or alters requests.
+        for _, store in web_stores():
+            try:
+                store.record(source, code, level)
+                return
+            except (OSError, RuntimeError, ValueError, sqlite3.Error):
+                continue  # Never break a request due to diagnostic storage.
+
 
     record_web("web-started")
 
@@ -183,13 +197,25 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             truncated = bool(result["truncated"])
         except (ControllerUnavailable, ControllerRejected, KeyError, ValueError, TypeError):
             pass
-        try:
-            data = DiagnosticStore(Path(app.config["WEB_DIAGNOSTICS_PATH"])).snapshot(minutes)
-            events.extend(data["events"])
-            truncated = truncated or data["truncated"]
+        # Read both stores when available: brief permission failures can have
+        # put recent events into the volatile fallback.
+        web_primary = False
+        web_fallback = False
+        for name, store in web_stores():
+            try:
+                data = store.snapshot(minutes)
+                events.extend(data["events"])
+                truncated = truncated or data["truncated"]
+                if name == "WEB_DIAGNOSTICS_PATH":
+                    web_primary = True
+                else:
+                    web_fallback = True
+            except (OSError, RuntimeError, ValueError, sqlite3.Error):
+                pass
+        if web_primary:
             sources["web"] = "available"
-        except (OSError, RuntimeError, ValueError, sqlite3.Error):
-            pass
+        elif web_fallback:
+            sources["web"] = "partial (volatile fallback)"
         safe_update = None
         try:
             data = update_state()

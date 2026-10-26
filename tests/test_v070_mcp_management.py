@@ -2,6 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import errno
 import json
 import os
 import stat
@@ -79,7 +80,7 @@ class MarkerTests(unittest.TestCase):
             path.chmod(0o700)
             with patch.object(manage, "REQUEST_DIR", path):
                 manage.request_action("enable")
-                marker = path / "action"
+                marker = path / "mcp-action"
                 self.assertEqual(marker.read_bytes(), b"enable")
                 self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
                 with self.assertRaises(manage.MCPManagementError):
@@ -87,6 +88,39 @@ class MarkerTests(unittest.TestCase):
                 marker.unlink()
                 manage.request_action("disable")
                 self.assertEqual(marker.read_bytes(), b"disable")
+
+    def test_permission_errors_are_not_disguised_as_generic_failure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)
+            path.chmod(0o700)
+            with patch.object(manage, "REQUEST_DIR", path), patch.object(
+                    manage.os, "open", side_effect=PermissionError(errno.EACCES, "denied")):
+                with self.assertRaises(manage.MCPManagementError) as caught:
+                    manage.request_action("enable")
+                self.assertEqual(caught.exception.code, "request_permission_denied")
+
+    def test_root_watcher_sees_only_complete_marker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            directory.chmod(0o700)
+            original_link = manage.os.link
+
+            def observe(source, destination, **kwargs):
+                self.assertEqual(Path(source).read_bytes(), b"enable")
+                self.assertFalse(Path(destination).exists())
+                return original_link(source, destination, **kwargs)
+
+            with patch.object(manage, "REQUEST_DIR", directory), patch.object(
+                manage.os, "link", side_effect=observe
+            ):
+                manage.request_action("enable")
+            self.assertEqual((directory / "mcp-action").read_bytes(), b"enable")
+            self.assertEqual(sorted(p.name for p in directory.iterdir()), ["mcp-action"])
+
+    def test_request_path_uses_verified_web_runtime_directory(self):
+        self.assertEqual(manage.REQUEST_DIR, Path("/run/devstack-update-request"))
+        self.assertIn("PathExists=/run/devstack-update-request/mcp-action",
+                      manage.UNIT_FILES["devstack-mcp-apply.path"])
 
     def test_install_units_only_in_disconnected_state(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -131,7 +165,7 @@ class WebAPIContractTests(unittest.TestCase):
 
     def test_status_has_no_sensitive_fields(self):
         safe={"gateway":"stopped","funnel":"disabled","url":None,
-              "request_pending":False,"last_result":None,"installed":True}
+              "request_pending":False,"request_state":"ready","last_result":None,"installed":True}
         with patch("devstack.api.http.mcp_status", return_value=safe):
             response=self.client.get("/api/v2/devstack/mcp")
             self.assertEqual(response.status_code, 200)
