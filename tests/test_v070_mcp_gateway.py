@@ -100,7 +100,7 @@ class ProtocolTests(unittest.TestCase):
                             first = await client.call_tool("devstack_status", {})
                             self.assertFalse(first.is_error)
                             self.assertEqual(first.structured_content["controller"], "connected")
-                            self.assertEqual(first.structured_content["version"], "0.7.0")
+                            self.assertEqual(first.structured_content["version"], __import__("importlib.metadata", fromlist=["version"]).version("devstack"))
                             self.assertIsNone(first.structured_content["last_ping"])
                             ping = await client.call_tool("devstack_ping", {"value": "connected"})
                             self.assertFalse(ping.is_error)
