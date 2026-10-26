@@ -67,3 +67,12 @@ export function validateCollection(value:unknown):value is SettingsCollection {
   });
   return apps&&tasks;
 }
+
+export interface MCPStatus {
+  gateway:"running"|"stopped";funnel:"enabled"|"disabled"|"unknown";
+  url:string|null; request_pending:boolean; last_result:string|null; installed:boolean;
+}
+export const readMCPStatus=(signal?:AbortSignal)=>
+  apiRequest<MCPStatus>("/api/v2/devstack/mcp",{signal});
+export const requestMCPAction=(action:"enable"|"disable")=>
+  apiRequest<{message:string;request_pending:true}>("/api/v2/devstack/mcp/"+action,{method:"POST",body:{}});

@@ -15,6 +15,7 @@ import { JobsScreen, JobDetail, JobLogs, RunJob } from "./features/workloads/Job
 import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor } from "./features/configuration/ProjectConfiguration";
 import { WebhookEditor } from "./features/configuration/WebhookEditor";
 import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
+import { MCPConnectionsScreen } from "./features/configuration/MCPConnections";
 import {DiagnosticsScreen} from "./features/configuration/Diagnostics";
 import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
 import "./styles.css";
@@ -31,6 +32,8 @@ export function App() {
   if(navigation.route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
   if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="updates")
     return <UpdatesScreen runtime={runtime.kind==="ready"?runtime.data:null} navigation={navigation}/>;
+  if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="mcp")
+    return <MCPConnectionsScreen navigation={navigation}/>;
   if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="diagnostics")
     return <DiagnosticsScreen navigation={navigation}/>;
   if(navigation.route.kind==="not-found") return <Shell title="Page not found" navigation={navigation} back>

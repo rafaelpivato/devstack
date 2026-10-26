@@ -1,5 +1,5 @@
 import {apiRequest} from "./client";
-export type DiagnosticSource = "controller"|"web"|"runtime"|"updater";
+export type DiagnosticSource = "controller"|"web"|"runtime"|"updater"|"mcp";
 export interface DiagnosticEvent {
   at:number; source:DiagnosticSource; level:"info"|"warning"|"error"; code:string;
   operation_id?:string; action?:string; error_code?:string|null;
@@ -19,7 +19,7 @@ export function diagnosticText(snapshot:DiagnosticSnapshot):string{
     "Installed: "+snapshot.version,
     "Captured: "+snapshot.retrieved_at,
     "Lookback: "+snapshot.minutes+" minute(s)",
-    "Sources: "+(["controller","web","runtime","updater"] as const)
+    "Sources: "+(["controller","web","runtime","updater","mcp"] as const)
       .map(source=>source+"="+snapshot.sources[source]).join("; "),
     snapshot.partial?"WARNING: Some sources are unavailable or partial.":"All listed sources available.",
     snapshot.truncated?"WARNING: Event list truncated.":"Event list not truncated.",
