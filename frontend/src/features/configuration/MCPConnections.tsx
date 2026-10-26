@@ -4,7 +4,7 @@ import { useResource } from "../../hooks/useResource";
 import { Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { NavLink, type Navigator } from "../../navigation/useNavigation";
 import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
-import { Feedback, message } from "./Common";
+import { message } from "./Common";
 
 export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const [serial, setSerial] = useState(0);
@@ -42,9 +42,16 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     {state.kind==="error"&&<Notice title="Cannot check MCP status" role="alert">{state.error.message}</Notice>}
     {current&&<section className="card">
       <div className="property"><span>MCP gateway</span><strong>{current.gateway}</strong></div>
+      <div className="property"><span>Request queue</span>
+        <strong>{current.request_state==="ready"?"ready":current.request_state.replaceAll("_"," ")}</strong>
+      </div>
       <div className="property"><span>Public Funnel</span><Status text={current.funnel}
         kind={enabled?"positive":current.funnel==="unknown"?"warning":"neutral"}/></div>
       {current.request_pending&&<p role="status">Applying your request…</p>}
+      {current.request_state!=="ready"&&<Notice title="Request queue unavailable" role="alert">
+        DevStack cannot currently queue MCP actions ({current.request_state.replaceAll("_"," ")}).
+        Check DevStack diagnostics for the matching failure event.
+      </Notice>}
       {current.last_result&&<p className="text-muted">Last action: {current.last_result.replaceAll("_"," ")}</p>}
       {current.url&&<div>
         <div className="section-head">MCP connection URL</div>
@@ -73,7 +80,11 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       <button type="button" className="text-button" onClick={()=>setSerial(x=>x+1)}>
         Refresh status</button>
     </div>
-    <Feedback error={error} success={feedback}/>
+    {error&&<Notice title="MCP connection request failed" role="alert">{error}
+      <p>Check the request queue status and copy the Web diagnostics snapshot.
+        No SSH is required for routine troubleshooting.</p>
+    </Notice>}
+    {feedback&&<Notice title="MCP request submitted">{feedback}</Notice>}
     <section className="card">
       <h2>MCP troubleshooting</h2>
       <p>Gateway requests, controller health checks and Funnel lifecycle errors are

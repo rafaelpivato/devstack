@@ -120,6 +120,35 @@ class DiagnosticHttpTests(unittest.TestCase):
         self.assertTrue(data["partial"])
         self.assertEqual(data["updater_status"]["phase"], "failed")
 
+    def test_web_logs_survive_primary_storage_failure(self):
+        # The deployed v0.7.0 instance reported web=unavailable. Fail over to
+        # the independent already-writable systemd RuntimeDirectory.
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            app = create_app({
+                "TESTING": True, "SECRET_KEY": "test",
+                "WEB_DIAGNOSTICS_PATH": str(folder / "nonexistent" / "web.sqlite3"),
+                "WEB_DIAGNOSTICS_FALLBACK_PATH": str(folder / "fallback.sqlite3"),
+            }, transport=lambda op, **_: {
+                "events": [], "sources": {"controller": "available", "runtime": "available"},
+                "truncated": False,
+            } if op == "diagnostics_snapshot" else {"runtime": "inactive"})
+            with patch("devstack.api.http.request_mcp_action", side_effect=__import__(
+                    "devstack.mcp_management", fromlist=["MCPManagementError"]).MCPManagementError(
+                        "request_permission_denied")):
+                client = app.test_client()
+                with client.session_transaction() as sess:
+                    sess["_csrf"] = "token"
+                response = client.post("/api/v2/devstack/mcp/enable", json={},
+                                       headers={"X-CSRF-Token": "token"})
+                self.assertEqual(response.status_code, 409)
+                with patch("devstack.api.http.updater_service_events",
+                           return_value={"events": [], "available": True}):
+                    snapshot = client.get("/api/v2/devstack/diagnostics?minutes=5").get_json()
+            self.assertEqual(snapshot["sources"]["web"], "partial (volatile fallback)")
+            codes = [event["code"] for event in snapshot["events"]]
+            self.assertIn("web-mcp-request-failed", codes)
+
     def test_diagnostics_ipc_rejects_arbitrary_arguments(self):
         self.assertEqual(validate_request({"op":"diagnostics_snapshot","minutes":5}),
                          "diagnostics_snapshot")
