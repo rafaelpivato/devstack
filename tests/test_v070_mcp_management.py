@@ -99,6 +99,24 @@ class MarkerTests(unittest.TestCase):
                     manage.request_action("enable")
                 self.assertEqual(caught.exception.code, "request_permission_denied")
 
+    def test_root_watcher_sees_only_complete_marker(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            directory.chmod(0o700)
+            original_link = manage.os.link
+
+            def observe(source, destination, **kwargs):
+                self.assertEqual(Path(source).read_bytes(), b"enable")
+                self.assertFalse(Path(destination).exists())
+                return original_link(source, destination, **kwargs)
+
+            with patch.object(manage, "REQUEST_DIR", directory), patch.object(
+                manage.os, "link", side_effect=observe
+            ):
+                manage.request_action("enable")
+            self.assertEqual((directory / "mcp-action").read_bytes(), b"enable")
+            self.assertEqual(sorted(p.name for p in directory.iterdir()), ["mcp-action"])
+
     def test_request_path_uses_verified_web_runtime_directory(self):
         self.assertEqual(manage.REQUEST_DIR, Path("/run/devstack-update-request"))
         self.assertIn("PathExists=/run/devstack-update-request/mcp-action",

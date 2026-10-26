@@ -405,11 +405,18 @@ def request_action(action: str) -> None:
         raise MCPManagementError("invalid_action")
     directory = REQUEST_DIR
     check_request_directory(directory)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    temp = None
     try:
-        descriptor = os.open(directory / "mcp-action", flags, 0o600)
+        # PathExists must not wake the root watcher until all bytes are
+        # durable and closed. A same-directory hard link is atomic and refuses
+        # to overwrite an existing action from another tab or Web worker.
+        descriptor, name = tempfile.mkstemp(prefix=".mcp-pending-", dir=directory)
+        temp = Path(name)
         with os.fdopen(descriptor, "wb") as output:
             output.write(action.encode("ascii"))
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(temp, directory / "mcp-action")
     except FileExistsError as exc:
         raise MCPManagementError("request_pending") from exc
     except OSError as exc:
@@ -422,6 +429,9 @@ def request_action(action: str) -> None:
             errno.ENOENT: "request_directory_missing",
         }.get(exc.errno, "request_failed")
         raise MCPManagementError(code) from exc
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
 
 
 def request_state() -> str:
