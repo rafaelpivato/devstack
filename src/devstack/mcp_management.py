@@ -367,12 +367,23 @@ def verify_state(host: str) -> tuple[bool, bool]:
 
 
 def apply_action(action: str) -> str:
-    if action not in {"enable", "disable", "migrate"}:
+    if action not in {"enable", "disable", "migrate", "disable_webhooks"}:
         raise MCPManagementError("invalid_action")
     host = pinned_hostname()
     if action == "migrate":
         return migrate_ports(host)
     entry = topology(host)
+    if action == "disable_webhooks":
+        if entry.phase != "legacy":
+            raise MCPManagementError("legacy_webhooks_not_active")
+        if entry.webhooks:
+            run_command("tailscale", "funnel", "--https=8443", "off", timeout=30)
+            after = topology(host)
+            if after.phase != "legacy" or after.webhooks or after.mcp != entry.mcp:
+                raise MCPManagementError("webhook_route_not_removed")
+            log_event("legacy_webhooks_disabled")
+        return "webhooks_disabled"
+
     if entry.phase not in ("legacy", "new"):
         raise MCPManagementError("migration_incomplete")
     active = entry.mcp
@@ -446,12 +457,12 @@ def apply_pending() -> None:
         with os.fdopen(os.open(REQUEST_FILE, flags), "rb") as source:
             data = source.read(16)
         REQUEST_FILE.unlink()
-        if data not in (b"enable", b"disable", b"migrate"):
+        if data not in (b"enable", b"disable", b"migrate", b"disable_webhooks"):
             raise MCPManagementError("request_invalid")
         action = data.decode("ascii")
         log_event("funnel_" + action + "_requested")
         url = apply_action(action)
-        result_record({"enable": "enabled", "disable": "disabled", "migrate": "migrated"}[action],
+        result_record({"enable": "enabled", "disable": "disabled", "migrate": "migrated", "disable_webhooks": "webhooks_disabled"}[action],
                       url=url if action in {"enable", "migrate"} else None)
         log_event("funnel_" + action + "_succeeded")
     except MCPManagementError as exc:
@@ -479,7 +490,7 @@ def check_request_directory(directory: Path = REQUEST_DIR) -> Path:
 
 def request_action(action: str) -> None:
     """Existing web CSRF is the request authority; no user commands or URLs."""
-    if action not in ("enable", "disable", "migrate"):
+    if action not in ("enable", "disable", "migrate", "disable_webhooks"):
         raise MCPManagementError("invalid_action")
     directory = REQUEST_DIR
     check_request_directory(directory)
@@ -536,11 +547,13 @@ def status() -> dict:
     private_url = None
     phase = "unknown"
     tunnel = "unknown"
+    legacy_webhooks_active = False
     try:
         state = json_command("tailscale", "status", "--json")
         host = hostname_from_status(state)
         entry = topology(host)
         phase = entry.phase
+        legacy_webhooks_active = phase == "legacy" and entry.webhooks
         private_url = f"https://{host}:8443/" if phase != "legacy" else f"https://{host}/"
         tunnel = "enabled" if entry.mcp else "disabled"
         if entry.mcp:
@@ -560,6 +573,7 @@ def status() -> dict:
         "private_url": private_url,
         "network_phase": phase,
         "migration_required": phase not in ("new", "unknown"),
+        "legacy_webhooks_active": legacy_webhooks_active,
         "request_pending": REQUEST_FILE.exists(),
         "request_state": request_state(),
         "last_result": last_code,
