@@ -103,6 +103,33 @@ class PublicIngressTests(unittest.TestCase):
             self.assertEqual(client.post("/mcp").status_code, 404)
             self.assertEqual(client.post("/hooks/" + "0"*36 + "/github").status_code, 404)
 
+    def test_webhook_request_body_goes_direct_to_container_not_ipc(self):
+        from starlette.testclient import TestClient
+        project = "01234567-89ab-cdef-0123-456789abcdef"
+        target = {"lease": project, "host": "10.11.12.13",
+                  "port": 8000, "destination": "/callback"}
+        operations = []
+        forwarded = []
+        def broker(operation, **fields):
+            operations.append((operation, fields))
+            return target if operation == "admit" else {"released": True}
+        def relay(mapping, body, headers):
+            forwarded.append((mapping, body, headers))
+            from starlette.responses import Response
+            return Response(b"delivered", status_code=202)
+        with patch.object(public_app, "ingress_call", side_effect=broker), \\
+             patch.object(public_app, "_forward", side_effect=relay):
+            with TestClient(create_app(mcp_enabled=False, webhooks_enabled=True)) as client:
+                response = client.post(f"/hooks/{project}/github", content=b'{"id":1}',
+                    headers={"Content-Type": "application/json",
+                             "X-Twilio-Signature": "signature"})
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(forwarded[0][1], b'{"id":1}')
+        self.assertEqual(forwarded[0][2]["x-twilio-signature"], "signature")
+        self.assertEqual([x[0] for x in operations], ["admit", "release"])
+        self.assertNotIn("body", str(operations))
+        self.assertNotIn("signature", str(operations))
+
     def test_mcp_is_separate_from_webhooks(self):
         app = create_app(mcp_enabled=True, webhooks_enabled=False)
         from starlette.testclient import TestClient

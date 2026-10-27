@@ -151,6 +151,35 @@ class WebhookTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM webhook_leases"
             ).fetchone()[0], 0)
 
+    def test_external_public_delivery_lease_blocks_switch_until_released(self):
+        self.controller.coordinator.activate(self.a.id)
+        granted = self.ingress.begin_delivery(self.a.id, "stripe")
+        self.assertEqual(granted["host"], "10.11.12.13")
+        self.assertEqual(granted["port"], 8000)
+        self.assertEqual(granted["destination"], "/hooks/stripe")
+        finished = []
+        thread = threading.Thread(target=lambda: finished.append(
+            self.controller.coordinator.switch(self.b.id)))
+        thread.start()
+        time.sleep(.1)
+        self.assertFalse(finished)
+        self.ingress.renew_delivery(granted["lease"])
+        self.ingress.finish_delivery(granted["lease"])
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(finished[0]["project_id"], self.b.id)
+
+    def test_expired_public_worker_lease_does_not_strand_switch(self):
+        self.controller.coordinator.activate(self.a.id)
+        lease = self.ingress.begin_delivery(self.a.id, "stripe")
+        with self.controller.registry.database.transaction(write=True) as db:
+            db.execute("UPDATE webhook_leases SET started_ns=? WHERE id=?",
+                       (time.time_ns() - 30_000_000_000, lease["lease"]))
+        result = self.controller.coordinator.switch(self.b.id)
+        self.assertEqual(result["project_id"], self.b.id)
+        with self.controller.registry.database.transaction() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM webhook_leases").fetchone()[0], 0)
+
     def test_failed_drain_blocks_switch_and_leaves_error(self):
         self.controller.coordinator.activate(self.a.id)
         with patch.object(self.ingress, "drain",
