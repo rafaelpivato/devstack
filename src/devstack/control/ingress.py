@@ -138,6 +138,54 @@ class WebhookIngress:
             with self.database.transaction(write=True) as db:
                 db.execute("DELETE FROM webhook_leases WHERE id=?", (lease,))
 
+    def begin_delivery(self, identifier: str, route: str) -> dict:
+        """Authorize a public HTTP delivery; controller never receives its body.
+
+        A lease prevents project switching until public delivery is released.
+        Only the restricted ingress socket may call this method remotely.
+        """
+        project_id(identifier)
+        if not isinstance(route, str) or not _ROUTE.fullmatch(route):
+            raise WebhookNotFound("Unknown webhook route")
+        with self.coordinator.locked():
+            self.registry.get(identifier)
+            with self.database.transaction() as db:
+                row = db.execute(
+                    "SELECT service,port,destination FROM webhook_routes "
+                    "WHERE project_id=? AND route=?", (identifier, route),
+                ).fetchone()
+            if row is None:
+                raise WebhookNotFound("Unknown webhook route")
+            state = self.coordinator.status()
+            if state["phase"] != "active" or state["project_id"] != identifier:
+                raise WebhookInactive("Inactive project")
+            generation = state.get("generation")
+            if not generation:
+                raise WebhookInactive("Missing generation")
+            host = self.backend.webhook_target(identifier, generation, row["service"])
+            parsed = ip_address(host)
+            if not parsed.is_private or parsed.is_loopback or parsed.is_link_local or parsed.is_unspecified:
+                raise WebhookInvalid("Unsafe Docker target")
+            lease = str(uuid4())
+            with self.database.transaction(write=True) as db:
+                db.execute(
+                    "INSERT INTO webhook_leases(id,project_id,generation,started_ns) "
+                    "VALUES(?,?,?,?)", (lease, identifier, generation, time.time_ns()),
+                )
+            return {"lease": lease, "host": host, "port": row["port"],
+                    "destination": row["destination"]}
+
+    def finish_delivery(self, lease: str) -> None:
+        """Idempotent completion from the restricted public ingress IPC."""
+        from uuid import UUID
+        try:
+            if not isinstance(lease, str) or len(lease) != 36 or str(UUID(lease)) != lease:
+                raise ValueError()
+        except (ValueError, AttributeError) as exc:
+            raise WebhookInvalid("Invalid lease") from exc
+        with self.database.transaction(write=True) as db:
+            db.execute("DELETE FROM webhook_leases WHERE id=?", (lease,))
+
     def drain(self, identifier: str, *, seconds: float = 14) -> None:
         """Caller holds coordinator lock and has already revoked admission."""
         deadline = time.monotonic() + seconds
