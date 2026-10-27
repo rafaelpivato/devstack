@@ -98,7 +98,7 @@ tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 base="https://raw.githubusercontent.com/$repo/$release_tag"
 for path in \
-  scripts/updater.py scripts/private_access.py scripts/webhook_funnel.py \
+  scripts/updater.py scripts/private_access.py \
   scripts/enable-tailscale.sh scripts/bootstrap.py \
   deploy/devstack-control.service deploy/devstack-web-v2.service \
   deploy/devstack-update.service deploy/devstack-update.timer \
@@ -111,7 +111,6 @@ do
 done
 install -m 0644 "$tmpdir/updater.py" /usr/local/lib/devstack/updater.py
 install -m 0644 "$tmpdir/private_access.py" /usr/local/lib/devstack/private_access.py
-install -m 0755 "$tmpdir/webhook_funnel.py" /usr/local/lib/devstack/webhook_funnel.py
 install -m 0755 "$tmpdir/enable-tailscale.sh" /usr/local/lib/devstack/enable-tailscale.sh
 install -m 0755 "$tmpdir/bootstrap.py" /usr/local/lib/devstack/bootstrap.py
 sed -e "s|@DEVSTACK_CONTROL_USER@|$control_user|g" \
@@ -145,9 +144,9 @@ systemctl enable --now devstack-update.timer
 systemctl enable --now devstack-update-request.path
 echo "DevStack $release_tag ready; dashboard is private at http://127.0.0.1:8765."
 echo "For private HTTPS, run: sudo /usr/local/lib/devstack/enable-tailscale.sh"
-echo "Do not expose ports 8765 or 8767 publicly."
-echo "Optional public webhooks (project UUID paths):"
-echo "  sudo python3 /usr/local/lib/devstack/webhook_funnel.py"
+echo "Do not expose loopback ports 8765 or 8768 publicly."
+echo "After Tailscale enrollment, open the private dashboard on HTTPS :8443."
+echo "Manage opt-in public MCP and webhook ingress from private Administration."
 echo "Logs: journalctl -u devstack-control -u devstack-web-v2 --no-pager -n 100"
 
 # First-use browser activation remains opt-in and separate from the dashboard.
