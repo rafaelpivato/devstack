@@ -1,115 +1,50 @@
-# DevStack 0.7 MCP — managed ChatGPT connectivity
+# DevStack MCP — ChatGPT connectivity
 
-The private DevStack Administration → ChatGPT / MCP screen now provisions
-a bounded opt-in connectivity session. A verified release's existing root
-updater invokes the established CLI installation hook to register a disabled
-MCP gateway systemd unit and a private marker→root one-shot watcher.
-No remote SSH commands are necessary for routine enable/disable.
+The intended endpoint after the migration described in
+[public ingress](public-ingress.md) is:
 
-## Browser steps
+- **Public:** `https://<pinned-node>.ts.net/mcp` (Tailscale Funnel HTTPS 443).
+- **Private dashboard:** `https://<pinned-node>.ts.net:8443/` (Tailscale Serve).
+- **Webhooks:** public `https://<pinned-node>.ts.net/hooks/<name>`.
 
-1. Install v0.7.0 through the normal DevStack update UI (the existing inactive
-   project/update safety gate still applies).
-2. In **Administration → ChatGPT / MCP**, verify the gateway/Funnel status.
-3. Acknowledge that this first two-tool MCP server is public and unauthenticated,
-   and choose **Enable MCP connection**. The browser queues one literal action
-   in a private directory; the privileged watcher starts only the dedicated
-   gateway and Funnel HTTPS 10000, without touching the private dashboard 443
-   or optional webhook Funnel 8443. The browser polls status automatically.
-4. Copy the displayed public URL ending in `/mcp`.
-5. On ChatGPT web, add a personal custom MCP server, choose **No authentication**,
-   and provide the copied URL. Try `devstack_status` and
-   `devstack_ping(value="connected")`, then `devstack_status` again to verify
-   `last_ping` is `connected`. Also test tool visibility in ChatGPT mobile.
-6. Use **Disable public connection** after testing. Disabling removes only the
-   verified MCP route on HTTPS port 10000 and stops/disables its gateway.
-   It does not change private Serve or webhook settings.
+v0.7.2 and older used *private* dashboard 443, optional webhook 8443,
+and public MCP 10000. Migrating is **not** simply changing one flag:
+public Funnel 443 is forbidden until the private dashboard 443 handler
+has been safely removed. The dedicated Web-console migration action
+prepares and verifies private Serve 8443 first, using a bounded,
+fail-closed root-owned watcher. It never resets unknown Tailscale state.
 
-First-time Tailscale Funnel permission may require approval on the Tailscale
-admin site. ChatGPT may also reject nonstandard HTTPS port 10000 even though
-Tailscale supports it; that remains a manual acceptance test, not a guarantee.
+## Use from ChatGPT
 
-## Boundaries
+Open **Administration → ChatGPT / MCP** on your private dashboard.
+Complete the guarded port migration if prompted, then opt in to
+**Enable MCP connection**. Copy the public HTTPS URL. In the ChatGPT Web
+custom MCP setup, enter that URL and select **No authentication** for
+this deliberately constrained test. Verify `devstack_status`, then
+`devstack_ping(value="connected")`, then another status to confirm
+`last_ping`. The gateway remains bound to localhost 8768.
 
-- No new controller daemon or Unix IPC permissions for MCP. The unauthenticated
-  gateway calls **only** local Web `/healthz`, which already reaches controller
-  IPC; no project names, logs, repository config or shell commands are exposed.
-- `devstack_status` returns installed gateway wheel version, coarse live
-  controller state, and the last short ping. `devstack_ping(value)` returns
-  a matching pong and stores value **only in process memory**, shared with
-  other public callers and lost on restart. Never send secrets.
-- A root helper accepts only `enable` and `disable` request markers; it
-  validates pinned Tailscale identity and exact known Serve/Funnel routes
-  before making changes. On unknown routes, it fails closed.
-- The persistent background route and systemd gateway restart automatically
-  across host restarts **until disabled**. The user controls exposure in the UI.
-- The first release does not provide OAuth, per-user permissions or a centrally
-  hosted plugin. Do not add privileged real DevStack tools without authentication.
+Without independent authentication, the publicly exposed tools are
+limited to coarse controller health and an ephemeral diagnostic ping.
+There is no project, filesystem, log, Docker or controller execution
+authority and there must not be one without a new authenticated design.
 
-## Troubleshooting
+## Diagnostics and recovery
 
-The browser displays queued state and bounded result codes from the host
-broker. If Tailscale reports `host_command_failed`, check device connectivity,
-Funnel eligibility/policy and whether the tailnet's HTTPS feature is enabled.
-If you have manually edited Tailscale Serve/Funnel, an unknown-route error
-means DevStack refused to replace foreign configuration. MCP lifecycle, health and failure events appear in Administration →
-DevStack diagnostics, which offers 1/5/30-minute views and a copyable
-snapshot. Do not request SSH for routine MCP/Tailscale troubleshooting.
-Only use host recovery when the Web diagnostic surface itself cannot function.
+The private Web UI provides all routine lifecycle and error handling;
+there is no routine SSH prerequisite. Operations are literal bounded
+commands through the existing verified root watcher. Administration →
+DevStack diagnostics provides 1/5/30-minute redacted, copyable events.
 
-## Development
+A configured Funnel route **does not prove** off-tailnet TLS, MCP
+initialization, tool discovery or ChatGPT client access. Test externally
+with MCP `initialize` and `tools/list` and record the HTTP/TLS outcome.
+Issue #101 tracks earlier mixed results from Tailscale client 1.104.2;
+simply switching ports does not establish that the upstream behavior
+is resolved. If the new external port fails, keep private 8443 intact
+and use Web-only diagnostics to identify TLS versus MCP failures.
 
-Unit tests cover the fixed action request contract and the verified
-Serve/Funnel configuration state machine using mocked Tailscale/systemd commands.
-End-to-end CI exercises the real MCP → Web → controller IPC health path.
-Real public ingress still needs a host with Tailscale and a supported ChatGPT
-client; CI does not assert cloud ChatGPT connectivity.
+Tailscale strips mounted prefixes with `--set-path`, so the proxy
+target includes `/mcp` to reconstruct the expected backend path.
 
-Official Tailscale documentation: https://tailscale.com/docs/reference/tailscale-cli/funnel
-
-The root diagnostic collector samples only the two dedicated MCP systemd
-units once per minute, emitting fixed-schema events, without exposing arbitrary
-journal entries or request parameters. SDK/internal crashes appear as generic
-MCP process-error events; explicit gateway and Funnel failures use safe codes.
-
-The new diagnostic unit is a root-owned **read-only journal collector**, limited
-to the MCP gateway and MCP apply services. It refreshes its safe JSON snapshot
-every minute. If the collector fails or becomes stale, source coverage becomes
-`mcp=unavailable` rather than quietly hiding failures. The browser never
-requests arbitrary host logs and never needs shell access to collect them.
-
-## v0.7.1 field hotfix
-
-The v0.7.0 Enable MCP action could fail before Funnel with
-`request_failed`, accompanied by `web=unavailable` diagnostic coverage.
-The MCP request is now queued in the existing, verified private Web
-RuntimeDirectory (`/run/devstack-update-request/mcp-action`), separate from
-the updater's `trigger` marker. The installer replaces the fixed systemd.path
-unit to watch the new marker. No operator SSH or manual permission repair.
-
-The Web diagnostics ring prefers its persistent state and falls back to
-`/run/devstack-update-request/web-diagnostics.sqlite3` when unavailable.
-The UI reports `partial (volatile fallback)` when its persistent storage is
-unavailable. The MCP Web screen identifies queue-readiness and reports
-permission, read-only storage or capacity errors instead of a generic
-request failure. The marker path and underlying operator checks are covered
-by automated host permission tests.
-
-## v0.7.2 — First live Funnel failure diagnosis
-
-The first deployed v0.7.1 connection successfully queued the Web action and
-started the MCP gateway, but the subsequent `tailscale funnel` command ended
-with `funnel_command_failed` after approximately 45 seconds. The existing
-45-second subprocess timeout was not distinguished from an ordinary CLI
-rejection, so this is consistent with a setup timeout **but not proof of the
-underlying cause**.
-
-Funnel setup now reports separate safe error codes for timeout, missing Funnel
-permission, HTTPS configuration, certificate issuance, occupied port, and
-other CLI failures. The Administration screen shows actionable advice and a
-link to the Tailscale admin console when appropriate. The diagnostic snapshot
-includes the bounded error code; no raw CLI stderr, tokens, certificate data,
-or privileged system journal is exposed. Failed startup still attempts to
-remove only the verified MCP route and stops the MCP gateway. The original
-failure category is preserved even if cleanup also fails. No SSH is required
-to inspect failures or retry the Web UI action.
+Official reference: https://tailscale.com/docs/reference/tailscale-cli/funnel
