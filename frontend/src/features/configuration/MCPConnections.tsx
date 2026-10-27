@@ -23,6 +23,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [acceptedWebhookDisable, setAcceptedWebhookDisable] = useState(false);
+  const [acceptedWebhookEnable, setAcceptedWebhookEnable] = useState(false);
   const [error, setError] = useState<string|null>(null);
   const [feedback, setFeedback] = useState<string|null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string|null>(null);
@@ -30,13 +31,13 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const state = useResource(load, 5000);
   const current = state.kind==="ready"?state.data:null;
   const enabled = current?.funnel==="enabled";
-  const request = async(action:"enable"|"disable"|"migrate"|"disable_webhooks")=>{
-    if(busy||(action==="enable"&&!accepted)||(action==="disable_webhooks"&&!acceptedWebhookDisable))return;
+  const request = async(action:"enable"|"disable"|"migrate"|"disable_webhooks"|"enable_webhooks")=>{
+    if(busy||(action==="enable"&&!accepted)||(action==="disable_webhooks"&&!acceptedWebhookDisable)||(action==="enable_webhooks"&&!acceptedWebhookEnable))return;
     setBusy(true);setError(null);setFeedback(null);
     try {
       const response = await requestMCPAction(action);
       setFeedback(response.message + ". Status will refresh automatically.");
-      setAccepted(false);setAcceptedWebhookDisable(false);setSerial(s=>s+1);
+      setAccepted(false);setAcceptedWebhookDisable(false);setAcceptedWebhookEnable(false);setSerial(s=>s+1);
     } catch (e) { setError(message(e)); }
     finally {setBusy(false);}
   };
@@ -142,6 +143,29 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
               Open Tailscale administration</a></p>}
         </Notice>}
     </section>
+    {current?.network_phase==="new"&&<section className="card">
+      <h2>Public webhook ingress</h2>
+      <p>Public Funnel HTTPS :443 routes only <code>/hooks/*</code> to
+        the existing webhook-only listener. Provider signatures still need validation.
+        This does not publish the DevStack dashboard.</p>
+      <div className="property"><span>Webhooks</span><strong>{current.webhooks_enabled?"enabled":"disabled"}</strong></div>
+      {!current.webhooks_enabled&&<label className="confirm-label">
+        <input type="checkbox" checked={acceptedWebhookEnable}
+          onChange={e=>setAcceptedWebhookEnable(e.target.checked)}/>
+        I understand this will allow public webhook requests on HTTPS 443.
+      </label>}
+      {current.webhooks_enabled&&<label className="confirm-label">
+        <input type="checkbox" checked={acceptedWebhookDisable}
+          onChange={e=>setAcceptedWebhookDisable(e.target.checked)}/>
+        I understand disabling public ingress interrupts existing webhook callbacks.
+      </label>}
+      <div className="actions"><button type="button" className="text-button"
+        disabled={busy||current.request_pending||
+          (current.webhooks_enabled?!acceptedWebhookDisable:!acceptedWebhookEnable)}
+        onClick={()=>void request(current.webhooks_enabled?"disable_webhooks":"enable_webhooks")}>
+        {current.webhooks_enabled?"Disable public webhooks":"Enable public webhooks"}
+      </button></div>
+    </section>}
     <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL and add it
       as a custom MCP server in ChatGPT web, choosing No authentication when available.
       Test devstack_status and devstack_ping. Plugin availability and remote HTTPS support depend on your ChatGPT account and client. You may need to approve
