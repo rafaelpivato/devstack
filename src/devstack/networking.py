@@ -182,18 +182,29 @@ def prepare():
     run_command("systemctl", "enable", "devstack-network-reconcile.timer", timeout=30)
 
 
-def _public_env(host: str, prefs: dict):
-    _atomic(ENV_FILE,
-            "DEVSTACK_MCP_PUBLIC_HOST=" + host + "\n"
-            + "DEVSTACK_PUBLIC_MCP=" + str(int(prefs["mcp"])) + "\n"
-            + "DEVSTACK_PUBLIC_WEBHOOKS=" + str(int(prefs["webhooks"])) + "\n")
+def _public_env(host: str, prefs: dict) -> bool:
+    value = ("DEVSTACK_MCP_PUBLIC_HOST=" + host + "\n"
+             + "DEVSTACK_PUBLIC_MCP=" + str(int(prefs["mcp"])) + "\n"
+             + "DEVSTACK_PUBLIC_WEBHOOKS=" + str(int(prefs["webhooks"])) + "\n")
+    try:
+        if ENV_FILE.read_text(encoding="utf-8") == value:
+            return False
+    except FileNotFoundError:
+        pass
+    _atomic(ENV_FILE, value)
+    return True
 
 
 def _ready_public(host: str, prefs: dict):
-    """Service code and route flags activated before publishing external 443."""
-    _public_env(host, prefs)
+    """Start only when necessary; do not reset MCP state on every timer tick."""
+    changed = _public_env(host, prefs)
     run_command("systemctl", "enable", "devstack-public.service", timeout=20)
-    run_command("systemctl", "restart", "devstack-public.service", timeout=40)
+    try:
+        active = run_command("systemctl", "is-active", "devstack-public.service").strip() == "active"
+    except MCPManagementError:
+        active = False
+    if changed or not active:
+        run_command("systemctl", "restart", "devstack-public.service", timeout=40)
     from urllib.request import urlopen
     import time
     for _ in range(30):
