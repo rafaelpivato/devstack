@@ -39,7 +39,8 @@ recommend remote sessions as the ordinary troubleshooting path.
 An unauthenticated public MCP test may expose only the bounded status and
 ephemeral ping tools. Network migration #102 moves the private dashboard to Serve :8443 and
 public MCP/webhook integration paths to Funnel :443. **Never publish 443
-while any private dashboard handler remains there**. The fixed Web-first
-broker must reject unknown states and preserve private access across cutover. Privileged MCP project or host
+while any private dashboard handler remains there**. The root-owned release reconciler and Web-controlled public opt-in broker
+must reject unknown states and preserve private access across **automatic**
+cutover. Do not add interactive one-time migration actions. Privileged MCP project or host
 operations require independent authentication and controller-side authority
 before they may be enabled.

@@ -14,7 +14,21 @@ The React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks 
 - Per-project webhooks are constrained to the active project and generation; optional Funnel is separate from the private dashboard.
 - Tailscale provides private access. Compose services may publish explicit TCP mappings on the host's Tailscale IPv4 and DevStack displays their direct URLs. **No additional reverse-proxy daemon or automatic public application port publication.**
 
-## HTTPS ingress\n\nPrivate dashboard: tailnet-only Tailscale Serve **8443**. Public MCP/webhooks: opt-in Tailscale Funnel **443**, explicitly restricted to their URL paths. No public dashboard route. Existing v0.7.2 installs require a guarded Web-console cutover. See [HTTPS ingress](docs/public-ingress.md).\n\n## Main workflows
+## HTTPS ingress
+
+DevStack uses two HTTP-facing native systemd services behind Tailscale:
+private dashboard via **Serve HTTPS 8443**, and opt-in public MCP/webhooks
+via **Funnel HTTPS 443** to one unprivileged `devstack-public` application.
+The controller is internal and Docker-privileged; public webhook payloads
+go directly to the approved project container, using a narrow authorization
+socket. No additional reverse proxy or infrastructure container is needed.
+
+Existing v0.7.2 installations receive an **automatic** port migration from
+the trusted release postinstall hook. After upgrading, open the dashboard
+with `:8443`; no migration button or SSH is required. See
+[networking and upgrade details](docs/public-ingress.md).
+
+## Main workflows
 
 Create or import projects from GitHub, register multiple repositories per project, inspect repository status, safely update them individually or in a single background batch, and preview/confirm per-repository or project-wide Git branch switches. If a requested branch does not exist in a repository, switching falls back to that repository's **verified remote default branch**; unsafe local changes are never discarded.
 
