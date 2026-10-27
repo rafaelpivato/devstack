@@ -26,7 +26,7 @@ _PATH = re.compile(r"/[A-Za-z0-9_./~-]{0,254}\Z")
 _MAX_BODY = 256 * 1024
 _HEADERS = {"content-type", "stripe-signature", "x-github-event",
             "x-github-delivery", "x-hub-signature-256",
-            "x-shopify-hmac-sha256", "x-webhook-signature"}
+            "x-shopify-hmac-sha256", "x-webhook-signature", "x-twilio-signature"}
 
 
 class WebhookNotFound(LookupError):

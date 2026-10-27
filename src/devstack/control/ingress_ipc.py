@@ -51,6 +51,9 @@ class IngressControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamS
         super().__init__(str(self.location), _Handler)
         self.ingress = ingress
         try:
+            # Socket itself stays group-restricted; allow directory traversal
+            # without opening the separate admin socket to this public group.
+            os.chmod(self.location.parent, 0o755)
             os.chmod(self.location, 0o660)
             if group:
                 os.chown(self.location, -1, grp.getgrnam(group).gr_gid)
