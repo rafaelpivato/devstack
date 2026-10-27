@@ -22,6 +22,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const [serial, setSerial] = useState(0);
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [acceptedWebhookDisable, setAcceptedWebhookDisable] = useState(false);
   const [error, setError] = useState<string|null>(null);
   const [feedback, setFeedback] = useState<string|null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string|null>(null);
@@ -29,13 +30,13 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const state = useResource(load, 5000);
   const current = state.kind==="ready"?state.data:null;
   const enabled = current?.funnel==="enabled";
-  const request = async(action:"enable"|"disable"|"migrate")=>{
-    if(busy||(action==="enable"&&!accepted))return;
+  const request = async(action:"enable"|"disable"|"migrate"|"disable_webhooks")=>{
+    if(busy||(action==="enable"&&!accepted)||(action==="disable_webhooks"&&!acceptedWebhookDisable))return;
     setBusy(true);setError(null);setFeedback(null);
     try {
       const response = await requestMCPAction(action);
       setFeedback(response.message + ". Status will refresh automatically.");
-      setAccepted(false);setSerial(s=>s+1);
+      setAccepted(false);setAcceptedWebhookDisable(false);setSerial(s=>s+1);
     } catch (e) { setError(message(e)); }
     finally {setBusy(false);}
   };
@@ -89,8 +90,20 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       <pre className="log-view" style={{overflowWrap:"anywhere",whiteSpace:"pre-wrap"}}>{current.network_phase==="legacy"
         ? (current.private_url?.slice(0,-1) ?? "") + ":8443/"
         : current.private_url}</pre>
+      {current.legacy_webhooks_active&&<div>
+        <p><strong>Legacy webhook ingress is currently enabled.</strong> Existing
+          external callbacks on :8443 will stop working when you disable it.
+          Update each provider to its new :443 URL only after migration.</p>
+        <label className="confirm-label"><input type="checkbox" checked={acceptedWebhookDisable}
+          onChange={e=>setAcceptedWebhookDisable(e.target.checked)}/>
+          I understand existing webhook callbacks will stop until their URLs are updated.
+        </label>
+        <p className="actions"><button type="button" className="text-button"
+          disabled={busy||current.request_pending||!acceptedWebhookDisable}
+          onClick={()=>void request("disable_webhooks")}>Disable legacy public webhooks</button></p>
+      </div>}
       <p className="actions"><button type="button" className="primary-button"
-        disabled={busy||current.request_pending||current.network_phase==="unknown"}
+        disabled={busy||current.request_pending||current.network_phase==="unknown"||current.legacy_webhooks_active}
         onClick={()=>void request("migrate")}>Migrate HTTPS ports</button></p>
     </Notice>}
     {!enabled&&!current?.migration_required&&<label className="confirm-label"><input type="checkbox"
