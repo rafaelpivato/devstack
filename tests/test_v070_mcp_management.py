@@ -34,6 +34,17 @@ def served(webhooks=False, mcp=False):
 
 
 class ServeStateTests(unittest.TestCase):
+    def test_accept_new_private_and_public_topology(self):
+        from devstack.tailscale_layout import config
+        for hooks in (False, True):
+            for mcp in (False, True):
+                with self.subTest(hooks=hooks, mcp=mcp):
+                    self.assertEqual(
+                        manage.serve_state(HOST, config(HOST, private="8443",
+                                                        webhooks=hooks, mcp=mcp)),
+                        (hooks, mcp),
+                    )
+
     def test_accept_private_and_managed_optional_routes(self):
         for hooks in (False, True):
             for mcp in (False, True):
@@ -122,7 +133,7 @@ class FunnelErrorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, \
              patch.object(manage, "ENV_FILE", Path(folder) / "gateway.env"), \
              patch.object(manage, "pinned_hostname", return_value=HOST), \
-             patch.object(manage, "verify_state", return_value=(False, False)), \
+             patch.object(manage, "topology", return_value=__import__("devstack.tailscale_layout", fromlist=["Topology"]).Topology("new", False, False)), \
              patch.object(manage, "run_command", side_effect=run), \
              patch("socket.create_connection") as connection, \
              patch.object(manage, "log_event") as logger:
