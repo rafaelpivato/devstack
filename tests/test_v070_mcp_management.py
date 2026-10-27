@@ -234,6 +234,14 @@ class WebAPIContractTests(unittest.TestCase):
                                               json={"cmd": "sh"}, headers=headers).status_code, 400)
             request.assert_called_once()
 
+    def test_legacy_webhook_disable_is_csrf_guarded(self):
+        with patch("devstack.api.http.request_mcp_action") as request:
+            url = "/api/v2/devstack/mcp/disable_webhooks"
+            self.assertEqual(self.client.post(url, json={}).status_code, 403)
+            self.assertEqual(self.client.post(url, json={},
+                headers={"X-CSRF-Token": "token"}).status_code, 202)
+            request.assert_called_once_with("disable_webhooks")
+
     def test_status_has_no_sensitive_fields(self):
         safe={"gateway":"stopped","funnel":"disabled","url":None,
               "request_pending":False,"request_state":"ready","last_result":None,"installed":True}

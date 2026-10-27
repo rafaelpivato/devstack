@@ -92,6 +92,27 @@ class MigrationTests(unittest.TestCase):
         self.assertIn("--set-path=/mcp", commands[2])
         self.assertIn(MCP_PUBLIC, commands[2])
 
+    @patch.object(manage, "log_event")
+    @patch.object(manage, "run_command")
+    @patch.object(manage, "topology")
+    @patch.object(manage, "pinned_hostname", return_value=HOST)
+    def test_operator_can_disable_legacy_webhooks_without_mcp_loss(self, pin, topology, command, event):
+        topology.side_effect = [Topology("legacy", True, True),
+                                Topology("legacy", False, True)]
+        self.assertEqual(manage.apply_action("disable_webhooks"), "webhooks_disabled")
+        command.assert_called_once_with("tailscale", "funnel", "--https=8443",
+                                         "off", timeout=30)
+        event.assert_called_with("legacy_webhooks_disabled")
+
+    @patch.object(manage, "run_command")
+    @patch.object(manage, "topology", return_value=Topology("new", False, True))
+    @patch.object(manage, "pinned_hostname", return_value=HOST)
+    def test_disable_legacy_webhooks_never_touches_new_public_443(self, pin, topology, command):
+        with self.assertRaises(manage.MCPManagementError) as ctx:
+            manage.apply_action("disable_webhooks")
+        self.assertEqual(ctx.exception.code, "legacy_webhooks_not_active")
+        command.assert_not_called()
+
     @patch.object(manage, "run_command")
     @patch.object(manage, "topology", return_value=Topology("legacy", True, False))
     def test_active_legacy_webhooks_block_cutover(self, topology, command):
