@@ -12,6 +12,9 @@ const FUNNEL_FIXES: Record<string,string> = {
   funnel_https_required: "Enable MagicDNS and HTTPS certificates for your tailnet in the Tailscale admin console, then retry.",
   funnel_certificate_failed: "Tailscale could not issue its HTTPS certificate. Check the tailnet HTTPS settings and certificate rate limits before retrying.",
   funnel_port_in_use: "Tailscale reports that the MCP port is already occupied. DevStack will not overwrite another service or an unknown route.",
+  migration_required: "Use Migrate HTTPS ports first. The public :443 endpoint must never contain a private dashboard handler.",
+  migration_incomplete: "The cutover is incomplete. Private :8443 should remain available; retry migration from the dashboard.",
+  legacy_webhooks_must_be_disabled: "Existing public webhooks on :8443 must be turned off before this migration. Their callback URL will change to HTTPS :443.",
   funnel_command_failed: "Tailscale rejected the Funnel operation for an unclassified reason. Copy the MCP diagnostic snapshot to report it; DevStack does not disclose raw host logs.",
 };
 
@@ -26,7 +29,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const state = useResource(load, 5000);
   const current = state.kind==="ready"?state.data:null;
   const enabled = current?.funnel==="enabled";
-  const request = async(action:"enable"|"disable")=>{
+  const request = async(action:"enable"|"disable"|"migrate")=>{
     if(busy||(action==="enable"&&!accepted))return;
     setBusy(true);setError(null);setFeedback(null);
     try {
@@ -56,6 +59,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       </div>
       <div className="property"><span>Public Funnel</span><Status text={current.funnel}
         kind={enabled?"positive":current.funnel==="unknown"?"warning":"neutral"}/></div>
+      {current.private_url&&<div className="property"><span>Private dashboard</span><strong style={{overflowWrap:"anywhere"}}>{current.private_url}</strong></div>}
       {current.request_pending&&<p role="status">Applying your request…</p>}
       {current.request_state!=="ready"&&<Notice title="Request queue unavailable" role="alert">
         DevStack cannot currently queue MCP actions ({current.request_state.replaceAll("_"," ")}).
@@ -75,13 +79,22 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     {current?.funnel==="unknown"&&<Notice title="Cannot verify Tailscale">
       Check that Tailscale is connected and private Serve is configured. DevStack will refuse
       to overwrite any unrecognized Serve or Funnel routes.</Notice>}
-    {!enabled&&<label className="confirm-label"><input type="checkbox"
+    {current?.migration_required&&<Notice title="Network migration required">
+      Move the private dashboard to HTTPS :8443 before enabling public HTTPS :443.
+      This action preserves private access and rejects unknown Tailscale routes.
+      Existing public webhooks on :8443 must be disabled and external callback URLs
+      updated separately before migration. The dashboard address changes.
+      <p className="actions"><button type="button" className="primary-button"
+        disabled={busy||current.request_pending||current.network_phase==="unknown"}
+        onClick={()=>void request("migrate")}>Migrate HTTPS ports</button></p>
+    </Notice>}
+    {!enabled&&!current?.migration_required&&<label className="confirm-label"><input type="checkbox"
       checked={accepted} onChange={e=>setAccepted(e.target.checked)}/>
       I understand this temporarily exposes the unauthenticated status and ping tools publicly.
     </label>}
     <div className="actions">
       <button type="button" className="primary-button"
-        disabled={!current?.installed || busy || current?.request_pending || enabled || !accepted}
+        disabled={!current?.installed || busy || current?.request_pending || enabled || !accepted || current?.network_phase!=="new"}
         onClick={()=>void request("enable")}>{busy?"Working…":"Enable MCP connection"}</button>
       <button type="button" className="text-button"
         disabled={!current?.installed || busy || current?.request_pending}
@@ -113,8 +126,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     </section>
     <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL and add it
       as a custom MCP server in ChatGPT web, choosing No authentication when available.
-      Test devstack_status and devstack_ping. Plugin availability and public HTTPS port
-      10000 support depend on your ChatGPT account and client. You may need to approve
+      Test devstack_status and devstack_ping. Plugin availability and remote HTTPS support depend on your ChatGPT account and client. You may need to approve
       Funnel in the Tailscale administration console on first use.</Notice>
     <p className="actions"><NavLink to={ADMIN_ROOT} navigate={navigation.navigate}>Administration →</NavLink></p>
   </Shell>;

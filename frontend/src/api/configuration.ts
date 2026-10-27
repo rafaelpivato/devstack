@@ -70,9 +70,10 @@ export function validateCollection(value:unknown):value is SettingsCollection {
 
 export interface MCPStatus {
   gateway:"running"|"stopped";funnel:"enabled"|"disabled"|"unknown";
-  url:string|null; request_pending:boolean; request_state:string; last_result:string|null; installed:boolean;
+  url:string|null; private_url?:string|null; network_phase?:string; migration_required?:boolean;
+  request_pending:boolean; request_state:string; last_result:string|null; installed:boolean;
 }
 export const readMCPStatus=(signal?:AbortSignal)=>
   apiRequest<MCPStatus>("/api/v2/devstack/mcp",{signal});
-export const requestMCPAction=(action:"enable"|"disable")=>
+export const requestMCPAction=(action:"enable"|"disable"|"migrate")=>
   apiRequest<{message:string;request_pending:true}>("/api/v2/devstack/mcp/"+action,{method:"POST",body:{}});
