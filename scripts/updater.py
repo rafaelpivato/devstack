@@ -375,6 +375,14 @@ def activate(
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             print(f"DevStack network migration pending: {type(exc).__name__}",
                   file=sys.stderr, flush=True)
+        # The timer is deliberately enabled but NOT started at --prepare time,
+        # to prevent a concurrent cutover while controller units are restarting.
+        try:
+            execute("systemctl", "start",
+                    "devstack-network-reconcile.timer", timeout=20)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            print("DevStack network retry timer unavailable", file=sys.stderr,
+                  flush=True)
     try:
         execute("systemctl", "try-restart", "devstack-bootstrap.service", timeout=30)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:

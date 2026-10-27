@@ -179,7 +179,7 @@ def prepare():
             raise MCPManagementError("unit_collision")
         _atomic(target, body)
     run_command("systemctl", "daemon-reload", timeout=30)
-    run_command("systemctl", "enable", "--now", "devstack-network-reconcile.timer", timeout=30)
+    run_command("systemctl", "enable", "devstack-network-reconcile.timer", timeout=30)
 
 
 def _public_env(host: str, prefs: dict):
