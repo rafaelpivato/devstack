@@ -16,7 +16,8 @@ import subprocess
 import tempfile
 
 from devstack.mcp_management import (MCPManagementError, pinned_hostname,
-                                      json_command, run_command, log_event)
+                                      hostname_from_status, json_command,
+                                      run_command, log_event)
 
 PREFS = Path("/var/lib/devstack/public-ingress.json")
 ENV_FILE = Path("/etc/devstack-public.env")
@@ -157,7 +158,9 @@ def _atomic(path: Path, content: str, mode=0o644):
 def write_preferences(settings: dict):
     if set(settings) != {"mcp", "webhooks"} or any(type(v) is not bool for v in settings.values()):
         raise MCPManagementError("preferences_invalid")
-    _atomic(PREFS, json.dumps(settings, separators=(",", ":")) + "\n", 0o600)
+    # Public/private enablement bits contain no credentials; Web needs read-only
+    # visibility without access to Tailscale's root-only identity pin.
+    _atomic(PREFS, json.dumps(settings, separators=(",", ":")) + "\n", 0o644)
 
 
 def prepare():
@@ -302,7 +305,9 @@ def update_preferences(name: str, enabled: bool):
 
 def summary():
     try:
-        host = pinned_hostname()
+        # Status runs under the unprivileged Web identity. Do not read the
+        # root-only PIN_FILE here; mutating reconcile() still requires it.
+        host = hostname_from_status(json_command("tailscale", "status", "--json"))
         phase, legacy_hooks, legacy_mcp = state(host)
         prefs = read_preferences()
         if prefs is None:
