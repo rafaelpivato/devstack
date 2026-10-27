@@ -56,7 +56,16 @@ class IngressControlServer(socketserver.ThreadingMixIn, socketserver.UnixStreamS
             os.chmod(self.location.parent, 0o755)
             os.chmod(self.location, 0o660)
             if group:
-                os.chown(self.location, -1, grp.getgrnam(group).gr_gid)
+                try:
+                    gid = grp.getgrnam(group).gr_gid
+                except KeyError:
+                    # First v0.7.2 -> v0.7.3 activation runs via an older
+                    # updater. Its release-owned postinstall hook creates the
+                    # dedicated group and restarts the controller shortly.
+                    # Do not prevent local controller health before that hook.
+                    gid = None
+                if gid is not None:
+                    os.chown(self.location, -1, gid)
         except Exception:
             self.server_close()
             raise
