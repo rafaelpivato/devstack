@@ -35,7 +35,10 @@ class NetworkStates(unittest.TestCase):
                     handlers = raw["Web"][HOST + ":443"]["Handlers"]
                     self.assertEqual(handlers, {"/": {"Proxy": networking.PUBLIC}})
                     self.assertNotIn(networking.PRIVATE, str(handlers))
-                    self.assertEqual(raw["AllowFunnel"], {HOST + ":443": True})
+                    expected_public = {HOST + ":443": True}
+                    if old_mcp:
+                        expected_public[HOST + ":10000"] = True
+                    self.assertEqual(raw["AllowFunnel"], expected_public)
                 self.assertNotIn(HOST + ":8443", raw["AllowFunnel"])
         with self.assertRaises(networking.MCPManagementError):
             networking.classify(HOST, {"Web": {HOST + ":443": {
