@@ -45,6 +45,7 @@ class NetworkStates(unittest.TestCase):
                 "Handlers": {"/": {"Proxy": networking.PRIVATE}}}},
                 "AllowFunnel": {HOST + ":443": True}})
 
+    @patch.object(networking, "network_lock")
     @patch.object(networking, "log_event")
     @patch.object(networking, "_finish_bootstrap")
     @patch.object(networking, "_ready_public")
@@ -54,7 +55,7 @@ class NetworkStates(unittest.TestCase):
     @patch.object(networking, "state")
     @patch.object(networking, "pinned_hostname", return_value=HOST)
     def test_automatic_migration_from_both_legacy_public_routes(
-            self, pin, state, command, read, write, public, finish, log):
+            self, pin, state, command, read, write, public, finish, log, lock):
         state.side_effect = [
             ("legacy", True, True),
             ("legacy", False, True),
@@ -63,6 +64,8 @@ class NetworkStates(unittest.TestCase):
             ("public_ready", False, True),
             ("new", False, False),
         ]
+        from contextlib import nullcontext
+        lock.return_value = nullcontext()
         self.assertEqual(networking.reconcile(), "network_reconciled")
         write.assert_called_once_with({"mcp": True, "webhooks": True})
         command_args = [call.args for call in command.call_args_list]

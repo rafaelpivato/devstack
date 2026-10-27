@@ -7,6 +7,8 @@ unknown handler nor the private dashboard can be published via Funnel.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -20,6 +22,7 @@ from devstack.mcp_management import (MCPManagementError, pinned_hostname,
                                       run_command, log_event)
 
 PREFS = Path("/var/lib/devstack/public-ingress.json")
+LOCK_FILE = Path("/run/devstack-network-reconcile.lock")
 ENV_FILE = Path("/etc/devstack-public.env")
 PRIVATE = "http://127.0.0.1:8765"
 PUBLIC = "http://127.0.0.1:8768"
@@ -229,7 +232,26 @@ def _finish_bootstrap():
                 "devstack-tailscale-finish.timer", timeout=15)
 
 
+@contextmanager
+def network_lock():
+    """Serialize updater, timer, and root-broker route changes."""
+    if LOCK_FILE.is_symlink():
+        raise MCPManagementError("network_lock_unsafe")
+    fd = os.open(LOCK_FILE, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def reconcile():
+    with network_lock():
+        return _reconcile_locked()
+
+
+def _reconcile_locked():
     """Bounded migration, safely repeatable after every interrupted checkpoint."""
     try:
         host = pinned_hostname()
@@ -295,12 +317,13 @@ def reconcile():
 def update_preferences(name: str, enabled: bool):
     if name not in ("mcp", "webhooks") or type(enabled) is not bool:
         raise MCPManagementError("invalid_action")
-    current = read_preferences()
-    if current is None:
-        raise MCPManagementError("network_not_installed")
-    current[name] = enabled
-    write_preferences(current)
-    return reconcile()
+    with network_lock():
+        current = read_preferences()
+        if current is None:
+            raise MCPManagementError("network_not_installed")
+        current[name] = enabled
+        write_preferences(current)
+        return _reconcile_locked()
 
 
 def summary():
