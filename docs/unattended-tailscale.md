@@ -28,10 +28,10 @@ authentication.
    certificates or first-use consent, complete that in the Tailscale admin
    console. The timer retries configuration without re-enrolling the device.
 6. Install the Tailscale app on your phone, join the same tailnet, and open
-   the machine's `https://<device>.<tailnet>.ts.net` address from Machines.
+   the machine's `https://<device>.<tailnet>.ts.net:8443/` address from Machines.
 
 Devstack itself stays on `127.0.0.1:8765`. Do not expose that port publicly
-or use Tailscale Funnel. Limit tailnet access to yourself.
+or make it a Funnel target. Funnel is a separately opt-in public listener\non HTTPS 443 for explicit integration paths only. Limit tailnet access to yourself.
 
 ## First-use security
 

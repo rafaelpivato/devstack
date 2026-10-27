@@ -67,10 +67,10 @@ def is_empty_serve(status: dict[str, Any]) -> bool:
             and not any(status.values()))
 
 
-def is_our_private_serve(status: dict[str, Any]) -> bool:
+def is_our_private_serve(status: dict[str, Any], port: int = 8443) -> bool:
     if set(status) - {"TCP", "Web", "AllowFunnel"}:
         return False
-    if status.get("TCP") != {"443": {"HTTPS": True}}:
+    if status.get("TCP") != {str(port): {"HTTPS": True}}:
         return False
     if any((status.get("AllowFunnel") or {}).values()):
         return False  # Do not treat a public Funnel as authenticated/private.
@@ -124,16 +124,18 @@ def configure() -> str:
     hostname = connected_hostname(status)
     pin_initial_identity(status)
     serve_state = parse_json(run_cli("serve", "status", "--json"))
-    if is_our_private_serve(serve_state):
-        return f"Private dashboard already configured: https://{hostname}/"
+    if is_our_private_serve(serve_state, 8443):
+        return f"Private dashboard already configured: https://{hostname}:8443/"
+    if is_our_private_serve(serve_state, 443):
+        return f"Legacy private dashboard retained at https://{hostname}/; migrate from the DevStack Web UI"
     if not is_empty_serve(serve_state):
         raise PrivateAccessError(
             "Existing Tailscale Serve/Funnel configuration detected; "
             "refusing to replace or expose it. Review 'tailscale serve status'."
         )
     # Serve, not Funnel: reachable only within the permitted tailnet.
-    run_cli("serve", "--bg", "--https=443", LOCAL_TARGET)
-    return f"Private dashboard: https://{hostname}/"
+    run_cli("serve", "--bg", "--https=8443", LOCAL_TARGET)
+    return f"Private dashboard: https://{hostname}:8443/"
 
 
 def finish_if_connected() -> str:

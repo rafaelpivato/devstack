@@ -142,14 +142,38 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("root is required for CLI setup (use sudo)")
     try:
         created = install_command(root=args.root)
+        # This can reject an unexpected standalone updater. Run before any
+        # Tailscale mutation, so the old release updater can safely roll back
+        # application code if this trust preflight fails.
+        refreshed = refresh_updater(args.root) if (
+            args.refresh_updater or args.root == DEFAULT_ROOT) else False
         if args.root == DEFAULT_ROOT:
-            # The already-authorized root release updater calls this hook on
-            # every wheel activation; install fixed MCP units once, disabled.
+            # The previously installed (v0.7.2) updater invokes THIS wheel's
+            # hook even though that updater knows nothing about networking.
+            # Bootstrap dedicated public group/units, then restart controller
+            # so its restricted ingress socket inherits the new group.
+            from devstack.networking import prepare, reconcile
+            prepare()
+            subprocess.run(["systemctl", "restart", "devstack-control.service"],
+                           check=True, timeout=45)
             from devstack.mcp_management import install_units
             install_units()
+            # A temporary Tailscale failure is not an app rollback: the
+            # reconcile timer retries without exposing the private dashboard.
+            try:
+                reconcile()
+            except Exception as exc:
+                print("dev: network reconciliation pending: "
+                      + type(exc).__name__, file=sys.stderr, flush=True)
+            try:
+                subprocess.run(["systemctl", "start",
+                                "devstack-network-reconcile.timer"],
+                               check=True, timeout=20)
+            except (OSError, subprocess.SubprocessError):
+                print("dev: network retry timer unavailable",
+                      file=sys.stderr, flush=True)
         if args.user:
             authorize_operator(args.user)
-        refreshed = refresh_updater(args.root) if args.refresh_updater else False
     except (CLIInstallError, OSError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"dev: setup failed: {exc}\n")
     print("dev: command ready" + (" (already installed)" if not created else ""))

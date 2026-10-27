@@ -1,6 +1,6 @@
 # DevStack
 
-**Latest published: v0.7.1. Next planned: v0.7.2 MCP Funnel diagnostics hotfix.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.7.2.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 
@@ -12,7 +12,21 @@ The React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks 
 - `devstack-web-v2`: unprivileged mobile dashboard and read-only/project-scoped JSON API. This process cannot access Docker or the private project database directly.
 - Python stdlib SQLite registry with independent project repositories, Compose/app/task definitions and durable job histories.
 - Per-project webhooks are constrained to the active project and generation; optional Funnel is separate from the private dashboard.
-- Tailscale provides private access. Compose services may publish explicit TCP mappings on the host's Tailscale IPv4 and DevStack displays their direct URLs. **No reverse proxy or automatic port publication.**
+- Tailscale provides private access. Compose services may publish explicit TCP mappings on the host's Tailscale IPv4 and DevStack displays their direct URLs. **No additional reverse-proxy daemon or automatic public application port publication.**
+
+## HTTPS ingress
+
+DevStack uses two HTTP-facing native systemd services behind Tailscale:
+private dashboard via **Serve HTTPS 8443**, and opt-in public MCP/webhooks
+via **Funnel HTTPS 443** to one unprivileged `devstack-public` application.
+The controller is internal and Docker-privileged; public webhook payloads
+go directly to the approved project container, using a narrow authorization
+socket. No additional reverse proxy or infrastructure container is needed.
+
+Existing v0.7.2 installations receive an **automatic** port migration from
+the trusted release postinstall hook. After upgrading, open the dashboard
+with `:8443`; no migration button or SSH is required. See
+[networking and upgrade details](docs/public-ingress.md).
 
 ## Main workflows
 

@@ -39,7 +39,8 @@ from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send_
 from devstack.ipc.protocol import (
     MAX_MESSAGE, ProtocolError, protocol_info, validate_request,
 )
-from .ingress import WebhookIngress, WebhookServer
+from .ingress import WebhookIngress
+from .ingress_ipc import IngressControlServer
 
 _MAX_MESSAGE = MAX_MESSAGE
 
@@ -464,7 +465,11 @@ def main():
     parser.add_argument("--socket", type=Path,
                         default=Path("/run/devstack-control/control.sock"))
     parser.add_argument("--socket-group", default=None)
-    parser.add_argument("--webhook-port", type=int, default=8767)
+    parser.add_argument("--ingress-socket", type=Path, default=None)
+    # Old CI/host invocations may still supply this port. The new public
+    # service handles HTTP, so the legacy option must never open a listener.
+    parser.add_argument("--webhook-port", type=int, default=None,
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
     with exclusive_daemon(args.state):
         database = Database(args.state / "control.sqlite3")
@@ -515,12 +520,13 @@ def main():
             sync_thread = threading.Thread(target=poll_repositories,
                                            name="devstack-git-poll", daemon=True)
             sync_thread.start()
-            with WebhookServer(controller.ingress, args.webhook_port) as public_ingress:
-                webhook_thread = threading.Thread(
-                    target=public_ingress.serve_forever,
-                    name="devstack-webhook-ingress", daemon=True,
+            ingress_socket = args.ingress_socket or args.socket.with_name("ingress.sock")
+            with IngressControlServer(ingress_socket, controller.ingress) as ingress_ipc:
+                ingress_thread = threading.Thread(
+                    target=ingress_ipc.serve_forever,
+                    name="devstack-public-authorization", daemon=True,
                 )
-                webhook_thread.start()
+                ingress_thread.start()
                 def stop(_signum, _frame):
                     threading.Thread(target=server.shutdown, daemon=True).start()
 
@@ -535,8 +541,8 @@ def main():
                         pass
                     sync_stop.set()
                     sync_thread.join(timeout=3)
-                    public_ingress.shutdown()
-                    webhook_thread.join(timeout=10)
+                    ingress_ipc.shutdown()
+                    ingress_thread.join(timeout=10)
                     try:
                         controller.coordinator.reconcile()
                     except Exception:

@@ -9,13 +9,13 @@ from scripts.private_access import (
 
 def example_serve(target=LOCAL_TARGET, funnel=False):
     return {
-        "TCP": {"443": {"HTTPS": True}},
+        "TCP": {"8443": {"HTTPS": True}},
         "Web": {
-            "devstack.example.ts.net:443": {
+            "devstack.example.ts.net:8443": {
                 "Handlers": {"/": {"Proxy": target}}
             }
         },
-        "AllowFunnel": {"devstack.example.ts.net:443": funnel},
+        "AllowFunnel": {"devstack.example.ts.net:8443": funnel},
     }
 
 
@@ -63,9 +63,9 @@ class PrivateAccessTests(unittest.TestCase):
     def test_first_time_configures_background_https(self, cli):
         cli.side_effect = [connected(), "{}", ""]
         url = configure()
-        self.assertEqual(url, "Private dashboard: https://devstack.example.ts.net/")
+        self.assertEqual(url, "Private dashboard: https://devstack.example.ts.net:8443/")
         self.assertEqual(cli.call_args_list[-1].args, (
-            "serve", "--bg", "--https=443", LOCAL_TARGET
+            "serve", "--bg", "--https=8443", LOCAL_TARGET
         ))
 
     @patch("scripts.private_access.run_cli")
@@ -89,7 +89,7 @@ class PrivateAccessTests(unittest.TestCase):
             parse_json("<html>not json</html>")
 
 
-    @patch("scripts.private_access.configure", return_value="Private dashboard: https://devstack.example.ts.net/")
+    @patch("scripts.private_access.configure", return_value="Private dashboard: https://devstack.example.ts.net:8443/")
     @patch("scripts.private_access.run_cli")
     def test_finish_after_browser_approval(self, cli, configure):
         from scripts.private_access import finish_if_connected

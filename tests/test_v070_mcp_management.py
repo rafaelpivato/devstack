@@ -34,6 +34,17 @@ def served(webhooks=False, mcp=False):
 
 
 class ServeStateTests(unittest.TestCase):
+    def test_accept_new_private_and_public_topology(self):
+        from devstack.tailscale_layout import config
+        for hooks in (False, True):
+            for mcp in (False, True):
+                with self.subTest(hooks=hooks, mcp=mcp):
+                    self.assertEqual(
+                        manage.serve_state(HOST, config(HOST, private="8443",
+                                                        webhooks=hooks, mcp=mcp)),
+                        (hooks, mcp),
+                    )
+
     def test_accept_private_and_managed_optional_routes(self):
         for hooks in (False, True):
             for mcp in (False, True):
@@ -111,26 +122,13 @@ class FunnelErrorTests(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, expected)
                 self.assertNotIn("abc123", str(ctx.exception))
 
-    def test_rollback_does_not_hide_funnel_failure(self):
-        # The gateway is live, and the first attempted Funnel action fails.
-        def run(*args, **_):
-            if args[:2] == ("tailscale", "funnel") and "off" not in args:
-                raise manage.MCPManagementError("funnel_setup_timeout")
-            if args[:2] == ("systemctl", "disable"):
-                raise manage.MCPManagementError("systemd_command_failed")
-            return ""
-        with tempfile.TemporaryDirectory() as folder, \
-             patch.object(manage, "ENV_FILE", Path(folder) / "gateway.env"), \
-             patch.object(manage, "pinned_hostname", return_value=HOST), \
-             patch.object(manage, "verify_state", return_value=(False, False)), \
-             patch.object(manage, "run_command", side_effect=run), \
-             patch("socket.create_connection") as connection, \
-             patch.object(manage, "log_event") as logger:
-            connection.return_value.__enter__.return_value = None
-            with self.assertRaises(manage.MCPManagementError) as ctx:
+    def test_reconciler_preserves_original_funnel_error(self):
+        from devstack import networking
+        with patch.object(networking, "update_preferences",
+                          side_effect=manage.MCPManagementError("funnel_setup_timeout")):
+            with self.assertRaises(manage.MCPManagementError) as error:
                 manage.apply_action("enable")
-            self.assertEqual(ctx.exception.code, "funnel_setup_timeout")
-            logger.assert_any_call("gateway_rollback_failed")
+            self.assertEqual(error.exception.code, "funnel_setup_timeout")
 
 
 class MarkerTests(unittest.TestCase):
@@ -222,6 +220,22 @@ class WebAPIContractTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/v2/devstack/mcp/enable",
                                               json={"cmd": "sh"}, headers=headers).status_code, 400)
             request.assert_called_once()
+
+    def test_legacy_webhook_disable_is_csrf_guarded(self):
+        with patch("devstack.api.http.request_mcp_action") as request:
+            url = "/api/v2/devstack/mcp/disable_webhooks"
+            self.assertEqual(self.client.post(url, json={}).status_code, 403)
+            self.assertEqual(self.client.post(url, json={},
+                headers={"X-CSRF-Token": "token"}).status_code, 202)
+            request.assert_called_once_with("disable_webhooks")
+
+    def test_enable_public_webhooks_requires_csrf(self):
+        with patch("devstack.api.http.request_mcp_action") as request:
+            url = "/api/v2/devstack/mcp/enable_webhooks"
+            self.assertEqual(self.client.post(url, json={}).status_code, 403)
+            self.assertEqual(self.client.post(url, json={},
+                headers={"X-CSRF-Token": "token"}).status_code, 202)
+            request.assert_called_once_with("enable_webhooks")
 
     def test_status_has_no_sensitive_fields(self):
         safe={"gateway":"stopped","funnel":"disabled","url":None,

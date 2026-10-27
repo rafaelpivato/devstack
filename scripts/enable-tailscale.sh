@@ -89,5 +89,5 @@ if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/n
 fi
 python3 /usr/local/lib/devstack/private_access.py
 echo "Install the Tailscale iOS app, sign in to the same tailnet,"
-echo "and open the HTTPS URL above in Safari. Never use Tailscale Funnel."
+echo "and open the HTTPS URL above in Safari. Public Funnel is opt-in and path-restricted."
 echo "Review tailnet access rules: all permitted tailnet members could control Devstack."
