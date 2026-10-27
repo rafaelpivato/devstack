@@ -87,7 +87,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       disconnect when private :443 is removed. Copy the future private address
       first, then open that address on your phone after the migration:
       <pre className="log-view" style={{overflowWrap:"anywhere",whiteSpace:"pre-wrap"}}>{current.network_phase==="legacy"
-        ? current.private_url?.replace(/\\/$/, ":8443/")
+        ? (current.private_url?.slice(0,-1) ?? "") + ":8443/"
         : current.private_url}</pre>
       <p className="actions"><button type="button" className="primary-button"
         disabled={busy||current.request_pending||current.network_phase==="unknown"}
