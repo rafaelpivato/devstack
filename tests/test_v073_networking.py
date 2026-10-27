@@ -117,8 +117,8 @@ class PublicIngressTests(unittest.TestCase):
             forwarded.append((mapping, body, headers))
             from starlette.responses import Response
             return Response(b"delivered", status_code=202)
-        with patch.object(public_app, "ingress_call", side_effect=broker), \\
-             patch.object(public_app, "_forward", side_effect=relay):
+        with (patch.object(public_app, "ingress_call", side_effect=broker),
+              patch.object(public_app, "_forward", side_effect=relay)):
             with TestClient(create_app(mcp_enabled=False, webhooks_enabled=True)) as client:
                 response = client.post(f"/hooks/{project}/github", content=b'{"id":1}',
                     headers={"Content-Type": "application/json",
