@@ -465,8 +465,11 @@ def main():
     parser.add_argument("--socket", type=Path,
                         default=Path("/run/devstack-control/control.sock"))
     parser.add_argument("--socket-group", default=None)
-    parser.add_argument("--ingress-socket", type=Path,
-                        default=Path("/run/devstack-control/ingress.sock"))
+    parser.add_argument("--ingress-socket", type=Path, default=None)
+    # Old CI/host invocations may still supply this port. The new public
+    # service handles HTTP, so the legacy option must never open a listener.
+    parser.add_argument("--webhook-port", type=int, default=None,
+                        help=argparse.SUPPRESS)
     args = parser.parse_args()
     with exclusive_daemon(args.state):
         database = Database(args.state / "control.sqlite3")
@@ -517,7 +520,8 @@ def main():
             sync_thread = threading.Thread(target=poll_repositories,
                                            name="devstack-git-poll", daemon=True)
             sync_thread.start()
-            with IngressControlServer(args.ingress_socket, controller.ingress) as ingress_ipc:
+            ingress_socket = args.ingress_socket or args.socket.with_name("ingress.sock")
+            with IngressControlServer(ingress_socket, controller.ingress) as ingress_ipc:
                 ingress_thread = threading.Thread(
                     target=ingress_ipc.serve_forever,
                     name="devstack-public-authorization", daemon=True,
