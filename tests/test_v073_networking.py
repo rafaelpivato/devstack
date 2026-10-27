@@ -138,6 +138,63 @@ class PublicIngressTests(unittest.TestCase):
             self.assertEqual(client.get("/healthz").status_code, 200)
 
 
+class PublicProtocolIntegration(unittest.TestCase):
+    def test_real_unified_public_process_serves_mcp_and_denies_root(self):
+        import os
+        import socket
+        import subprocess
+        import sys
+        import time
+        from http.client import HTTPConnection
+        from mcp import Client
+        with socket.socket() as reserved:
+            reserved.bind(("127.0.0.1", 0))
+            port = reserved.getsockname()[1]
+        env = dict(os.environ, DEVSTACK_PUBLIC_MCP="1",
+                   DEVSTACK_PUBLIC_WEBHOOKS="0", DEVSTACK_MCP_PUBLIC_HOST="")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "devstack.public_app", "--port", str(port)],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        try:
+            for _ in range(75):
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=.2):
+                        break
+                except OSError:
+                    if proc.poll() is not None:
+                        self.fail("Unified public process exited before listening")
+                    time.sleep(.1)
+            else:
+                self.fail("Unified public process not ready")
+            conn = HTTPConnection("127.0.0.1", port, timeout=3)
+            try:
+                conn.request("GET", "/")
+                response = conn.getresponse()
+                self.assertEqual(response.status, 404)
+                response.read()
+            finally:
+                conn.close()
+
+            async def exercise():
+                async with Client(f"http://127.0.0.1:{port}/mcp") as client:
+                    names = {tool.name for tool in (await client.list_tools()).tools}
+                    self.assertEqual(names, {"devstack_status", "devstack_ping"})
+                    ping = await client.call_tool("devstack_ping", {"value": "public-ready"})
+                    self.assertFalse(ping.is_error)
+                    self.assertEqual(ping.structured_content["pong"], "public-ready")
+                    status = await client.call_tool("devstack_status", {})
+                    self.assertEqual(status.structured_content["last_ping"], "public-ready")
+            asyncio.run(exercise())
+        finally:
+            proc.terminate()
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.communicate(timeout=5)
+
+
 class IngressSocketTests(unittest.TestCase):
     def test_socket_exposes_only_admit_and_release(self):
         class Ingress:
