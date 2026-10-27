@@ -44,7 +44,7 @@ def ingress_call(op: str, **fields) -> dict:
     """Only admit/release. Cannot send arbitrary admin controller operations."""
     if op == "admit" and set(fields) == {"project_id", "route"}:
         payload = {"op": op, **fields}
-    elif op == "release" and set(fields) == {"lease"}:
+    elif op in ("release", "renew") and set(fields) == {"lease"}:
         payload = {"op": op, **fields}
     else:
         raise IngressRejected("InvalidRequest")
@@ -114,6 +114,7 @@ async def webhook(request: Request) -> Response:
     if not _SLOTS.acquire(blocking=False):
         return Response(status_code=503)
     lease = None
+    heartbeat = None
     try:
         body = bytearray()
         async for chunk in request.stream():
@@ -124,6 +125,11 @@ async def webhook(request: Request) -> Response:
             target = await asyncio.to_thread(ingress_call, "admit",
                 project_id=project, route=route)
             lease = target["lease"]
+            async def renew():
+                while True:
+                    await asyncio.sleep(3)
+                    await asyncio.to_thread(ingress_call, "renew", lease=lease)
+            heartbeat = asyncio.create_task(renew())
             return await asyncio.to_thread(
                 _forward, target, bytes(body), dict(request.headers.items()))
         except IngressRejected as exc:
@@ -135,6 +141,11 @@ async def webhook(request: Request) -> Response:
         except (OSError, ValueError, HTTPException, URLError, KeyError):
             return Response(status_code=503)
     finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
+            from contextlib import suppress
+            with suppress(asyncio.CancelledError, IngressRejected, OSError):
+                await heartbeat
         if lease:
             try:
                 await asyncio.to_thread(ingress_call, "release", lease=lease)

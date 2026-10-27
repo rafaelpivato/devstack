@@ -1,7 +1,7 @@
 """Minimal public-webhook control socket, NOT the administrative controller IPC.
 
-Only two fixed operations exist: authorize a registered active-project
-delivery, and release its bounded generation lease. Never accepts HTTP bodies.
+Only three fixed operations exist: authorize a registered active-project
+delivery, renew it and release its bounded generation lease. Never accepts HTTP bodies.
 The systemd controller account owns this socket, group devstackpublic.
 """
 from __future__ import annotations
@@ -28,6 +28,9 @@ class _Handler(socketserver.StreamRequestHandler):
                     and payload["op"] == "admit"):
                 result = self.server.ingress.begin_delivery(
                     payload["project_id"], payload["route"])
+            elif set(payload) == {"op", "lease"} and payload["op"] == "renew":
+                self.server.ingress.renew_delivery(payload["lease"])
+                result = {"renewed": True}
             elif set(payload) == {"op", "lease"} and payload["op"] == "release":
                 self.server.ingress.finish_delivery(payload["lease"])
                 result = {"released": True}

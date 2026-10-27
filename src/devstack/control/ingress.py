@@ -186,11 +186,29 @@ class WebhookIngress:
         with self.database.transaction(write=True) as db:
             db.execute("DELETE FROM webhook_leases WHERE id=?", (lease,))
 
+    def renew_delivery(self, lease: str) -> None:
+        """Heartbeat from a public worker; a dead delivery eventually expires."""
+        from uuid import UUID
+        try:
+            if not isinstance(lease, str) or len(lease) != 36 or str(UUID(lease)) != lease:
+                raise ValueError()
+        except (ValueError, AttributeError) as exc:
+            raise WebhookInvalid("Invalid lease") from exc
+        with self.database.transaction(write=True) as db:
+            updated = db.execute("UPDATE webhook_leases SET started_ns=? WHERE id=?",
+                                 (time.time_ns(), lease)).rowcount
+        if updated != 1:
+            raise WebhookNotFound("Lease no longer active")
+
     def drain(self, identifier: str, *, seconds: float = 14) -> None:
         """Caller holds coordinator lock and has already revoked admission."""
         deadline = time.monotonic() + seconds
         while True:
-            with self.database.transaction() as db:
+            with self.database.transaction(write=True) as db:
+                # Public deliveries refresh every 3s; crashed workers have
+                # their leases expired within the 14s switch-drain window.
+                db.execute("DELETE FROM webhook_leases WHERE project_id=? AND started_ns<?",
+                           (identifier, time.time_ns() - 12_000_000_000))
                 count = db.execute(
                     "SELECT COUNT(*) FROM webhook_leases WHERE project_id=?",
                     (identifier,),
