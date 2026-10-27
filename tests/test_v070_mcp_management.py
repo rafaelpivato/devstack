@@ -122,26 +122,13 @@ class FunnelErrorTests(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, expected)
                 self.assertNotIn("abc123", str(ctx.exception))
 
-    def test_rollback_does_not_hide_funnel_failure(self):
-        # The gateway is live, and the first attempted Funnel action fails.
-        def run(*args, **_):
-            if args[:2] == ("tailscale", "funnel") and "off" not in args:
-                raise manage.MCPManagementError("funnel_setup_timeout")
-            if args[:2] == ("systemctl", "disable"):
-                raise manage.MCPManagementError("systemd_command_failed")
-            return ""
-        with tempfile.TemporaryDirectory() as folder, \
-             patch.object(manage, "ENV_FILE", Path(folder) / "gateway.env"), \
-             patch.object(manage, "pinned_hostname", return_value=HOST), \
-             patch.object(manage, "topology", return_value=__import__("devstack.tailscale_layout", fromlist=["Topology"]).Topology("new", False, False)), \
-             patch.object(manage, "run_command", side_effect=run), \
-             patch("socket.create_connection") as connection, \
-             patch.object(manage, "log_event") as logger:
-            connection.return_value.__enter__.return_value = None
-            with self.assertRaises(manage.MCPManagementError) as ctx:
+    def test_reconciler_preserves_original_funnel_error(self):
+        from devstack import networking
+        with patch.object(networking, "update_preferences",
+                          side_effect=manage.MCPManagementError("funnel_setup_timeout")):
+            with self.assertRaises(manage.MCPManagementError) as error:
                 manage.apply_action("enable")
-            self.assertEqual(ctx.exception.code, "funnel_setup_timeout")
-            logger.assert_any_call("gateway_rollback_failed")
+            self.assertEqual(error.exception.code, "funnel_setup_timeout")
 
 
 class MarkerTests(unittest.TestCase):
