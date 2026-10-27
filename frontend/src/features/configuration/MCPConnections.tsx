@@ -12,9 +12,7 @@ const FUNNEL_FIXES: Record<string,string> = {
   funnel_https_required: "Enable MagicDNS and HTTPS certificates for your tailnet in the Tailscale admin console, then retry.",
   funnel_certificate_failed: "Tailscale could not issue its HTTPS certificate. Check the tailnet HTTPS settings and certificate rate limits before retrying.",
   funnel_port_in_use: "Tailscale reports that the MCP port is already occupied. DevStack will not overwrite another service or an unknown route.",
-  migration_required: "Use Migrate HTTPS ports first. The public :443 endpoint must never contain a private dashboard handler.",
-  migration_incomplete: "The cutover is incomplete. Private :8443 should remain available; retry migration from the dashboard.",
-  legacy_webhooks_must_be_disabled: "Existing public webhooks on :8443 must be turned off before this migration. Their callback URL will change to HTTPS :443.",
+  network_migration_incomplete: "Automatic Tailscale reconciliation has not finished. DevStack retries independently.",
   funnel_command_failed: "Tailscale rejected the Funnel operation for an unclassified reason. Copy the MCP diagnostic snapshot to report it; DevStack does not disclose raw host logs.",
 };
 
@@ -31,7 +29,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const state = useResource(load, 5000);
   const current = state.kind==="ready"?state.data:null;
   const enabled = current?.funnel==="enabled";
-  const request = async(action:"enable"|"disable"|"migrate"|"disable_webhooks"|"enable_webhooks")=>{
+  const request = async(action:"enable"|"disable"|"disable_webhooks"|"enable_webhooks")=>{
     if(busy||(action==="enable"&&!accepted)||(action==="disable_webhooks"&&!acceptedWebhookDisable)||(action==="enable_webhooks"&&!acceptedWebhookEnable))return;
     setBusy(true);setError(null);setFeedback(null);
     try {
@@ -81,33 +79,13 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     {current?.funnel==="unknown"&&<Notice title="Cannot verify Tailscale">
       Check that Tailscale is connected and private Serve is configured. DevStack will refuse
       to overwrite any unrecognized Serve or Funnel routes.</Notice>}
-    {current?.migration_required&&<Notice title="Network migration required">
-      Move the private dashboard to HTTPS :8443 before enabling public HTTPS :443.
-      This action preserves private access and rejects unknown Tailscale routes.
-      Existing public webhooks on :8443 must be disabled and external callback URLs
-      updated separately before migration. The current dashboard tab will
-      disconnect when private :443 is removed. Copy the future private address
-      first, then open that address on your phone after the migration:
-      <pre className="log-view" style={{overflowWrap:"anywhere",whiteSpace:"pre-wrap"}}>{current.network_phase==="legacy"
-        ? (current.private_url?.slice(0,-1) ?? "") + ":8443/"
-        : current.private_url}</pre>
-      {current.legacy_webhooks_active&&<div>
-        <p><strong>Legacy webhook ingress is currently enabled.</strong> Existing
-          external callbacks on :8443 will stop working when you disable it.
-          Update each provider to its new :443 URL only after migration.</p>
-        <label className="confirm-label"><input type="checkbox" checked={acceptedWebhookDisable}
-          onChange={e=>setAcceptedWebhookDisable(e.target.checked)}/>
-          I understand existing webhook callbacks will stop until their URLs are updated.
-        </label>
-        <p className="actions"><button type="button" className="text-button"
-          disabled={busy||current.request_pending||!acceptedWebhookDisable}
-          onClick={()=>void request("disable_webhooks")}>Disable legacy public webhooks</button></p>
-      </div>}
-      <p className="actions"><button type="button" className="primary-button"
-        disabled={busy||current.request_pending||current.network_phase==="unknown"||current.legacy_webhooks_active}
-        onClick={()=>void request("migrate")}>Migrate HTTPS ports</button></p>
-    </Notice>}
-    {!enabled&&!current?.migration_required&&<label className="confirm-label"><input type="checkbox"
+    {current?.network_phase!=="new"&&current?.network_phase!=="unknown"&&
+      <Notice title="Automatic network reconciliation">
+        The new private dashboard uses HTTPS :8443. DevStack will reconcile
+        Tailscale routes during the release update and retry automatically.
+        No manual migration action is needed.
+      </Notice>}
+    {!enabled&&<label className="confirm-label"><input type="checkbox"
       checked={accepted} onChange={e=>setAccepted(e.target.checked)}/>
       I understand this temporarily exposes the unauthenticated status and ping tools publicly.
     </label>}
@@ -145,9 +123,9 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     </section>
     {current?.network_phase==="new"&&<section className="card">
       <h2>Public webhook ingress</h2>
-      <p>Public Funnel HTTPS :443 routes only <code>/hooks/*</code> to
-        the existing webhook-only listener. Provider signatures still need validation.
-        This does not publish the DevStack dashboard.</p>
+      <p>The unified public service handles <code>/hooks/*</code> over HTTPS :443.
+        Only registered project routes are forwarded directly to private Docker services.
+        Provider signatures must still be verified by the receiving application.</p>
       <div className="property"><span>Webhooks</span><strong>{current.webhooks_enabled?"enabled":"disabled"}</strong></div>
       {!current.webhooks_enabled&&<label className="confirm-label">
         <input type="checkbox" checked={acceptedWebhookEnable}

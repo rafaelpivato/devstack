@@ -75,5 +75,5 @@ export interface MCPStatus {
 }
 export const readMCPStatus=(signal?:AbortSignal)=>
   apiRequest<MCPStatus>("/api/v2/devstack/mcp",{signal});
-export const requestMCPAction=(action:"enable"|"disable"|"migrate"|"disable_webhooks"|"enable_webhooks")=>
+export const requestMCPAction=(action:"enable"|"disable"|"disable_webhooks"|"enable_webhooks")=>
   apiRequest<{message:string;request_pending:true}>("/api/v2/devstack/mcp/"+action,{method:"POST",body:{}});

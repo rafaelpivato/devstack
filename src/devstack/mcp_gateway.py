@@ -85,7 +85,7 @@ def transport_security(hostname: str) -> TransportSecuritySettings:
     origins: list[str] = []
     if hostname:
         hosts.extend([hostname, hostname + ":*"])
-        origins.extend(["https://" + hostname, "https://" + hostname + ":10000"])
+        origins.append("https://" + hostname)
     return TransportSecuritySettings(allowed_hosts=hosts, allowed_origins=origins)
 
 
