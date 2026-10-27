@@ -1,8 +1,7 @@
-"""Fixed-purpose MCP gateway/Tailscale Funnel lifecycle, no arbitrary host commands.
+"""Bounded MCP/Funnel operations and explicit guarded Tailscale port migration.
 
-The private Web UI can only enqueue 'enable' or 'disable'; a root-owned
-systemd.path oneshot interprets those two exact verbs, owns port 10000 only,
-and never replaces the tailnet-only dashboard or webhook configuration.
+The private UI queues only fixed verbs. The root broker validates all known
+routes, preserves private dashboard access and never accepts arbitrary commands.
 """
 from __future__ import annotations
 
@@ -23,8 +22,9 @@ REQUEST_FILE = REQUEST_DIR / "mcp-action"
 RESULT_FILE = Path("/run/devstack-mcp-result.json")
 ENV_FILE = Path("/etc/devstack-mcp.env")
 SNAPSHOT_FILE = Path("/run/devstack-mcp-diagnostics.json")
-PORT = 10000
+PORT = 443
 TARGET = "http://127.0.0.1:8768"
+from devstack.tailscale_layout import identify, MCP_PUBLIC, DASHBOARD
 PIN_FILE = Path("/var/lib/devstack/tailscale-identity.json")
 HOST_PATTERN = re.compile(r"(?:[a-z0-9-]+\.)+ts\.net\Z")
 
@@ -295,36 +295,63 @@ def pinned_hostname() -> str:
     return host
 
 
-def serve_state(host: str, state: dict) -> tuple[bool, bool]:
-    """Return (webhooks_enabled, mcp_enabled), verifying every served port.
+def topology(host: str):
+    try:
+        return identify(host, json_command("tailscale", "serve", "status", "--json"))
+    except ValueError as exc:
+        raise MCPManagementError("unknown_tailscale_routes") from exc
 
-    Only 443 private DevStack, optional 8443 webhooks, and optional 10000 MCP
-    are permitted. Never modify unknown or foreign Serve/Funnel routes.
+
+def serve_state(host: str, state: dict) -> tuple[bool, bool]:
+    """Exact allowlist; transitional states require the explicit migrate action."""
+    try:
+        entry = identify(host, state)
+    except ValueError as exc:
+        raise MCPManagementError("unknown_tailscale_routes") from exc
+    if entry.phase not in ("legacy", "new"):
+        raise MCPManagementError("migration_incomplete")
+    return entry.webhooks, entry.mcp
+
+
+def migrate_ports(host: str) -> str:
+    """Resumable cutover. Private :8443 is validated *before* freeing :443.
+
+    Active old :8443 webhooks block migration: moving them could break signed
+    third-party callbacks. No public command runs while private :443 exists.
     """
-    if set(state) - {"TCP", "Web", "AllowFunnel"}:
-        raise MCPManagementError("unknown_tailscale_routes")
-    tcp = state.get("TCP") or {}
-    web = state.get("Web") or {}
-    funnel = state.get("AllowFunnel") or {}
-    if not isinstance(tcp, dict) or not isinstance(web, dict) or not isinstance(funnel, dict):
-        raise MCPManagementError("unknown_tailscale_routes")
-    webhooks = host + ":8443" in web or "8443" in tcp
-    mcp = host + ":10000" in web or "10000" in tcp
-    expected_tcp = {p: {"HTTPS": True} for p in
-                    (["443"] + (["8443"] if webhooks else []) + (["10000"] if mcp else []))}
-    expected_web = {
-        host + ":443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8765"}}},
-    }
-    if webhooks:
-        expected_web[host + ":8443"] = {
-            "Handlers": {"/": {"Proxy": "http://127.0.0.1:8767"}}}
-    if mcp:
-        expected_web[host + ":10000"] = {"Handlers": {"/": {"Proxy": TARGET}}}
-    expected_funnel = ({host + ":8443": True} if webhooks else {}) | (
-        {host + ":10000": True} if mcp else {})
-    if tcp != expected_tcp or web != expected_web or funnel != expected_funnel:
-        raise MCPManagementError("unknown_tailscale_routes")
-    return webhooks, mcp
+    entry = topology(host)
+    if entry.phase == "new":
+        return f"https://{host}:8443/"
+    if entry.webhooks:
+        raise MCPManagementError("legacy_webhooks_must_be_disabled")
+    if entry.phase == "legacy":
+        run_command("tailscale", "serve", "--bg", "--https=8443", DASHBOARD, timeout=45)
+        if topology(host).phase != "dual_private":
+            raise MCPManagementError("private_cutover_unverified")
+        log_event("private_8443_ready")
+        entry = topology(host)
+    if entry.phase == "dual_private":
+        # Important: explicitly turn off the known private handler BEFORE
+        # Funnel is allowed to allocate public HTTPS :443.
+        run_command("tailscale", "serve", "--https=443", "off", timeout=30)
+        entry = topology(host)
+        if entry.phase not in ("private_ready", "new"):
+            raise MCPManagementError("old_private_route_not_removed")
+        log_event("old_private_443_removed")
+    if entry.phase == "private_ready":
+        # Old MCP Funnel remains available at :10000 through this phase.
+        run_command("tailscale", "funnel", "--yes", "--bg", "--https=443",
+                    "--set-path=/mcp", MCP_PUBLIC, timeout=45)
+        if topology(host).phase != "public_ready":
+            raise MCPManagementError("public_mcp_route_unverified")
+        entry = topology(host)
+    if entry.phase == "public_ready":
+        run_command("tailscale", "funnel", "--https=10000", "off", timeout=30)
+        entry = topology(host)
+    if entry.phase != "new":
+        raise MCPManagementError("migration_incomplete")
+    log_event("network_migration_succeeded")
+    return f"https://{host}:8443/"
 
 
 def result_record(code: str, *, url: str | None = None) -> None:
@@ -340,19 +367,25 @@ def verify_state(host: str) -> tuple[bool, bool]:
 
 
 def apply_action(action: str) -> str:
-    if action not in {"enable", "disable"}:
+    if action not in {"enable", "disable", "migrate"}:
         raise MCPManagementError("invalid_action")
     host = pinned_hostname()
-    _, active = verify_state(host)
+    if action == "migrate":
+        return migrate_ports(host)
+    entry = topology(host)
+    if entry.phase not in ("legacy", "new"):
+        raise MCPManagementError("migration_incomplete")
+    active = entry.mcp
+    if action == "enable" and entry.phase == "legacy":
+        raise MCPManagementError("migration_required")
+    new = entry.phase == "new"
+    url = f"https://{host}/mcp" if new else f"https://{host}:10000/mcp"
     if action == "enable":
-        url = f"https://{host}:10000/mcp"
         if not active:
-            # The unit owns no privileged sockets; hostname is not user input.
             ENV_FILE.write_text(f"DEVSTACK_MCP_PUBLIC_HOST={host}\n", encoding="ascii")
             ENV_FILE.chmod(0o644)
             try:
                 run_command("systemctl", "enable", "--now", "devstack-mcp.service", timeout=40)
-                # Ensure the gateway actually accepts loopback TCP first.
                 import socket
                 for attempt in range(24):
                     try:
@@ -362,17 +395,19 @@ def apply_action(action: str) -> str:
                         time.sleep(.15)
                 else:
                     raise MCPManagementError("gateway_not_ready")
-                run_command("tailscale", "funnel", "--yes", "--bg",
-                            "--https=10000", TARGET, timeout=45)
-                if not verify_state(host)[1]:
+                if new:
+                    run_command("tailscale", "funnel", "--yes", "--bg",
+                                "--https=443", "--set-path=/mcp", MCP_PUBLIC, timeout=45)
+                else:
+                    raise MCPManagementError("migration_required")
+                if not topology(host).mcp or topology(host).phase != "new":
                     raise MCPManagementError("funnel_not_verified")
             except MCPManagementError:
-                # Preserve the original Tailscale error even if rollback fails.
-                # Never clobber a route whose ownership cannot be verified.
                 try:
-                    if verify_state(host)[1]:
-                        run_command("tailscale", "funnel", "--https=10000",
-                                    "off", timeout=12)
+                    status = topology(host)
+                    if status.phase == "new" and status.mcp:
+                        run_command("tailscale", "funnel", "--https=443",
+                                    "--set-path=/mcp", "off", timeout=12)
                 except MCPManagementError:
                     log_event("funnel_rollback_unverified")
                 try:
@@ -382,16 +417,18 @@ def apply_action(action: str) -> str:
                     log_event("gateway_rollback_failed")
                 raise
         else:
-            # Restart a previously configured gateway after a host reboot.
             if not ENV_FILE.exists():
-                ENV_FILE.write_text(f"DEVSTACK_MCP_PUBLIC_HOST={host}\n",
-                                    encoding="ascii")
+                ENV_FILE.write_text(f"DEVSTACK_MCP_PUBLIC_HOST={host}\n", encoding="ascii")
                 ENV_FILE.chmod(0o644)
             run_command("systemctl", "enable", "--now", "devstack-mcp.service", timeout=40)
         return url
     if active:
-        run_command("tailscale", "funnel", "--https=10000", "off", timeout=30)
-        if verify_state(host)[1]:
+        if new:
+            run_command("tailscale", "funnel", "--https=443", "--set-path=/mcp", "off", timeout=30)
+        else:
+            run_command("tailscale", "funnel", "--https=10000", "off", timeout=30)
+        after = topology(host)
+        if after.mcp or after.phase not in ("legacy", "new"):
             raise MCPManagementError("funnel_not_removed")
     run_command("systemctl", "disable", "--now", "devstack-mcp.service", timeout=30)
     return "disabled"
@@ -409,13 +446,13 @@ def apply_pending() -> None:
         with os.fdopen(os.open(REQUEST_FILE, flags), "rb") as source:
             data = source.read(16)
         REQUEST_FILE.unlink()
-        if data not in (b"enable", b"disable"):
+        if data not in (b"enable", b"disable", b"migrate"):
             raise MCPManagementError("request_invalid")
         action = data.decode("ascii")
         log_event("funnel_" + action + "_requested")
         url = apply_action(action)
-        result_record("enabled" if action == "enable" else "disabled",
-                      url=url if action == "enable" else None)
+        result_record({"enable": "enabled", "disable": "disabled", "migrate": "migrated"}[action],
+                      url=url if action in {"enable", "migrate"} else None)
         log_event("funnel_" + action + "_succeeded")
     except MCPManagementError as exc:
         result_record(exc.code)
@@ -442,7 +479,7 @@ def check_request_directory(directory: Path = REQUEST_DIR) -> Path:
 
 def request_action(action: str) -> None:
     """Existing web CSRF is the request authority; no user commands or URLs."""
-    if action not in ("enable", "disable"):
+    if action not in ("enable", "disable", "migrate"):
         raise MCPManagementError("invalid_action")
     directory = REQUEST_DIR
     check_request_directory(directory)
@@ -496,13 +533,19 @@ def status() -> dict:
     if not isinstance(last_code, str) or not re.fullmatch("[a-z_]{1,45}", last_code):
         last_code = None
     connected_url = None
+    private_url = None
+    phase = "unknown"
     tunnel = "unknown"
     try:
         state = json_command("tailscale", "status", "--json")
         host = hostname_from_status(state)
-        _, active = verify_state(host)
-        tunnel = "enabled" if active else "disabled"
-        connected_url = f"https://{host}:10000/mcp" if active else None
+        entry = topology(host)
+        phase = entry.phase
+        private_url = f"https://{host}:8443/" if phase != "legacy" else f"https://{host}/"
+        tunnel = "enabled" if entry.mcp else "disabled"
+        if entry.mcp:
+            connected_url = (f"https://{host}/mcp" if phase in ("new", "public_ready")
+                             else f"https://{host}:10000/mcp")
     except MCPManagementError:
         pass
     try:
@@ -514,6 +557,9 @@ def status() -> dict:
         "gateway": gateway,
         "funnel": tunnel,
         "url": connected_url,
+        "private_url": private_url,
+        "network_phase": phase,
+        "migration_required": phase not in ("new", "unknown"),
         "request_pending": REQUEST_FILE.exists(),
         "request_state": request_state(),
         "last_result": last_code,
