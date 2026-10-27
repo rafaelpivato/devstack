@@ -21,10 +21,10 @@ The current v0.7.2 layout uses private Serve 443, optional webhook Funnel
 `https://<node>.ts.net:8443/` address before starting the cutover.
 
 If public webhooks are already enabled on **8443**, the migration refuses
-to proceed until those legacy callbacks are disabled by the authorized
-existing workflow. Existing external callback URLs must be updated for
+to proceed until you explicitly acknowledge and disable the legacy webhook
+listener in the same private Web screen. Existing external callback URLs must be updated for
 443 after the cutover; DevStack cannot silently change Twilio/GitHub URLs.
-Do not migrate if the normal Web UI cannot safely disable active webhooks.
+Do not migrate while that old public listener remains active.
 
 Choose **Migrate HTTPS ports**. The root broker checks the pinned node
 identity and exact legacy configuration, installs private Serve 8443
@@ -36,7 +36,10 @@ or replaces unrecognized routes.
 
 The original dashboard browser tab on :443 disconnects during the
 cutover. Navigate to the new **private** URL with :8443. The MCP page
-will show the standard-port public URL once it is enabled.
+will show the standard-port public URL once it is enabled. It also provides
+opt-in enable/disable controls for public webhook ingress on 443, through
+the existing wheel-owned root broker. No outdated standalone host script is
+needed after an upgrade.
 
 ## Safety and verification
 
