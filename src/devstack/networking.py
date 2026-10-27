@@ -221,7 +221,7 @@ def reconcile():
         host = pinned_hostname()
     except MCPManagementError as exc:
         # Fresh cloud-init servers may not be connected to Tailscale yet.
-        if exc.code in ("tailscale_disconnected", "private_identity_missing"):
+        if exc.code in ("tailscale_disconnected", "private_tailscale_not_configured"):
             return "awaiting_tailscale"
         raise
     phase, old_hooks, old_mcp = state(host)
@@ -296,7 +296,7 @@ def summary():
         prefs = read_preferences()
         if prefs is None:
             prefs = {"mcp": legacy_mcp, "webhooks": legacy_hooks}
-        return {"phase": phase, "mcp": prefs["mcp"],
+        return {"phase": "new" if phase in ("new", "private_ready") else phase, "mcp": prefs["mcp"],
                 "webhooks": prefs["webhooks"], "private_url":
                 f"https://{host}:8443/" if phase not in ("legacy", "empty") else
                 f"https://{host}/", "url": f"https://{host}/mcp"

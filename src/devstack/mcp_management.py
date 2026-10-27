@@ -367,106 +367,23 @@ def verify_state(host: str) -> tuple[bool, bool]:
 
 
 def apply_action(action: str) -> str:
-    if action not in {"enable", "disable", "migrate", "disable_webhooks", "enable_webhooks"}:
+    """Fixed root broker updates endpoint intent; one network reconciler owns routing."""
+    from devstack.networking import update_preferences, summary
+    actions = {
+        "enable": ("mcp", True), "disable": ("mcp", False),
+        "enable_webhooks": ("webhooks", True),
+        "disable_webhooks": ("webhooks", False),
+    }
+    if action not in actions:
         raise MCPManagementError("invalid_action")
-    host = pinned_hostname()
-    if action == "migrate":
-        return migrate_ports(host)
-    entry = topology(host)
-    if action in ("enable_webhooks", "disable_webhooks"):
-        if entry.phase not in ("legacy", "new"):
-            raise MCPManagementError("migration_incomplete")
-        if action == "enable_webhooks" and entry.phase != "new":
-            raise MCPManagementError("migration_required")
-        if action == "enable_webhooks":
-            if not entry.webhooks:
-                # Verify the existing dedicated webhook-only listener first;
-                # never configure a generic port or proxy an unexpected app.
-                from urllib.request import urlopen
-                try:
-                    with urlopen("http://127.0.0.1:8767/healthz", timeout=5) as response:
-                        payload = json.loads(response.read(1024))
-                    if payload.get("scope") != "webhook-only":
-                        raise ValueError("Not a webhook listener")
-                except (OSError, ValueError, TypeError, AttributeError) as exc:
-                    raise MCPManagementError("webhook_listener_not_ready") from exc
-                run_command("tailscale", "funnel", "--yes", "--bg",
-                            "--https=443", "--set-path=/hooks/", WEBHOOK_PUBLIC, timeout=45)
-                after = topology(host)
-                if after.phase != "new" or not after.webhooks or after.mcp != entry.mcp:
-                    raise MCPManagementError("webhook_route_not_verified")
-            return f"https://{host}/hooks/<name>"
-        if entry.webhooks:
-            if entry.phase == "legacy":
-                run_command("tailscale", "funnel", "--https=8443", "off", timeout=30)
-            else:
-                run_command("tailscale", "funnel", "--https=443",
-                            "--set-path=/hooks/", "off", timeout=30)
-            after = topology(host)
-            if (after.phase != entry.phase or after.webhooks
-                    or after.mcp != entry.mcp):
-                raise MCPManagementError("webhook_route_not_removed")
-            log_event("webhooks_disabled")
-        return "webhooks_disabled"
-    if entry.phase not in ("legacy", "new"):
-        raise MCPManagementError("migration_incomplete")
-    active = entry.mcp
-    if action == "enable" and entry.phase == "legacy":
-        raise MCPManagementError("migration_required")
-    new = entry.phase == "new"
-    url = f"https://{host}/mcp" if new else f"https://{host}:10000/mcp"
-    if action == "enable":
-        if not active:
-            ENV_FILE.write_text(f"DEVSTACK_MCP_PUBLIC_HOST={host}\n", encoding="ascii")
-            ENV_FILE.chmod(0o644)
-            try:
-                run_command("systemctl", "enable", "--now", "devstack-mcp.service", timeout=40)
-                import socket
-                for attempt in range(24):
-                    try:
-                        with socket.create_connection(("127.0.0.1", 8768), timeout=.15):
-                            break
-                    except OSError:
-                        time.sleep(.15)
-                else:
-                    raise MCPManagementError("gateway_not_ready")
-                if new:
-                    run_command("tailscale", "funnel", "--yes", "--bg",
-                                "--https=443", "--set-path=/mcp", MCP_PUBLIC, timeout=45)
-                else:
-                    raise MCPManagementError("migration_required")
-                if not topology(host).mcp or topology(host).phase != "new":
-                    raise MCPManagementError("funnel_not_verified")
-            except MCPManagementError:
-                try:
-                    status = topology(host)
-                    if status.phase == "new" and status.mcp:
-                        run_command("tailscale", "funnel", "--https=443",
-                                    "--set-path=/mcp", "off", timeout=12)
-                except MCPManagementError:
-                    log_event("funnel_rollback_unverified")
-                try:
-                    run_command("systemctl", "disable", "--now",
-                                "devstack-mcp.service", timeout=12)
-                except MCPManagementError:
-                    log_event("gateway_rollback_failed")
-                raise
-        else:
-            if not ENV_FILE.exists():
-                ENV_FILE.write_text(f"DEVSTACK_MCP_PUBLIC_HOST={host}\n", encoding="ascii")
-                ENV_FILE.chmod(0o644)
-            run_command("systemctl", "enable", "--now", "devstack-mcp.service", timeout=40)
-        return url
-    if active:
-        if new:
-            run_command("tailscale", "funnel", "--https=443", "--set-path=/mcp", "off", timeout=30)
-        else:
-            run_command("tailscale", "funnel", "--https=10000", "off", timeout=30)
-        after = topology(host)
-        if after.mcp or after.phase not in ("legacy", "new"):
-            raise MCPManagementError("funnel_not_removed")
-    run_command("systemctl", "disable", "--now", "devstack-mcp.service", timeout=30)
+    name, enabled = actions[action]
+    update_preferences(name, enabled)
+    if name == "mcp" and enabled:
+        return summary()["url"] or "enabled"
+    if name == "webhooks" and enabled:
+        return "webhooks_enabled"
     return "disabled"
+
 
 
 def apply_pending() -> None:
@@ -481,13 +398,13 @@ def apply_pending() -> None:
         with os.fdopen(os.open(REQUEST_FILE, flags), "rb") as source:
             data = source.read(17)  # Reject extra bytes after the longest 16-byte verb
         REQUEST_FILE.unlink()
-        if data not in (b"enable", b"disable", b"migrate", b"disable_webhooks", b"enable_webhooks"):
+        if data not in (b"enable", b"disable", b"disable_webhooks", b"enable_webhooks"):
             raise MCPManagementError("request_invalid")
         action = data.decode("ascii")
         log_event("funnel_" + action + "_requested")
         url = apply_action(action)
-        result_record({"enable": "enabled", "disable": "disabled", "migrate": "migrated", "disable_webhooks": "webhooks_disabled", "enable_webhooks": "webhooks_enabled"}[action],
-                      url=url if action in {"enable", "migrate"} else None)
+        result_record({"enable": "enabled", "disable": "disabled", "disable_webhooks": "webhooks_disabled", "enable_webhooks": "webhooks_enabled"}[action],
+                      url=url if action == "enable" else None)
         log_event("funnel_" + action + "_succeeded")
     except MCPManagementError as exc:
         result_record(exc.code)
@@ -514,7 +431,7 @@ def check_request_directory(directory: Path = REQUEST_DIR) -> Path:
 
 def request_action(action: str) -> None:
     """Existing web CSRF is the request authority; no user commands or URLs."""
-    if action not in ("enable", "disable", "migrate", "disable_webhooks", "enable_webhooks"):
+    if action not in ("enable", "disable", "disable_webhooks", "enable_webhooks"):
         raise MCPManagementError("invalid_action")
     directory = REQUEST_DIR
     check_request_directory(directory)
@@ -556,56 +473,38 @@ def request_state() -> str:
 
 
 def status() -> dict:
-    """Public-safe management summary; no shell, token, or full Serve dump."""
+    """Private UI summary; routing from the centralized desired-state owner."""
+    from devstack.networking import summary
+    state = summary()
     result = {}
     try:
         result = json.loads(RESULT_FILE.read_text(encoding="utf-8"))
-        if not isinstance(result, dict):
-            result = {}
     except (OSError, ValueError):
         pass
-    last_code = result.get("code")
-    if not isinstance(last_code, str) or not re.fullmatch("[a-z_]{1,45}", last_code):
-        last_code = None
-    connected_url = None
-    private_url = None
-    phase = "unknown"
-    tunnel = "unknown"
-    legacy_webhooks_active = False
-    webhooks_enabled = False
+    code = result.get("code") if isinstance(result, dict) else None
+    if not isinstance(code, str) or not re.fullmatch("[a-z_]{1,45}", code):
+        code = None
     try:
-        state = json_command("tailscale", "status", "--json")
-        host = hostname_from_status(state)
-        entry = topology(host)
-        phase = entry.phase
-        legacy_webhooks_active = phase == "legacy" and entry.webhooks
-        webhooks_enabled = entry.webhooks
-        private_url = f"https://{host}:8443/" if phase != "legacy" else f"https://{host}/"
-        tunnel = "enabled" if entry.mcp else "disabled"
-        if entry.mcp:
-            connected_url = (f"https://{host}/mcp" if phase in ("new", "public_ready")
-                             else f"https://{host}:10000/mcp")
-    except MCPManagementError:
-        pass
-    try:
-        active = run_command("systemctl", "is-active", "devstack-mcp.service")
+        active = run_command("systemctl", "is-active", "devstack-public.service")
         gateway = "running" if active.strip() == "active" else "stopped"
     except MCPManagementError:
         gateway = "stopped"
     return {
         "gateway": gateway,
-        "funnel": tunnel,
-        "url": connected_url,
-        "private_url": private_url,
-        "network_phase": phase,
-        "migration_required": phase not in ("new", "unknown"),
-        "legacy_webhooks_active": legacy_webhooks_active,
-        "webhooks_enabled": webhooks_enabled,
+        "funnel": "enabled" if state["mcp"] and state["phase"] == "new"
+                  else "unknown" if state["phase"] == "unknown" else "disabled",
+        "url": state["url"],
+        "private_url": state["private_url"],
+        "network_phase": state["phase"],
+        "migration_required": False,
+        "legacy_webhooks_active": False,
+        "webhooks_enabled": state["webhooks"],
         "request_pending": REQUEST_FILE.exists(),
         "request_state": request_state(),
-        "last_result": last_code,
+        "last_result": code,
         "installed": Path("/etc/systemd/system/devstack-mcp-apply.path").is_file(),
     }
+
 
 
 def install_units(root: Path = Path("/opt/devstack"),

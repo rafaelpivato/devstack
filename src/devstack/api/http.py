@@ -260,7 +260,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
 
     @app.post("/api/v2/devstack/mcp/<action>")
     def mcp_action_api(action):
-        if action not in {"enable", "disable", "migrate", "disable_webhooks", "enable_webhooks"}:
+        if action not in {"enable", "disable", "disable_webhooks", "enable_webhooks"}:
             abort(404)
         if request.is_json and request.get_json(silent=True) != {}:
             abort(400)
