@@ -142,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("root is required for CLI setup (use sudo)")
     try:
         created = install_command(root=args.root)
+        # This can reject an unexpected standalone updater. Run before any
+        # Tailscale mutation, so the old release updater can safely roll back
+        # application code if this trust preflight fails.
+        refreshed = refresh_updater(args.root) if (
+            args.refresh_updater or args.root == DEFAULT_ROOT) else False
         if args.root == DEFAULT_ROOT:
             # The previously installed (v0.7.2) updater invokes THIS wheel's
             # hook even though that updater knows nothing about networking.
@@ -169,10 +174,6 @@ def main(argv: list[str] | None = None) -> int:
                       file=sys.stderr, flush=True)
         if args.user:
             authorize_operator(args.user)
-        # Release-owned updater refresh is safe after a verified wheel
-        # install and keeps subsequent unattended updates migration-aware.
-        refreshed = refresh_updater(args.root) if (
-            args.refresh_updater or args.root == DEFAULT_ROOT) else False
     except (CLIInstallError, OSError, subprocess.CalledProcessError) as exc:
         parser.exit(1, f"dev: setup failed: {exc}\n")
     print("dev: command ready" + (" (already installed)" if not created else ""))
