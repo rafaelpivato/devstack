@@ -1,6 +1,6 @@
 # DevStack
 
-**Latest published: v0.7.1. Next planned: v0.7.2 MCP Funnel diagnostics hotfix.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
+**Latest published: v0.7.2.** Mobile-first, self-hosted development control plane for one Ubuntu server with Docker and Docker Compose.
 
 DevStack maintains multiple **persistent projects** while allowing **only one globally active project runtime** at a time. Selecting a project in the dashboard does not activate it. Project switching drains active containers, background commands, and webhooks before the next project starts; named volumes and repository worktrees remain intact. Multiple independently cancellable, long-running ad-hoc commands may execute concurrently inside the active project.
 
@@ -12,9 +12,9 @@ The React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks 
 - `devstack-web-v2`: unprivileged mobile dashboard and read-only/project-scoped JSON API. This process cannot access Docker or the private project database directly.
 - Python stdlib SQLite registry with independent project repositories, Compose/app/task definitions and durable job histories.
 - Per-project webhooks are constrained to the active project and generation; optional Funnel is separate from the private dashboard.
-- Tailscale provides private access. Compose services may publish explicit TCP mappings on the host's Tailscale IPv4 and DevStack displays their direct URLs. **No reverse proxy or automatic port publication.**
+- Tailscale provides private access. Compose services may publish explicit TCP mappings on the host's Tailscale IPv4 and DevStack displays their direct URLs. **No additional reverse-proxy daemon or automatic public application port publication.**
 
-## Main workflows
+## HTTPS ingress\n\nPrivate dashboard: tailnet-only Tailscale Serve **8443**. Public MCP/webhooks: opt-in Tailscale Funnel **443**, explicitly restricted to their URL paths. No public dashboard route. Existing v0.7.2 installs require a guarded Web-console cutover. See [HTTPS ingress](docs/public-ingress.md).\n\n## Main workflows
 
 Create or import projects from GitHub, register multiple repositories per project, inspect repository status, safely update them individually or in a single background batch, and preview/confirm per-repository or project-wide Git branch switches. If a requested branch does not exist in a repository, switching falls back to that repository's **verified remote default branch**; unsafe local changes are never discarded.
 
