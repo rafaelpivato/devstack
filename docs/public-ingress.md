@@ -1,62 +1,77 @@
-# DevStack HTTPS ingress (ADR-0010)
+# DevStack v0.7.3 HTTPS ingress
 
-The intended topology has two listeners on the *existing Tailscale daemon*:
+The DevStack networking boundary has **two HTTP-facing applications**,
+both native Python processes managed through systemd. No additional reverse
+proxy, Docker infrastructure container, or continuously running network manager
+is required; the existing Tailscale daemon terminates HTTPS.
 
-| Audience | HTTPS address | Loopback backend |
+| Boundary | Tailscale HTTPS | Loopback target |
 | --- | --- | --- |
-| Private dashboard | `https://<node>.ts.net:8443/` | `127.0.0.1:8765` |
-| Public MCP (opt-in) | `https://<node>.ts.net/mcp` | `127.0.0.1:8768/mcp` |
-| Public webhooks (opt-in) | `https://<node>.ts.net/hooks/<name>` | `127.0.0.1:8767/hooks/<name>` |
+| Private dashboard/API | Serve :8443 (tailnet only) | devstack-web-v2 :8765 |
+| Public MCP and webhooks | Funnel :443 (opt-in) | devstack-public :8768 |
 
-Public Funnel HTTPS 443 is **default-deny by URL path**. There is no
-public `/` handler or dashboard forwarding route. Public and private are
-**different ports**; never infer network trust from Origin or a proxied
-socket's peer IP. No Caddy, Nginx or extra Docker service is required.
+The public ASGI app explicitly implements /mcp and
+/hooks/<project-id>/<route>. Disabled integrations have no endpoint; unknown
+paths, including public /, return 404. The public process has no Docker group
+membership or administrative controller socket access.
 
-## Migrating a live v0.7.2 installation
+## Webhooks: control versus data plane
 
-In the *private dashboard*, visit **Administration → ChatGPT / MCP**.
-The current v0.7.2 layout uses private Serve 443, optional webhook Funnel
-8443 and optional MCP Funnel 10000. Keep a copy of the future private
-`https://<node>.ts.net:8443/` address before starting the cutover.
+1. Tailscale forwards /hooks to the unprivileged devstack-public app.
+2. A narrow, group-restricted Unix socket asks the controller only for a
+   registered active-project destination and a delivery lease.
+3. devstack-public forwards the original bounded HTTP POST directly to the
+   validated private Docker bridge IP/port and returns the response.
+4. devstack-public releases the lease; project switching waits for in-flight
+   deliveries. Application services verify their provider-specific signatures.
 
-If public webhooks are already enabled on **8443**, the migration refuses
-to proceed until you explicitly acknowledge and disable the legacy webhook
-listener in the same private Web screen. Existing external callback URLs must be updated for
-443 after the cutover; DevStack cannot silently change Twilio/GitHub URLs.
-Do not migrate while that old public listener remains active.
+No webhook body goes through controller IPC or MCP. This is specialized
+HTTP delivery, not an arbitrary reverse-proxy framework.
 
-Choose **Migrate HTTPS ports**. The root broker checks the pinned node
-identity and exact legacy configuration, installs private Serve 8443
-and verifies it, removes the old private 443 handler, and *only then*
-installs public Funnel 443 /mcp (if old MCP was enabled) and disables
-the old MCP 10000 route. The process is idempotent across recognized
-intermediate configurations. It never resets the Tailscale configuration
-or replaces unrecognized routes.
+## Fresh cloud-init installation
 
-The original dashboard browser tab on :443 disconnects during the
-cutover. Navigate to the new **private** URL with :8443. The MCP page
-will show the standard-port public URL once it is enabled. It also provides
-opt-in enable/disable controls for public webhook ingress on 443, through
-the existing wheel-owned root broker. No outdated standalone host script is
-needed after an upgrade.
+The supported installer detects the latest stable GitHub release. On a new
+Ubuntu server it configures Tailscale Serve private :8443 after initial
+Tailscale enrollment, and leaves public Funnel disabled until explicitly
+enabled from the existing MCP/public integration controls.
 
-## Safety and verification
+The private address is
+`https://<node>.<tailnet>.ts.net:8443/`.
 
-MCP initially exposes unauthenticated bounded status and ephemeral ping
-only—no project, host or controller execution authority. Webhook payload
-validation and provider-specific signature verification remain required.
-Future public routes need an explicit opt-in and route-level security review.
+## v0.7.2 upgrade without manual migration
 
-Tailscale `--set-path` removes the mount prefix when proxying. Our public
-target URLs restore `/mcp` and `/hooks/` for their respective local
-servers. Disabling one route must not disable the other.
+v0.7.2 used private Serve :443, optional webhook Funnel :8443 and
+optional MCP Funnel :10000. The v0.7.3 verified wheel provides a
+root-controlled postinstall hook compatible with the older independent
+updater. Whether scheduled or started from the dashboard, installation:
 
-After migration, test Tailscale private access and *independent* public
-HTTPS (off-tailnet) with MCP `initialize` and `tools/list`, not merely
-the status of Funnel configuration. A prior suspected Tailscale 1.104.2
-Funnel regression is tracked in issue #101; a port change is not proof
-that bug is fixed.
+1. Installs the unprivileged public service and its restricted ingress
+   permissions without enabling arbitrary public routes.
+2. Validates local application/controller health.
+3. Automatically records previously enabled public ingress choices and
+   reconciles recognized Tailscale states: releases legacy public 8443,
+   prepares private Serve 8443, removes private Serve 443, and only then
+   creates public Funnel 443 if MCP or webhooks had been enabled.
+4. Removes old Funnel 10000, retires the obsolete Tailscale bootstrap timer
+   after successful enrollment, and refreshes the independent updater.
+5. Retries interrupted or unavailable network reconciliation through an
+   existing-style root-owned systemd **oneshot timer**, not a new daemon.
 
-See https://tailscale.com/docs/reference/tailscale-cli/funnel
-and https://tailscale.com/docs/reference/tailscale-cli/serve.
+The old browser tab may disconnect. **Simply reconnect to the new private
+:8443 address**. No migration UI, SSH, manual port change or consent wizard
+is required.
+
+Legacy webhook consumers configured at external :8443 will need their
+provider callback URL updated to the same hostname/path on HTTPS :443.
+DevStack cannot update external provider settings. No webhook subscription
+is silently registered or changed.
+
+## Failure model
+
+Never enable public Funnel on a port still containing the private dashboard.
+Never reset Tailscale or replace a foreign route. If the networking step
+fails after a healthy release activation, keep the installed release and
+known-safe private access, log a bounded error, and let the retry timer
+attempt the idempotent transition. Tailscale status alone does not prove
+ChatGPT cloud reachability; off-tailnet TLS/MCP and signed webhook delivery
+still require real-world acceptance tests.

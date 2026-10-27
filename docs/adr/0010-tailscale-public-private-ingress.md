@@ -1,43 +1,50 @@
-# ADR-0010: public/private Tailscale listener isolation
+# ADR-0010: two HTTP-facing DevStack applications
 
-- **Status:** Proposed, pending issue #102 and PR #103 review.
-- **Baseline:** v0.7.2; supersedes ADR-0009 ingress ports only.
+Status: Proposed, reviewed under #102 / PR #103. Baseline v0.7.2.
 
 ## Decision
 
-The tailnet-only dashboard lives under Serve **HTTPS 8443**.
-All public integration endpoints share Funnel **HTTPS 443** by explicit
-path mounts, currently `/mcp` and `/hooks/`. Unknown public paths
-have no handler. Existing Python listeners remain on localhost. Tailscale
-already provides the required TLS and reverse proxy, so no additional
-daemon, Docker container, Caddy, Nginx or custom Python reverse proxy.
+DevStack infrastructure runs on Ubuntu under systemd. The internal controller
+has Docker administration authority; managed user projects run in Docker.
 
-Public/private exposure is set at the external port boundary; never use
-`Origin`, `Host` or an upstream-proxied peer socket address as a substitute
-for that boundary.
+Private ingress consists of Tailscale Serve :8443 -> loopback Gunicorn
+`devstack-web-v2:8765`. Public ingress consists of Tailscale Funnel :443
+-> loopback ASGI `devstack-public:8768`. The latter mounts the MCP SDK's
+HTTP transport alongside ordinary, strictly bounded webhook POST endpoints.
+No general-purpose proxy or per-integration daemon/container is installed.
+All public handlers are opt-in and default deny.
 
-## Migration and security
+Public webhook traffic is parsed only by the unprivileged public application.
+It asks the controller through a distinct, permission-restricted Unix
+socket for project/generation admission and an internal service destination.
+It sends the HTTP body **directly** to the Docker bridge target and releases
+its in-flight lease. Neither MCP nor controller IPC transports webhook bodies.
+The controller remains the single Docker orchestrator.
 
-Legacy private :443 must be removed **before** public Funnel :443 is
-ever enabled; first stage and validate private Serve :8443. A pre-existing
-public webhook :8443 prevents cutover until disabled (and callback
-consumers must be reconfigured). Validate pinned Tailscale identity and
-whole known Serve/Funnel configuration, refuse unknown routes, and recover
-only along allowlisted transitional states. Web UI and bounded diagnostics
-control normal changes; no routine SSH.
+## Ownership and lifecycle
 
-MCP remains restricted to status and diagnostic ping without independent
-authentication. Authenticated privileged tools are deliberately deferred.
-Webhook handlers still verify source signatures; no wildcard public route
-and no public management UI.
+A root-owned, nonresident Python network reconciler owns the desired-state
+Tailscale Serve/Funnel topology. It is called by release postinstall and a
+systemd retry timer, not by an interactive migration wizard. An allowlisted
+state machine safely moves legacy Serve private 443 and public Funnel
+8443/10000 to private 8443 and public 443. Network errors never silently
+expose private 443 nor force healthy app code to roll back into an
+incompatible networking layout.
 
-## Rejected
+The release-owned installer hook works even when v0.7.2's older independent
+updater performs the upgrade. After verification, it also refreshes the
+standalone updater for subsequent upgrades.
 
-Source-IP/Origin-based routing, publicly accessible dashboard, generic
-reconfig/reset of Tailscale, extra reverse proxy services, and dependence
-on nonstandard public HTTPS ports.
+## Rejected alternatives
+
+Caddy/Nginx, custom Python reverse proxy, standalone gateway container,
+per-integration public daemons, generic user-pluggable proxy framework,
+MCP as a webhook transport, webhook HTTP parsing with Docker controller
+privileges, and operator-driven one-time migration controls.
 
 ## Acceptance
 
-CI + real-host private and independent off-tailnet Funnel TLS/HTTP tests.
-Owner approves before final squash merge/release.
+Unit, frontend, wheel reproducibility, Linux systemd, fresh installer,
+legacy-updater, guarded route cutover, webhook lease and direct-delivery tests.
+External HTTPS/Funnel reachability and real provider callbacks require a
+host/network acceptance test.
