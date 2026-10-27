@@ -66,6 +66,38 @@ class TopologyTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    @patch("urllib.request.urlopen")
+    @patch.object(manage, "run_command")
+    @patch.object(manage, "topology")
+    @patch.object(manage, "pinned_hostname", return_value=HOST)
+    def test_enable_public_webhooks_is_path_scoped_and_preserves_mcp(self, pin, topology, command, urlopen):
+        urlopen.return_value.__enter__.return_value.read.return_value = b'{"scope":"webhook-only"}'
+        topology.side_effect = [Topology("new", False, True),
+                                Topology("new", True, True)]
+        self.assertIn("/hooks/<name>", manage.apply_action("enable_webhooks"))
+        command.assert_called_once_with("tailscale", "funnel", "--yes", "--bg",
+            "--https=443", "--set-path=/hooks/",
+            "http://127.0.0.1:8767/hooks/", timeout=45)
+
+    @patch.object(manage, "run_command")
+    @patch.object(manage, "topology")
+    @patch.object(manage, "pinned_hostname", return_value=HOST)
+    def test_disable_new_public_webhooks_preserves_mcp(self, pin, topology, command):
+        topology.side_effect = [Topology("new", True, True), Topology("new", False, True)]
+        self.assertEqual(manage.apply_action("disable_webhooks"), "webhooks_disabled")
+        command.assert_called_once_with("tailscale", "funnel", "--https=443",
+                                         "--set-path=/hooks/", "off", timeout=30)
+
+    @patch("urllib.request.urlopen", side_effect=OSError("down"))
+    @patch.object(manage, "run_command")
+    @patch.object(manage, "topology", return_value=Topology("new", False, True))
+    @patch.object(manage, "pinned_hostname", return_value=HOST)
+    def test_reject_unhealthy_public_webhook_listener(self, pin, topology, command, urlopen):
+        with self.assertRaises(manage.MCPManagementError) as ctx:
+            manage.apply_action("enable_webhooks")
+        self.assertEqual(ctx.exception.code, "webhook_listener_not_ready")
+        command.assert_not_called()
+
     @patch.object(manage, "log_event")
     @patch.object(manage, "run_command")
     @patch.object(manage, "topology")
