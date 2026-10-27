@@ -148,23 +148,25 @@ async def health(_request: Request) -> Response:
     return Response(b'{"scope":"public-ingress"}', media_type="application/json")
 
 
-def create_app(hostname: str = "") -> Starlette:
-    mcp = make_server()
+def create_app(hostname: str = "", *, mcp_enabled: bool = True,
+               webhooks_enabled: bool = True) -> Starlette:
+    mcp = make_server() if mcp_enabled else None
     @asynccontextmanager
     async def lifespan(_app):
-        async with mcp.session_manager.run():
+        if mcp is not None:
+            async with mcp.session_manager.run():
+                yield
+        else:
             yield
-    return Starlette(
-        routes=[
-            Route("/healthz", health, methods=["GET"]),
-            Route("/hooks/{project}/{route}", webhook, methods=["POST"]),
-            Mount("/", app=mcp.streamable_http_app(
-                stateless_http=True, json_response=True,
-                max_request_body_size=16384,
-                transport_security=transport_security(hostname))),
-        ],
-        lifespan=lifespan,
-    )
+    routes = [Route("/healthz", health, methods=["GET"])]
+    if webhooks_enabled:
+        routes.append(Route("/hooks/{project}/{route}", webhook, methods=["POST"]))
+    if mcp is not None:
+        routes.append(Mount("/", app=mcp.streamable_http_app(
+            stateless_http=True, json_response=True,
+            max_request_body_size=16384,
+            transport_security=transport_security(hostname))))
+    return Starlette(routes=routes, lifespan=lifespan)
 
 
 def main() -> None:
@@ -179,7 +181,10 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
     import uvicorn
-    uvicorn.run(create_app(hostname), host="127.0.0.1", port=args.port,
+    uvicorn.run(create_app(hostname,
+                           mcp_enabled=os.getenv("DEVSTACK_PUBLIC_MCP", "0") == "1",
+                           webhooks_enabled=os.getenv("DEVSTACK_PUBLIC_WEBHOOKS", "0") == "1"),
+                host="127.0.0.1", port=args.port,
                 access_log=False)
 
 
