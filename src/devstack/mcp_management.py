@@ -491,7 +491,7 @@ def status() -> dict:
         gateway = "stopped"
     return {
         "gateway": gateway,
-        "funnel": "enabled" if state["mcp"] and state["phase"] == "new"
+        "funnel": "enabled" if state["mcp"] and state["public_active"]
                   else "unknown" if state["phase"] == "unknown" else "disabled",
         "url": state["url"],
         "private_url": state["private_url"],

@@ -296,13 +296,15 @@ def summary():
         prefs = read_preferences()
         if prefs is None:
             prefs = {"mcp": legacy_mcp, "webhooks": legacy_hooks}
-        return {"phase": "new" if phase in ("new", "private_ready") else phase, "mcp": prefs["mcp"],
+        public_active = phase == "new" and any(prefs.values())
+        return {"phase": "new" if phase in ("new", "private_ready") else phase,
+                "public_active": public_active, "mcp": prefs["mcp"],
                 "webhooks": prefs["webhooks"], "private_url":
                 f"https://{host}:8443/" if phase not in ("legacy", "empty") else
                 f"https://{host}/", "url": f"https://{host}/mcp"
-                if prefs["mcp"] and phase == "new" else None}
+                if prefs["mcp"] and public_active else None}
     except MCPManagementError:
-        return {"phase": "unknown", "mcp": False, "webhooks": False,
+        return {"phase": "unknown", "public_active": False, "mcp": False, "webhooks": False,
                 "private_url": None, "url": None}
 
 
