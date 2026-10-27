@@ -455,7 +455,7 @@ def apply_pending() -> None:
             raise MCPManagementError("request_invalid")
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         with os.fdopen(os.open(REQUEST_FILE, flags), "rb") as source:
-            data = source.read(16)
+            data = source.read(17)  # Reject extra bytes after the longest 16-byte verb
         REQUEST_FILE.unlink()
         if data not in (b"enable", b"disable", b"migrate", b"disable_webhooks"):
             raise MCPManagementError("request_invalid")
