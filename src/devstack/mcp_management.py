@@ -68,7 +68,7 @@ User=root
 ExecStart=/opt/devstack/current/venv/bin/python -m devstack.mcp_management --apply
 NoNewPrivileges=yes
 PrivateTmp=yes
-TimeoutStartSec=90
+TimeoutStartSec=240
 """,
     "devstack-mcp-diagnostics.service": """# Managed by DevStack v0.7+
 [Unit]
