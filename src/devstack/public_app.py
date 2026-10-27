@@ -18,7 +18,8 @@ import re
 import socket
 import threading
 from urllib.error import HTTPError, URLError
-from urllib.request import Request as URLRequest, urlopen
+from urllib.request import (Request as URLRequest, ProxyHandler,
+                            HTTPRedirectHandler, build_opener)
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -79,6 +80,15 @@ def _target_url(target: dict) -> str:
     return f"http://{host}:{port}{path}"
 
 
+class NoRedirect(HTTPRedirectHandler):
+    """Relay application redirects to the webhook caller; never follow them."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_DIRECT_HTTP = build_opener(ProxyHandler({}), NoRedirect())
+
+
 def _forward(target: dict, body: bytes, headers: dict[str, str]):
     url = _target_url(target)
     filtered = {key: value for key, value in headers.items()
@@ -86,7 +96,7 @@ def _forward(target: dict, body: bytes, headers: dict[str, str]):
                 and "\r" not in value and "\n" not in value}
     req = URLRequest(url, data=body, headers=filtered, method="POST")
     try:
-        with urlopen(req, timeout=8) as upstream:
+        with _DIRECT_HTTP.open(req, timeout=8) as upstream:
             status, data = upstream.status, upstream.read(_MAX_BODY + 1)
             kind = upstream.headers.get("Content-Type", "application/octet-stream")
     except HTTPError as exc:
