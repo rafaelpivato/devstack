@@ -21,7 +21,9 @@ from devstack.mcp_management import (MCPManagementError, pinned_hostname,
                                       hostname_from_status, json_command,
                                       run_command, log_event)
 
-PREFS = Path("/var/lib/devstack/public-ingress.json")
+# Persistent root-owned opt-in flags contain no secrets. Place under /etc:
+# /var/lib/devstack is 0700 (controller-owned) and cannot be read by Web.
+PREFS = Path("/etc/devstack-public-ingress.json")
 LOCK_FILE = Path("/run/devstack-network-reconcile.lock")
 ENV_FILE = Path("/etc/devstack-public.env")
 PRIVATE = "http://127.0.0.1:8765"
