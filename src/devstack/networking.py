@@ -250,6 +250,10 @@ def reconcile():
         if phase != "private_ready":
             raise MCPManagementError("old_private_443_not_removed")
     if phase in ("private_ready", "new", "public_ready"):
+        # The v0.7.2 MCP service owns the same loopback port as the new
+        # consolidated public service. Retire it before starting its successor.
+        run_command("systemctl", "disable", "--now",
+                    "devstack-mcp.service", timeout=35)
         _ready_public(host, prefs)
     if phase == "private_ready" and any(prefs.values()):
         run_command("tailscale", "funnel", "--yes", "--bg",

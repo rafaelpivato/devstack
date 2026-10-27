@@ -328,6 +328,11 @@ def activate(
     had_cli_link = os.path.lexists(cli_link)
     point_at(current, target)
     try:
+        # Release-owned preparation runs with root authority, BEFORE the
+        # controller restarts with its dedicated ingress IPC group.
+        if cli_available and release_version(tag) >= (0, 7, 3):
+            execute(str(target / "venv" / "bin" / "python"), "-m",
+                    "devstack.networking", "--prepare", timeout=60)
         restart_services()
         if not healthy(health_url):
             raise RuntimeError(f"Controller+web reconciliation health check failed for {tag}")
@@ -359,6 +364,17 @@ def activate(
         raise RuntimeError(
             f"Update to {tag} failed, restored previous release pointer; check logs"
         ) from exc
+    # Network reconciliation is a separate, resumable release step. A
+    # missing Tailscale enrollment or temporary Funnel failure must not roll
+    # back healthy Python services into an incompatible old ingress layout.
+    # The fixed-purpose root timer retries without any browser interaction.
+    if cli_available and release_version(tag) >= (0, 7, 3):
+        try:
+            execute(str(target / "venv" / "bin" / "python"), "-m",
+                    "devstack.networking", "--reconcile", timeout=240)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            print(f"DevStack network migration pending: {type(exc).__name__}",
+                  file=sys.stderr, flush=True)
     try:
         execute("systemctl", "try-restart", "devstack-bootstrap.service", timeout=30)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
