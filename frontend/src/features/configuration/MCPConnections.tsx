@@ -83,7 +83,12 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       Move the private dashboard to HTTPS :8443 before enabling public HTTPS :443.
       This action preserves private access and rejects unknown Tailscale routes.
       Existing public webhooks on :8443 must be disabled and external callback URLs
-      updated separately before migration. The dashboard address changes.
+      updated separately before migration. The current dashboard tab will
+      disconnect when private :443 is removed. Copy the future private address
+      first, then open that address on your phone after the migration:
+      <pre className="log-view" style={{overflowWrap:"anywhere",whiteSpace:"pre-wrap"}}>{current.network_phase==="legacy"
+        ? current.private_url?.replace(/\\/$/, ":8443/")
+        : current.private_url}</pre>
       <p className="actions"><button type="button" className="primary-button"
         disabled={busy||current.request_pending||current.network_phase==="unknown"}
         onClick={()=>void request("migrate")}>Migrate HTTPS ports</button></p>
