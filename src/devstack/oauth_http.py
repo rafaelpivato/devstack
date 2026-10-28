@@ -61,7 +61,9 @@ def auth_routes(hostname: str, store: OAuthStore) -> list:
                 redirect=q["redirect_uri"], state=q.get("state", ""),
                 resource=resource, scope=q.get("scope") or SCOPE,
             )
-        except (OSError, OAuthError, ValueError):
+        except OAuthError:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        except (OSError, ValueError, TypeError):
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         # The browser must have tailnet access. Public Funnel never sees
         # the private approval page or receives an administrator cookie.
