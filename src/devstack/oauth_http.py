@@ -6,7 +6,7 @@ accepted. The human owner approves in private Serve :8443, never on Funnel.
 from __future__ import annotations
 
 import re
-from urllib.parse import urlencode
+from urllib.parse import urlencode, parse_qs
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
@@ -79,7 +79,14 @@ def auth_routes(hostname: str, store: OAuthStore) -> list:
                 "application/x-www-form-urlencoded"):
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         try:
-            form = await request.form()
+            raw = await request.body()
+            if len(raw) > 4096:
+                raise OAuthError("invalid_request")
+            params = parse_qs(raw.decode("ascii"), keep_blank_values=True,
+                              strict_parsing=True, max_num_fields=12)
+            if any(len(values) != 1 for values in params.values()):
+                raise OAuthError("invalid_request")
+            form = {key: values[0] for key, values in params.items()}
             if (form.get("client_id") != CLIENT_ID
                     or form.get("resource") != resource
                     or request.headers.get("authorization")):

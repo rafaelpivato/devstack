@@ -204,7 +204,7 @@ def prepare():
             raise MCPManagementError("oauth_file_unsafe")
         if not path.exists():
             _atomic(path, contents, 0o660)
-        if not path.is_file() or path.stat().st_uid != 0:
+        if not path.is_file() or path.stat().st_gid != gid:
             raise MCPManagementError("oauth_file_unsafe")
         os.chown(path, 0, gid)
         os.chmod(path, 0o660)
