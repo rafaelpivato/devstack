@@ -6,6 +6,7 @@ accepted. The human owner approves in private Serve :8443, never on Funnel.
 from __future__ import annotations
 
 import re
+import sys
 from urllib.parse import urlencode, parse_qs
 
 from starlette.requests import Request
@@ -17,6 +18,11 @@ from devstack.oauth_store import (
 )
 
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43,128}\Z")
+def diagnostic(code: str) -> None:
+    # Fixed, payload-free codes; never log OAuth state, codes or credentials.
+    print("DEVSTACK_MCP oauth_" + code, file=sys.stderr, flush=True)
+
+
 _CODE = re.compile(r"[A-Za-z0-9_-]{32,128}\Z")
 
 
@@ -61,9 +67,12 @@ def auth_routes(hostname: str, store: OAuthStore) -> list:
                 redirect=q["redirect_uri"], state=q.get("state", ""),
                 resource=resource, scope=q.get("scope") or SCOPE,
             )
+            diagnostic("approval_pending")
         except OAuthError:
+            diagnostic("authorization_invalid")
             return JSONResponse({"error": "invalid_request"}, status_code=400)
         except (OSError, ValueError, TypeError):
+            diagnostic("authorization_store_error")
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         # The browser must have tailnet access. Public Funnel never sees
         # the private approval page or receives an administrator cookie.
@@ -111,13 +120,16 @@ def auth_routes(hostname: str, store: OAuthStore) -> list:
                 )
             else:
                 raise OAuthError("unsupported_grant_type")
+            diagnostic("token_issued")
             return JSONResponse(result, headers={"Cache-Control": "no-store",
                                                  "Pragma": "no-cache"})
         except OAuthError as exc:
+            diagnostic("token_rejected")
             status = 400
             return JSONResponse({"error": str(exc)}, status_code=status,
                                 headers={"Cache-Control": "no-store"})
         except (OSError, ValueError, KeyError, TypeError):
+            diagnostic("token_store_error")
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503,
                                 headers={"Cache-Control": "no-store"})
 
