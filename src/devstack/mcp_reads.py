@@ -48,12 +48,13 @@ class MCPReadClient:
             raise ValueError("invalid_web_port")
         self.web_port = web_port
 
-    def _get(self, path: str) -> dict:
+    def _get(self, path: str, *, timeout: int = 8) -> dict:
         # Paths are constructed below from static templates and validated IDs;
         # arbitrary Web requests are intentionally not supported.
-        if not path.startswith("/api/v2/") or len(path) > 260:
+        if (not path.startswith("/api/v2/") or len(path) > 260
+                or type(timeout) is not int or not 1 <= timeout <= 30):
             raise MCPReadError("invalid_read_route")
-        connection = HTTPConnection("127.0.0.1", self.web_port, timeout=5)
+        connection = HTTPConnection("127.0.0.1", self.web_port, timeout=timeout)
         try:
             connection.request("GET", path, headers={"Accept": "application/json"})
             response = connection.getresponse()
@@ -140,7 +141,7 @@ class MCPReadClient:
         if not any(row.get("id") == repo for row in detail["repositories"]):
             raise MCPReadError("repository_not_in_project")
         name = next(row["name"] for row in detail["repositories"] if row["id"] == repo)
-        data = self._get(f"/api/v2/projects/{target}/repositories/{repo}")
+        data = self._get(f"/api/v2/projects/{target}/repositories/{repo}", timeout=15)
         status = _fields(data, ("branch", "head", "upstream", "ahead", "behind",
                                 "dirty", "status", "working_tree", "staged", "unstaged",
                                 "untracked", "detached"))
@@ -153,7 +154,7 @@ class MCPReadClient:
 
     def services(self, project_id: str) -> dict:
         target = _uuid(project_id)
-        data = self._get(f"/api/v2/projects/{target}/services")
+        data = self._get(f"/api/v2/projects/{target}/services", timeout=30)
         if data.get("project_id") != target:
             raise MCPReadError("project_identity_mismatch")
         services = data.get("services", [])
@@ -169,7 +170,7 @@ class MCPReadClient:
             raise MCPReadError("invalid_tail")
         # Existing controller validates active project, activation generation,
         # project-owned Compose labels, and exact container identity.
-        data = self._get(f"/api/v2/projects/{target}/services/{container}/logs?tail={tail}")
+        data = self._get(f"/api/v2/projects/{target}/services/{container}/logs?tail={tail}", timeout=18)
         if data.get("container_id") != container or not isinstance(data.get("service"), str):
             raise MCPReadError("container_identity_mismatch")
         return {**self._project(target, "service_logs", container, data["service"]),
