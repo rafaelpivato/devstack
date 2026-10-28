@@ -72,6 +72,6 @@ export function MCPConsentScreen() {
       </div>}
       {error && <p className="mcp-consent__error" role="alert">{error}</p>}
     </section>
-    <p className="mcp-consent__footnote">Only you can approve access from your private tailnet.</p>
+    <p className="mcp-consent__footnote">Approval is available only from the private Tailscale dashboard.</p>
   </main>;
 }

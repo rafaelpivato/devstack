@@ -60,6 +60,7 @@ class OAuthFlow(unittest.TestCase):
         location = self._request().headers["location"]
         parsed = urlparse(location)
         self.assertEqual(parsed.netloc, HOST + ":8443")
+        self.assertEqual(parsed.path, "/connect/authorize")
         identifier = parse_qs(parsed.query)["oauth_request"][0]
         pending = self.web.get("/api/v2/devstack/mcp/auth-requests/" + identifier)
         self.assertEqual(pending.status_code, 200)
