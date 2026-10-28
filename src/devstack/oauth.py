@@ -6,6 +6,7 @@ SQLite file, never the administrative controller database or IPC socket.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import hmac
 import os
@@ -75,13 +76,18 @@ class OAuthStore:
                 );
             """)
 
+    @contextmanager
     def _db(self):
         if self.path.is_symlink() or not self.path.is_file():
             raise OAuthError("store_unavailable")
         db = sqlite3.connect(self.path, timeout=3)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=3000")
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def authorize_parameters(params: dict, resource: str) -> dict:

@@ -154,6 +154,10 @@ def main(argv: list[str] | None = None) -> int:
             # so its restricted ingress socket inherits the new group.
             from devstack.networking import prepare, reconcile
             prepare()
+            # Refresh the private Web unit groups so approval can access the
+            # dedicated OAuth state without giving the public gateway admin IPC.
+            subprocess.run(["systemctl", "try-restart", "devstack-web-v2.service"],
+                           check=True, timeout=45)
             subprocess.run(["systemctl", "restart", "devstack-control.service"],
                            check=True, timeout=45)
             from devstack.mcp_management import install_units

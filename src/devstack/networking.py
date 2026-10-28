@@ -43,7 +43,8 @@ Requires=devstack-control.service
 [Service]
 Type=simple
 DynamicUser=yes
-SupplementaryGroups=devstackpublic
+SupplementaryGroups=devstackpublic devstackoauth
+ReadWritePaths=/var/lib/devstack-oauth
 EnvironmentFile=-/etc/devstack-public.env
 ExecStart=/opt/devstack/current/venv/bin/python -m devstack.public_app
 Restart=on-failure
@@ -177,6 +178,32 @@ def prepare():
         grp.getgrnam("devstackpublic")
     except KeyError:
         run_command("groupadd", "--system", "devstackpublic", timeout=15)
+    # A dedicated OAuth group permits token exchange and private approval
+    # without granting the public process devstackipc or Docker access.
+    try:
+        oauth_group = grp.getgrnam("devstackoauth")
+    except KeyError:
+        run_command("groupadd", "--system", "devstackoauth", timeout=15)
+        oauth_group = grp.getgrnam("devstackoauth")
+    oauth_dir = Path("/var/lib/devstack-oauth")
+    if oauth_dir.is_symlink():
+        raise MCPManagementError("oauth_directory_unsafe")
+    oauth_dir.mkdir(mode=0o2770, parents=True, exist_ok=True)
+    os.chown(oauth_dir, 0, oauth_group.gr_gid)
+    os.chmod(oauth_dir, 0o2770)
+    from devstack.oauth import OAuthStore
+    oauth_file = oauth_dir / "oauth.sqlite3"
+    if oauth_file.is_symlink():
+        raise MCPManagementError("oauth_database_unsafe")
+    OAuthStore(oauth_file).bootstrap()
+    os.chown(oauth_file, 0, oauth_group.gr_gid)
+    os.chmod(oauth_file, 0o660)
+    web_dropin = Path("/etc/systemd/system/devstack-web-v2.service.d/20-oauth.conf")
+    _atomic(web_dropin, """# Managed by DevStack v0.7+
+[Service]
+SupplementaryGroups=devstackoauth
+ReadWritePaths=/var/lib/devstack-oauth
+""")
     _atomic(Path(DROPIN),
             "# Managed by DevStack v0.7+\n[Service]\nSupplementaryGroups=docker devstackpublic\n")
     for name, body in (
