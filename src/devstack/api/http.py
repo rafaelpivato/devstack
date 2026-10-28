@@ -373,6 +373,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             (len(segments)==2 and segments[0]=="imports" and
              re.fullmatch(pattern,segments[1],re.IGNORECASE) is not None) or
             segments == ["administration"] or
+            segments == ["connect", "authorize"] or
             segments in (["administration", "ssh"], ["administration", "updates"],
                          ["administration", "diagnostics"], ["administration", "mcp"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],

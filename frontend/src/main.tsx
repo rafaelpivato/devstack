@@ -16,12 +16,18 @@ import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor 
 import { WebhookEditor } from "./features/configuration/WebhookEditor";
 import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
 import { MCPConnectionsScreen } from "./features/configuration/MCPConnections";
+import { MCPConsentScreen } from "./features/configuration/MCPConsent";
 import {DiagnosticsScreen} from "./features/configuration/Diagnostics";
 import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
 import "./styles.css";
 
 /** Canonical DevStack browser frontend: reads controller state only through the guarded API. */
 export function App() {
+  if (window.location.pathname === "/connect/authorize")
+    return <MCPConsentScreen/>;
+  return <DevStackApp/>;
+}
+function DevStackApp() {
   useEffect(watchAppearance,[]);
   const navigation=useNavigation();
   const loadRuntime=useCallback(readRuntime,[]);

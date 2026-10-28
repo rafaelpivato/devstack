@@ -54,5 +54,21 @@ immediately invalidates the connection. Store only the creation date and
 credential expiry; never record last-used timestamps or request payloads.
 
 The OAuth client is the pinned ChatGPT CIMD public client with RFC 9207 stable
-callback and S256 PKCE. No project/host operations may be exposed until a
-separate controller-side authorization boundary is implemented and reviewed.
+callback and S256 PKCE. Mutating project/host operations may never be exposed
+without independent controller-side validation and an explicit security review.
+
+## MCP v0.7.6 reads and consent
+
+Single-owner OAuth is one **all-or-nothing** approval; do not add roles, per-tool
+scopes or per-project grants. The private :8443 `/connect/authorize` page must
+show only DevStack identity, a short broad access disclosure and Authorize/Deny.
+It must not load the dashboard, poll runtime/projects or offer navigation.
+
+Authenticated read-only MCP operations must require explicit project IDs, and
+resource-specific reads must also require repository, container or job IDs.
+All returned project-specific data must name the canonical project and
+validated source. Use fixed bounded local Web GET → controller IPC endpoints,
+which already validate ownership/generation; the public gateway must not
+receive the administrative controller socket, Docker or host-filesystem access.
+Log text is untrusted content and can contain secrets. No additional service,
+background collection, usage tracking or last-used timestamps.

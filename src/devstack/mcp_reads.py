@@ -1,0 +1,215 @@
+"""Bounded, explicitly project-scoped MCP reads via the existing private Web API.
+
+Public gateway never gets Docker, project workspace, controller Unix IPC, or
+host journal access. Each literal allowlisted GET reaches Web :8765, whose
+existing administrative controller client enforces resource ownership.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from http.client import HTTPConnection, HTTPException
+import json
+import re
+
+MAX_BODY = 192 * 1024
+PROJECT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z", re.I)
+CONTAINER_ID = re.compile(r"[a-f0-9]{64}\Z")
+MAX_PROJECTS = 100
+MAX_REPOSITORIES = 100
+
+
+class MCPReadError(ValueError):
+    """Fixed errors: no private Web response body is disclosed on failure."""
+
+
+def _uuid(value: str) -> str:
+    if not isinstance(value, str) or not PROJECT_ID.fullmatch(value):
+        raise MCPReadError("invalid_resource_id")
+    return value.lower()
+
+
+def _container(value: str) -> str:
+    if not isinstance(value, str) or not CONTAINER_ID.fullmatch(value):
+        raise MCPReadError("invalid_container_id")
+    return value
+
+
+def _stamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _fields(value: dict, allowed: tuple[str, ...]) -> dict:
+    return {field: value[field] for field in allowed if field in value}
+
+
+class MCPReadClient:
+    def __init__(self, web_port: int = 8765):
+        if type(web_port) is not int or not 1024 <= web_port <= 65535:
+            raise ValueError("invalid_web_port")
+        self.web_port = web_port
+
+    def _get(self, path: str, *, timeout: int = 8) -> dict:
+        # Paths are constructed below from static templates and validated IDs;
+        # arbitrary Web requests are intentionally not supported.
+        if (not path.startswith("/api/v2/") or len(path) > 260
+                or type(timeout) is not int or not 1 <= timeout <= 30):
+            raise MCPReadError("invalid_read_route")
+        connection = HTTPConnection("127.0.0.1", self.web_port, timeout=timeout)
+        try:
+            connection.request("GET", path, headers={"Accept": "application/json"})
+            response = connection.getresponse()
+            raw = response.read(MAX_BODY + 1)
+            if len(raw) > MAX_BODY:
+                raise MCPReadError("response_too_large")
+            if response.status != 200:
+                raise MCPReadError("read_unavailable" if response.status >= 500 else "resource_unavailable")
+            result = json.loads(raw)
+            if not isinstance(result, dict):
+                raise MCPReadError("invalid_response")
+            return result
+        except (OSError, TimeoutError, HTTPException, UnicodeError, json.JSONDecodeError) as exc:
+            raise MCPReadError("web_unavailable") from exc
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _global(source: str, data: dict) -> dict:
+        return {"scope": "devstack", "source": {"type": source},
+                "captured_at": _stamp(), **data}
+
+    def projects(self) -> dict:
+        values = self._get("/api/v2/projects").get("projects")
+        if not isinstance(values, list) or len(values) > MAX_PROJECTS:
+            raise MCPReadError("invalid_projects")
+        entries = []
+        for value in values:
+            if not isinstance(value, dict) or not PROJECT_ID.fullmatch(str(value.get("id", ""))):
+                raise MCPReadError("invalid_projects")
+            entries.append(_fields(value, ("id", "name", "slug")))
+        return self._global("project_registry", {"projects": entries, "truncated": False})
+
+    def runtime(self) -> dict:
+        value = self._get("/api/v2/runtime")
+        project = None
+        if value.get("project_id") is not None:
+            project = self._project_identity(value["project_id"])
+        return self._global("runtime", {"runtime": _fields(value, (
+            "phase", "project_id", "updated_ns")), "active_project": project})
+
+    def _project_identity(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        for project in self.projects()["projects"]:
+            if project["id"] == target:
+                return {"id": project["id"], "name": project["name"]}
+        raise MCPReadError("project_not_found")
+
+    def _project(self, project_id: str, source_type: str, source_id: str | None = None,
+                 source_name: str | None = None) -> dict:
+        project = self._project_identity(project_id)
+        source = {"type": source_type}
+        if source_id is not None:
+            source["id"] = source_id
+        if source_name is not None:
+            source["name"] = source_name
+        return {"scope": "project", "project": project,
+                "source": source, "captured_at": _stamp()}
+
+    def project(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._get("/api/v2/projects/" + target)
+        entry = data.get("project", {})
+        if not isinstance(entry, dict) or entry.get("id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        identity = {"id": target, "name": entry.get("name")}
+        repositories = data.get("repositories", [])
+        if not isinstance(repositories, list) or len(repositories) > MAX_REPOSITORIES:
+            raise MCPReadError("invalid_repositories")
+        result = self._project(target, "project_registry")
+        if result["project"] != identity:
+            raise MCPReadError("project_identity_mismatch")
+        return {**result,
+                "repositories": [_fields(row, ("id", "name")) for row in repositories],
+                "applications": [_fields(row, ("name", "service", "port"))
+                                 for row in data.get("applications", [])[:100]],
+                "tasks": [_fields(row, ("name", "service", "mode"))
+                          for row in data.get("tasks", [])[:100]],
+                "truncated": False}
+
+    def repository_status(self, project_id: str, repository_id: str) -> dict:
+        target, repo = _uuid(project_id), _uuid(repository_id)
+        detail = self.project(target)
+        if not any(row.get("id") == repo for row in detail["repositories"]):
+            raise MCPReadError("repository_not_in_project")
+        name = next(row["name"] for row in detail["repositories"] if row["id"] == repo)
+        data = self._get(f"/api/v2/projects/{target}/repositories/{repo}", timeout=15)
+        status = _fields(data, ("branch", "head", "upstream", "ahead", "behind",
+                                "dirty", "status", "working_tree", "staged", "unstaged",
+                                "untracked", "detached"))
+        sync = data.get("sync", {})
+        if isinstance(sync, dict):
+            status["sync"] = _fields(sync, ("policy", "status", "error_code", "last_checked_ns",
+                                            "last_updated_ns", "ahead", "behind", "head"))
+        return {**self._project(target, "repository", repo, name),
+                "repository_status": status}
+
+    def services(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._get(f"/api/v2/projects/{target}/services", timeout=30)
+        if data.get("project_id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        services = data.get("services", [])
+        if not isinstance(services, list) or len(services) > 96:
+            raise MCPReadError("invalid_services")
+        return {**self._project(target, "services"),
+                "active": data.get("active") is True,
+                "services": services}
+
+    def service_logs(self, project_id: str, container_id: str, tail: int = 100) -> dict:
+        target, container = _uuid(project_id), _container(container_id)
+        if type(tail) is not int or not 1 <= tail <= 200:
+            raise MCPReadError("invalid_tail")
+        # Existing controller validates active project, activation generation,
+        # project-owned Compose labels, and exact container identity.
+        data = self._get(f"/api/v2/projects/{target}/services/{container}/logs?tail={tail}", timeout=18)
+        if data.get("container_id") != container or not isinstance(data.get("service"), str):
+            raise MCPReadError("container_identity_mismatch")
+        return {**self._project(target, "service_logs", container, data["service"]),
+                "requested_tail": tail,
+                "log": _fields(data, ("text", "logs", "truncated", "lines", "output"))}
+
+    def jobs(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._get(f"/api/v2/projects/{target}/jobs")
+        jobs = data.get("jobs")
+        if not isinstance(jobs, list) or len(jobs) > 40:
+            raise MCPReadError("invalid_jobs")
+        if any(not isinstance(row, dict) or row.get("project_id") != target for row in jobs):
+            raise MCPReadError("job_identity_mismatch")
+        return {**self._project(target, "jobs"),
+                "jobs": [_fields(row, ("id", "kind", "status", "action",
+                                       "started_ns", "finished_ns", "exit_code"))
+                         for row in jobs]}
+
+    def job_logs(self, project_id: str, job_id: str, offset: int = 0) -> dict:
+        target, job = _uuid(project_id), _uuid(job_id)
+        if type(offset) is not int or not 0 <= offset <= 2 * 1024 * 1024:
+            raise MCPReadError("invalid_offset")
+        # Validate ownership even for empty logs. The existing job endpoint
+        # rejects IDs belonging to another project.
+        detail = self._get(f"/api/v2/projects/{target}/jobs/{job}")
+        if detail.get("project_id") != target or detail.get("id") != job:
+            raise MCPReadError("job_identity_mismatch")
+        data = self._get(f"/api/v2/projects/{target}/jobs/{job}/logs?offset={offset}")
+        return {**self._project(target, "job_logs", job),
+                "status": detail.get("status"), "offset": data.get("offset"),
+                "next_offset": data.get("next_offset"), "complete": data.get("complete"),
+                "text": data.get("text", "")}
+
+    def diagnostics(self, minutes: int = 5) -> dict:
+        if type(minutes) is not int or minutes not in (1, 5, 30):
+            raise MCPReadError("invalid_window")
+        data = self._get(f"/api/v2/devstack/diagnostics?minutes={minutes}")
+        return self._global("diagnostics", {"minutes": minutes,
+            "sources": data.get("sources", {}),
+            "events": data.get("events", [])[:250],
+            "truncated": bool(data.get("truncated", False)) or len(data.get("events", [])) > 250})
