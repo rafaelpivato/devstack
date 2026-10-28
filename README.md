@@ -111,3 +111,16 @@ recovery infrastructure itself** (i.e. troubleshooting the troubleshooting).
 It remains an optional power-user CLI, not a required operational workflow.
 
 See [AGENTS.md](AGENTS.md) for the enforceable contributor checklist.
+
+## v0.7.6 — project-scoped MCP reads and focused authorization
+
+The single-owner OAuth decision uses a dedicated private `:8443/connect/authorize`
+page with only Authorize and Deny, not the Administration UI. Approval grants
+all available MCP tools on this workstation; no per-project role management.
+Authenticated MCP clients may read the project registry, runtime, project details,
+repository status, Compose services and logs, jobs and logs, and bounded global
+DevStack diagnostic events. Every project-specific request includes the exact
+project ID and the response names the verified project and source. The public
+MCP process still cannot access administrative controller IPC, Docker or host
+files; reads go through fixed, bounded local Web read endpoints. There are no
+new write operations, long-running log subscriptions or tracking fields.

@@ -96,7 +96,13 @@ class ProtocolTests(unittest.TestCase):
                     async def exercise():
                         async with Client(f"http://127.0.0.1:{mcp_port}/mcp") as client:
                             names = {t.name for t in (await client.list_tools()).tools}
-                            self.assertEqual(names, {"devstack_status", "devstack_ping"})
+                            self.assertEqual(names, {
+                                "devstack_status", "devstack_ping",
+                                "devstack_projects", "devstack_runtime", "devstack_project",
+                                "devstack_repository_status", "devstack_services",
+                                "devstack_service_logs", "devstack_jobs",
+                                "devstack_job_logs", "devstack_diagnostics",
+                            })
                             first = await client.call_tool("devstack_status", {})
                             self.assertFalse(first.is_error)
                             self.assertEqual(first.structured_content["controller"], "connected")

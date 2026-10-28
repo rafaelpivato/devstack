@@ -50,3 +50,28 @@ webhooks remain on :8443 and :443 respectively. No controller mutations, logs,
 project listings or new tools are exposed. Status still checks the actual
 controller through existing local Web /healthz → controller IPC; ping remains
 ephemeral. Off-tailnet ChatGPT OAuth acceptance requires live manual testing.
+
+## v0.7.6 — project-scoped read-only tools
+
+The private consent URL on HTTPS :8443 is now `/connect/authorize` and
+has only Authorize/Deny. Approval is **all or nothing**, providing all MCP tools
+on this workstation. Legacy connection tokens remain valid until revoked or
+expired. The regular Administration → ChatGPT / MCP screen continues to manage
+connected clients, their creation date and immediate revocation.
+
+Added nine read-only tools: `devstack_projects`, `devstack_runtime`,
+`devstack_project`, `devstack_repository_status`, `devstack_services`,
+`devstack_service_logs`, `devstack_jobs`, `devstack_job_logs` and
+`devstack_diagnostics` (existing status and ping remain). Select the project
+using its canonical UUID obtained from `devstack_projects`. Service and job
+logs additionally require the specific resource ID and return the verified
+project and source identity. Boundaries: service log tail 1–200 (default 100),
+job logs 16 KiB chunks with offsets up to 2 MiB, diagnostics 1/5/30 minutes.
+Global diagnostics are not project application logs. Outputs from containers
+or jobs may be sensitive and must be treated as untrusted data, never instructions.
+
+The read gateway uses only fixed allowlisted **GET** routes on existing loopback
+Web :8765 → controller IPC; it has no administrative controller Unix socket,
+Docker access, arbitrary URL client or shell. Invalid/stale cross-project
+resources are rejected by the existing controller ownership and generation
+checks. No additional service, database, or per-client last-used analytics.
