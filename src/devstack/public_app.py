@@ -18,16 +18,18 @@ import re
 import socket
 import threading
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, quote
 from urllib.request import (Request as URLRequest, ProxyHandler,
                             HTTPRedirectHandler, build_opener)
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, JSONResponse, RedirectResponse
 from starlette.routing import Route, Mount
 
 from devstack.control.ingress import _HEADERS, _MAX_BODY
 from devstack.mcp_gateway import make_server, transport_security, public_host
+from devstack.oauth import OAuthStore, OAuthError, CLIENT_ID, SCOPE
 
 INGRESS_SOCKET = "/run/devstack-control/ingress.sock"
 _ALLOWED_ROUTE = re.compile(r"[a-z][a-z0-9_-]{0,62}\Z")
@@ -165,13 +167,135 @@ async def webhook(request: Request) -> Response:
         _SLOTS.release()
 
 
+import sqlite3
+
+
+def oauth_resource(hostname: str) -> str:
+    if not hostname:
+        # For localhost protocol tests only. The deployed hostname is pinned.
+        return "http://127.0.0.1/mcp"
+    return "https://" + public_host(hostname) + "/mcp"
+
+
+def oauth_issuer(hostname: str) -> str:
+    return "https://" + public_host(hostname) if hostname else "http://127.0.0.1"
+
+
+def oauth_error(code: str, status: int = 400) -> Response:
+    return JSONResponse({"error": code}, status_code=status,
+                        headers={"Cache-Control": "no-store"})
+
+
+def oauth_routes(hostname: str, store: OAuthStore) -> list:
+    issuer = oauth_issuer(hostname)
+    resource = oauth_resource(hostname)
+
+    async def resource_metadata(_request: Request):
+        return JSONResponse({"resource": resource, "authorization_servers": [issuer],
+                             "scopes_supported": [SCOPE]},
+                            headers={"Cache-Control": "no-store"})
+
+    async def server_metadata(_request: Request):
+        return JSONResponse({
+            "issuer": issuer,
+            "authorization_endpoint": issuer + "/oauth/authorize",
+            "token_endpoint": issuer + "/oauth/token",
+            "authorization_response_iss_parameter_supported": True,
+            "client_id_metadata_document_supported": True,
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "token_endpoint_auth_methods_supported": ["none"],
+            "code_challenge_methods_supported": ["S256"],
+            "scopes_supported": [SCOPE, "offline_access"],
+        }, headers={"Cache-Control": "no-store"})
+
+    async def authorize(request: Request):
+        pairs = list(request.query_params.multi_items())
+        params = dict(pairs)
+        if len(pairs) != len(params):
+            return oauth_error("invalid_request")
+        try:
+            identifier = store.start(params, resource)
+        except OAuthError as exc:
+            return oauth_error(exc.code, 503 if exc.code in (
+                "store_unavailable", "temporarily_unavailable") else 400)
+        except (OSError, ValueError, sqlite3.Error):
+            return oauth_error("temporarily_unavailable", 503)
+        private_url = ("https://" + hostname + ":8443/administration/mcp/authorize"
+                       + "?request_id=" + quote(identifier))
+        return RedirectResponse(private_url, status_code=303,
+                                headers={"Cache-Control": "no-store",
+                                         "Referrer-Policy": "no-referrer"})
+
+    async def token(request: Request):
+        if request.headers.get("content-type", "").split(";", 1)[0].strip() != \
+                "application/x-www-form-urlencoded":
+            return oauth_error("invalid_request", 415)
+        raw = await request.body()
+        if len(raw) > 4096:
+            return oauth_error("invalid_request", 413)
+        try:
+            pairs = parse_qsl(raw.decode("ascii"), keep_blank_values=True,
+                              strict_parsing=True, max_num_fields=12)
+            payload = dict(pairs)
+            if len(pairs) != len(payload) or set(payload) - {
+                "grant_type", "client_id", "redirect_uri", "code", "code_verifier",
+                "refresh_token", "resource", "scope"}:
+                raise OAuthError("invalid_request")
+            answer = store.exchange(payload, resource)
+        except OAuthError as exc:
+            return oauth_error(exc.code)
+        except (ValueError, UnicodeError):
+            return oauth_error("invalid_request")
+        except (OSError, sqlite3.Error):
+            return oauth_error("temporarily_unavailable", 503)
+        return JSONResponse(answer, headers={"Cache-Control": "no-store",
+                                             "Pragma": "no-cache"})
+
+    return [
+        Route("/.well-known/oauth-protected-resource", resource_metadata, methods=["GET"]),
+        Route("/.well-known/oauth-protected-resource/mcp", resource_metadata, methods=["GET"]),
+        Route("/.well-known/oauth-authorization-server", server_metadata, methods=["GET"]),
+        Route("/oauth/authorize", authorize, methods=["GET"]),
+        Route("/oauth/token", token, methods=["POST"]),
+    ]
+
+
+class AuthenticatedMCP:
+    """ASGI middleware so streaming MCP request bodies are never buffered."""
+
+    def __init__(self, app, hostname: str, store: OAuthStore):
+        self.app, self.store = app, store
+        self.resource = oauth_resource(hostname)
+        self.metadata_url = oauth_issuer(hostname) + "/.well-known/oauth-protected-resource/mcp"
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and (
+                scope.get("path") == "/mcp" or scope.get("path", "").startswith("/mcp/")):
+            headers = {k.lower(): v for k, v in scope.get("headers", [])}
+            authorization = headers.get(b"authorization", b"")
+            valid = (authorization.startswith(b"Bearer ") and
+                     self.store.valid(authorization[7:].decode("ascii", "ignore"), self.resource))
+            if not valid:
+                response = JSONResponse(
+                    {"error": "unauthorized"}, status_code=401,
+                    headers={"WWW-Authenticate":
+                             'Bearer resource_metadata="' + self.metadata_url
+                             + '", scope="' + SCOPE + '"',
+                             "Cache-Control": "no-store"})
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 async def health(_request: Request) -> Response:
     return Response(b'{"scope":"public-ingress"}', media_type="application/json")
 
 
 def create_app(hostname: str = "", *, mcp_enabled: bool = True,
-               webhooks_enabled: bool = True) -> Starlette:
+               webhooks_enabled: bool = True, oauth_store: OAuthStore | None = None):
     mcp = make_server() if mcp_enabled else None
+    store = oauth_store if oauth_store is not None else OAuthStore()
     @asynccontextmanager
     async def lifespan(_app):
         if mcp is not None:
@@ -183,11 +307,13 @@ def create_app(hostname: str = "", *, mcp_enabled: bool = True,
     if webhooks_enabled:
         routes.append(Route("/hooks/{project}/{route}", webhook, methods=["POST"]))
     if mcp is not None:
+        routes.extend(oauth_routes(hostname, store))
         routes.append(Mount("/", app=mcp.streamable_http_app(
             stateless_http=True, json_response=True,
             max_request_body_size=16384,
             transport_security=transport_security(hostname))))
-    return Starlette(routes=routes, lifespan=lifespan)
+    app = Starlette(routes=routes, lifespan=lifespan)
+    return AuthenticatedMCP(app, hostname, store) if mcp is not None else app
 
 
 def main() -> None:
