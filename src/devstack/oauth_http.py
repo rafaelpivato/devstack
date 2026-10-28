@@ -138,7 +138,9 @@ class ProtectedMCP:
                          + "/.well-known/oauth-protected-resource")
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
+        if (scope["type"] != "http" or not (
+                scope.get("path") == "/mcp" or
+                scope.get("path", "").startswith("/mcp/"))):
             await self.app(scope, receive, send)
             return
         headers = {k.lower(): v for k, v in scope.get("headers", [])}
