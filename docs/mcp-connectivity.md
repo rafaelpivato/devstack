@@ -24,3 +24,28 @@ migration control.
 External TLS, MCP initialize and tools/list must be tested off-tailnet;
 Funnel configuration status does not guarantee successful ChatGPT access.
 Issue #101 tracks earlier remote Funnel incompatibility separately.
+
+## v0.7.4 — single-owner OAuth approval
+
+MCP requires OAuth 2.1 authorization-code + S256 PKCE; anonymous status/ping
+calls are no longer accepted on public HTTPS :443. The only allowed client
+is ChatGPT's stable CIMD identity (`https://chatgpt.com/oauth/client.json`)
+with stable callback (`https://chatgpt.com/connector_platform_oauth_redirect`).
+DevStack uses its pinned Tailscale HTTPS hostname for authorization-server
+metadata, and advertises the protected resource `https://<node>.ts.net/mcp`.
+
+On first connection, ChatGPT opens the public `/oauth/authorize` endpoint, which
+sends the browser to the **private** :8443 Administration → ChatGPT / MCP screen.
+The owner must be connected to Tailscale. Approving there redirects back to
+ChatGPT with a short-lived, single-use authorization code. The refresh token
+rotates, while the access token lasts one hour. Both are stored as SHA-256
+hashes in a root-provisioned, group-restricted local JSON store; only
+creation date appears in the private connected-client list. Revoke immediately
+invalidates access and refresh tokens. No last-used tracking or external IdP.
+
+An upgrade from v0.7.3 requires reauthorizing the ChatGPT connector (existing
+anonymous MCP connections no longer work). Private dashboard and public
+webhooks remain on :8443 and :443 respectively. No controller mutations, logs,
+project listings or new tools are exposed. Status still checks the actual
+controller through existing local Web /healthz → controller IPC; ping remains
+ephemeral. Off-tailnet ChatGPT OAuth acceptance requires live manual testing.

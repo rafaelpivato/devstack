@@ -44,3 +44,15 @@ must reject unknown states and preserve private access across **automatic**
 cutover. Do not add interactive one-time migration actions. Privileged MCP project or host
 operations require independent authentication and controller-side authority
 before they may be enabled.
+
+## MCP single-owner OAuth v0.7.4
+
+The public `/mcp` transport must require an OAuth bearer credential, validated
+before MCP tool discovery or execution. The owner approves/denies requests only
+from private Tailscale Serve :8443 via CSRF-protected Web APIs. Revocation
+immediately invalidates the connection. Store only the creation date and
+credential expiry; never record last-used timestamps or request payloads.
+
+The OAuth client is the pinned ChatGPT CIMD public client with RFC 9207 stable
+callback and S256 PKCE. No project/host operations may be exposed until a
+separate controller-side authorization boundary is implemented and reviewed.
