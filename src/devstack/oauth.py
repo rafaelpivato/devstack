@@ -23,6 +23,7 @@ CLIENT_ID = "https://chatgpt.com/oauth/client.json"
 CALLBACK = "https://chatgpt.com/connector_platform_oauth_redirect"
 SCOPE = "devstack:read"
 _CHALLENGE = re.compile(r"[a-zA-Z0-9_-]{43,128}\Z")
+_VERIFIER = re.compile(r"[a-zA-Z0-9._~-]{43,128}\Z")
 _VALUE = re.compile(r"[a-zA-Z0-9_~-]{1,512}\Z")
 PENDING_TTL = 600
 CODE_TTL = 120
@@ -45,8 +46,8 @@ def _utc() -> str:
 
 
 class OAuthStore:
-    def __init__(self, path: Path = DB_PATH):
-        self.path = Path(path)
+    def __init__(self, path: Path | None = None):
+        self.path = Path(path if path is not None else os.environ.get("DEVSTACK_OAUTH_DB_PATH", DB_PATH))
 
     def bootstrap(self) -> None:
         """Only installer/root should initialize the real deployment database."""
@@ -174,7 +175,7 @@ class OAuthStore:
             if grant == "authorization_code":
                 code = payload.get("code", "")
                 verifier = payload.get("code_verifier", "")
-                if (not 16 <= len(code) <= 256 or not _CHALLENGE.fullmatch(verifier)
+                if (not 16 <= len(code) <= 256 or not _VERIFIER.fullmatch(verifier)
                         or payload.get("redirect_uri") != CALLBACK):
                     raise OAuthError("invalid_grant")
                 row = db.execute("SELECT * FROM codes WHERE hash=?", (digest(code),)).fetchone()

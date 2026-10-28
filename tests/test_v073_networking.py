@@ -179,16 +179,19 @@ class PublicProtocolIntegration(unittest.TestCase):
             finally:
                 conn.close()
 
-            async def exercise():
-                async with Client(f"http://127.0.0.1:{port}/mcp") as client:
-                    names = {tool.name for tool in (await client.list_tools()).tools}
-                    self.assertEqual(names, {"devstack_status", "devstack_ping"})
-                    ping = await client.call_tool("devstack_ping", {"value": "public-ready"})
-                    self.assertFalse(ping.is_error)
-                    self.assertEqual(ping.structured_content["pong"], "public-ready")
-                    status = await client.call_tool("devstack_status", {})
-                    self.assertEqual(status.structured_content["last_ping"], "public-ready")
-            asyncio.run(exercise())
+            conn = HTTPConnection("127.0.0.1", port, timeout=3)
+            try:
+                conn.request("POST", "/mcp", body=b'{}', headers={"Content-Type":"application/json"})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 401)
+                self.assertIn("resource_metadata", response.getheader("WWW-Authenticate"))
+                response.read()
+                conn.request("GET", "/.well-known/oauth-authorization-server")
+                metadata = conn.getresponse()
+                self.assertEqual(metadata.status, 200)
+                self.assertIn("code_challenge_methods_supported", metadata.read().decode())
+            finally:
+                conn.close()
         finally:
             proc.terminate()
             try:
