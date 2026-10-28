@@ -149,12 +149,11 @@ class PublicProtocolIntegration(unittest.TestCase):
         import sys
         import time
         from http.client import HTTPConnection
-        from mcp import Client
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0))
             port = reserved.getsockname()[1]
         env = dict(os.environ, DEVSTACK_PUBLIC_MCP="1",
-                   DEVSTACK_PUBLIC_WEBHOOKS="0", DEVSTACK_MCP_PUBLIC_HOST="")
+                   DEVSTACK_PUBLIC_WEBHOOKS="0", DEVSTACK_MCP_PUBLIC_HOST=HOST)
         proc = subprocess.Popen(
             [sys.executable, "-m", "devstack.public_app", "--port", str(port)],
             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -179,16 +178,22 @@ class PublicProtocolIntegration(unittest.TestCase):
             finally:
                 conn.close()
 
-            async def exercise():
-                async with Client(f"http://127.0.0.1:{port}/mcp") as client:
-                    names = {tool.name for tool in (await client.list_tools()).tools}
-                    self.assertEqual(names, {"devstack_status", "devstack_ping"})
-                    ping = await client.call_tool("devstack_ping", {"value": "public-ready"})
-                    self.assertFalse(ping.is_error)
-                    self.assertEqual(ping.structured_content["pong"], "public-ready")
-                    status = await client.call_tool("devstack_status", {})
-                    self.assertEqual(status.structured_content["last_ping"], "public-ready")
-            asyncio.run(exercise())
+            conn = HTTPConnection("127.0.0.1", port, timeout=3)
+            try:
+                conn.request("POST", "/mcp", body=b"{}",
+                             headers={"Content-Type": "application/json"})
+                response = conn.getresponse()
+                self.assertEqual(response.status, 401)
+                self.assertIn("resource_metadata=",
+                              response.getheader("WWW-Authenticate"))
+                response.read()
+                conn.request("GET", "/.well-known/oauth-protected-resource")
+                response = conn.getresponse()
+                self.assertEqual(response.status, 200)
+                metadata = json.loads(response.read())
+                self.assertEqual(metadata["resource"], "https://" + HOST + "/mcp")
+            finally:
+                conn.close()
         finally:
             proc.terminate()
             try:

@@ -136,7 +136,8 @@ def capture_diagnostics() -> None:
         output = run_command(
             "journalctl", "--no-pager", "--output=json", "--since=-30min",
             "--lines=240", "--unit=devstack-mcp.service",
-            "--unit=devstack-mcp-apply.service", timeout=8,
+            "--unit=devstack-mcp-apply.service",
+            "--unit=devstack-public.service", timeout=8,
         )
         available = True
     except MCPManagementError:
@@ -156,7 +157,7 @@ def capture_diagnostics() -> None:
             continue
         level = "error" if str(entry.get("PRIORITY")) in ("0", "1", "2", "3") else "info"
         unit = str(entry.get("_SYSTEMD_UNIT") or entry.get("UNIT") or "")
-        if unit not in {"devstack-mcp.service", "devstack-mcp-apply.service"}:
+        if unit not in {"devstack-mcp.service", "devstack-mcp-apply.service", "devstack-public.service"}:
             continue
         message = entry.get("MESSAGE", "")
         if not isinstance(message, str):
@@ -167,7 +168,9 @@ def capture_diagnostics() -> None:
             if code.startswith(("funnel_error_", "gateway_process_error", "status_unavailable")):
                 level = "error"
         elif level == "error":
-            code = "gateway_process_error" if unit == "devstack-mcp.service" else "funnel_broker_error"
+            code = ("gateway_process_error" if unit == "devstack-mcp.service"
+                    else "public_gateway_error" if unit == "devstack-public.service"
+                    else "funnel_broker_error")
         else:
             continue
         # Each line has only an allowlisted structure and a fixed unit identity.

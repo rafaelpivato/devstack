@@ -1,5 +1,7 @@
-import { useCallback, useState } from "react";
-import { readMCPStatus, requestMCPAction } from "../../api/configuration";
+import { useCallback, useEffect, useState } from "react";
+import { readMCPStatus, requestMCPAction, readMCPConnections, readMCPApproval,
+  decideMCPApproval, revokeMCPConnection, type MCPAuthorizationRequest,
+  type MCPConnection } from "../../api/configuration";
 import { useResource } from "../../hooks/useResource";
 import { Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { NavLink, type Navigator } from "../../navigation/useNavigation";
@@ -18,6 +20,45 @@ const FUNNEL_FIXES: Record<string,string> = {
 
 export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const [serial, setSerial] = useState(0);
+  const approvalId = new URLSearchParams(window.location.search).get("oauth_request");
+  const [approval, setApproval] = useState<MCPAuthorizationRequest|null>(null);
+  const [approvalError, setApprovalError] = useState<string|null>(null);
+  const [connections, setConnections] = useState<MCPConnection[]>([]);
+  const [connectionError, setConnectionError] = useState<string|null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  useEffect(()=>{
+    let alive=true;
+    readMCPConnections().then(result=>{
+      if(alive){setConnections(result.connections);setConnectionError(null);}
+    }).catch(e=>{if(alive)setConnectionError(message(e));});
+    return ()=>{alive=false;};
+  },[serial]);
+  useEffect(()=>{
+    if(!approvalId)return;
+    let alive=true;
+    readMCPApproval(approvalId).then(result=>{
+      if(alive){setApproval(result.request);setApprovalError(null);}
+    }).catch(e=>{if(alive)setApprovalError(message(e));});
+    return ()=>{alive=false;};
+  },[approvalId,serial]);
+  const decide=async(action:"approve"|"deny")=>{
+    if(!approvalId||authBusy)return;
+    setAuthBusy(true);setApprovalError(null);
+    try{
+      const result=await decideMCPApproval(approvalId,action);
+      // Never redirect the browser to an attacker-supplied URL.
+      if(!/^https:\/\/chatgpt\.com\/connector_platform_oauth_redirect\?/.test(result.redirect))
+        throw Error("Unexpected OAuth redirect.");
+      window.location.assign(result.redirect);
+    }catch(e){setApprovalError(message(e));setAuthBusy(false);}
+  };
+  const revoke=async(id:string)=>{
+    if(authBusy||!window.confirm("Revoke this ChatGPT connection immediately?"))return;
+    setAuthBusy(true);setConnectionError(null);
+    try{await revokeMCPConnection(id);setSerial(s=>s+1);}
+    catch(e){setConnectionError(message(e));}
+    finally{setAuthBusy(false);}
+  };
   const [busy, setBusy] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [acceptedWebhookDisable, setAcceptedWebhookDisable] = useState(false);
@@ -47,9 +88,41 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     }catch{setCopyFeedback("Clipboard unavailable. Select the URL to copy.");}
   };
   return <Shell title="ChatGPT / MCP" subtitle="Global — connectivity" navigation={navigation} back>
-    <Notice title="Opt-in public test">This publishes only the DevStack MCP status and ping tools.
-      Funnel is reachable from the public internet and has no authentication yet. Never enter secrets
-      as ping values. Your private DevStack dashboard stays on the tailnet.</Notice>
+    <Notice title="Owner-approved MCP">Public MCP requests require an OAuth connection
+      authorized through this private Tailscale dashboard. No DevStack accounts or passwords
+      are needed. Do not enter secrets as ping values.</Notice>
+    {approvalId&&<section className="card">
+      <h2>Authorize ChatGPT</h2>
+      {!approval&&!approvalError&&<p role="status">Loading the pending connection…</p>}
+      {approval&&<>
+        <p>ChatGPT requests access to this single-owner DevStack workstation.</p>
+        <div className="property"><span>Client</span><strong>{approval.client}</strong></div>
+        <div className="property"><span>Permission</span><strong>{approval.scope}</strong></div>
+        <p className="text-muted">Requested {new Date(approval.created_at).toLocaleString()}</p>
+        <p>Only status and ping are currently available. Future controller operations
+          will require their own security review.</p>
+        <div className="actions">
+          <button type="button" className="primary-button" disabled={authBusy}
+            onClick={()=>void decide("approve")}>Approve connection</button>
+          <button type="button" className="text-button" disabled={authBusy}
+            onClick={()=>void decide("deny")}>Deny</button>
+        </div>
+      </>}
+      {approvalError&&<Notice title="Cannot authorize connection" role="alert">{approvalError}</Notice>}
+    </section>}
+    <section className="card">
+      <h2>Authorized connections</h2>
+      <p className="text-muted">Only creation date is stored; DevStack does not track
+        when a client last used MCP.</p>
+      {connections.length===0&&!connectionError&&<p>No connections approved yet.</p>}
+      {connections.map(item=><div className="property" key={item.id}>
+        <span><strong>{item.name}</strong><span className="text-muted" style={{display:"block"}}>
+          Created {new Date(item.created_at).toLocaleString()}</span></span>
+        <button type="button" className="text-button" disabled={authBusy}
+          onClick={()=>void revoke(item.id)}>Revoke</button>
+      </div>)}
+      {connectionError&&<Notice title="Cannot load connections" role="alert">{connectionError}</Notice>}
+    </section>
     {state.kind==="loading"&&<Skeleton/>}
     {state.kind==="error"&&<Notice title="Cannot check MCP status" role="alert">{state.error.message}</Notice>}
     {current&&<section className="card">
@@ -87,7 +160,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       </Notice>}
     {!enabled&&<label className="confirm-label"><input type="checkbox"
       checked={accepted} onChange={e=>setAccepted(e.target.checked)}/>
-      I understand this temporarily exposes the unauthenticated status and ping tools publicly.
+      I understand this enables a publicly reachable OAuth-protected MCP endpoint.
     </label>}
     <div className="actions">
       <button type="button" className="primary-button"
@@ -144,10 +217,10 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
         {current.webhooks_enabled?"Disable public webhooks":"Enable public webhooks"}
       </button></div>
     </section>}
-    <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL and add it
-      as a custom MCP server in ChatGPT web, choosing No authentication when available.
-      Test devstack_status and devstack_ping. Plugin availability and remote HTTPS support depend on your ChatGPT account and client. You may need to approve
-      Funnel in the Tailscale administration console on first use.</Notice>
+    <Notice title="Connecting ChatGPT">After enabling, add the HTTPS MCP URL in ChatGPT
+      with OAuth authentication. Approve the connection from this private dashboard while
+      connected to Tailscale, then test devstack_status and devstack_ping.
+      Existing unauthenticated connections must be reconnected after this upgrade.</Notice>
     <p className="actions"><NavLink to={ADMIN_ROOT} navigate={navigation.navigate}>Administration →</NavLink></p>
   </Shell>;
 }

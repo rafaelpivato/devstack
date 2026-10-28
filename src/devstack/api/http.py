@@ -24,6 +24,7 @@ from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
 from devstack.diagnostics import DiagnosticStore, MAX_EVENTS
 from devstack.mcp_diagnostics import snapshot as mcp_diagnostics_snapshot, DEFAULT_SNAPSHOT as MCP_DIAGNOSTICS_PATH
 from devstack.mcp_management import MCPManagementError, request_action as request_mcp_action, status as mcp_status
+from devstack.oauth_store import OAuthError, OAuthStore, STORE as MCP_OAUTH_STORE
 from devstack.update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
     request_update, updater_service_events,
@@ -50,6 +51,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             "DEVSTACK_WEB_DIAGNOSTICS_FALLBACK_PATH",
             "/run/devstack-update-request/web-diagnostics.sqlite3"),
         MCP_DIAGNOSTICS_PATH=os.environ.get("DEVSTACK_MCP_DIAGNOSTICS_PATH", str(MCP_DIAGNOSTICS_PATH)),
+        MCP_OAUTH_STORE_PATH=os.environ.get("DEVSTACK_MCP_OAUTH_STORE", str(MCP_OAUTH_STORE)),
         CONTROLLER_SOCKET=os.environ.get(
             "DEVSTACK_CONTROL_SOCKET", "/run/devstack-control/control.sock"),
     )
@@ -273,6 +275,54 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             record_web("web-mcp-request-failed", level="warning")
             return jsonify({"ok": False, "message": "MCP request not queued: " + exc.code}), 409
         return jsonify({"message": "MCP " + action + " queued", "request_pending": True}), 202
+
+
+    def oauth_store():
+        return OAuthStore(Path(app.config["MCP_OAUTH_STORE_PATH"]))
+
+    @app.get("/api/v2/devstack/mcp/connections")
+    def mcp_connections_api():
+        try:
+            return jsonify({"connections": oauth_store().connections()})
+        except (OSError, ValueError, TypeError):
+            return jsonify({"ok": False, "message": "MCP authorization store unavailable."}), 503
+
+    @app.get("/api/v2/devstack/mcp/auth-requests/<identifier>")
+    def mcp_auth_request_api(identifier):
+        try:
+            return jsonify({"request": oauth_store().pending(identifier)})
+        except OAuthError:
+            return jsonify({"ok": False, "message": "Approval request expired or unavailable."}), 404
+        except (OSError, ValueError, TypeError):
+            return jsonify({"ok": False, "message": "MCP authorization store unavailable."}), 503
+
+    @app.post("/api/v2/devstack/mcp/auth-requests/<identifier>/<decision>")
+    def mcp_auth_decide_api(identifier, decision):
+        if decision not in {"approve", "deny"}:
+            abort(404)
+        if not request.is_json or request.get_json(silent=True) != {}:
+            abort(400)
+        try:
+            destination = oauth_store().decide(identifier, approve=decision == "approve")
+            record_web("web-mcp-auth-" + ("approved" if decision == "approve" else "denied"))
+            return jsonify({"redirect": destination})
+        except OAuthError:
+            return jsonify({"ok": False, "message": "Approval request expired or unavailable."}), 404
+        except (OSError, ValueError, TypeError):
+            record_web("web-mcp-auth-error", level="warning")
+            return jsonify({"ok": False, "message": "MCP authorization store unavailable."}), 503
+
+    @app.delete("/api/v2/devstack/mcp/connections/<identifier>")
+    def mcp_revoke_api(identifier):
+        try:
+            oauth_store().revoke(identifier)
+            record_web("web-mcp-auth-revoked")
+            return jsonify({"revoked": True})
+        except OAuthError:
+            return jsonify({"ok": False, "message": "Connection not found."}), 404
+        except (OSError, ValueError, TypeError):
+            record_web("web-mcp-auth-error", level="warning")
+            return jsonify({"ok": False, "message": "MCP authorization store unavailable."}), 503
 
     @app.get("/healthz")
     def healthz():

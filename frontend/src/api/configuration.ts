@@ -77,3 +77,19 @@ export const readMCPStatus=(signal?:AbortSignal)=>
   apiRequest<MCPStatus>("/api/v2/devstack/mcp",{signal});
 export const requestMCPAction=(action:"enable"|"disable"|"disable_webhooks"|"enable_webhooks")=>
   apiRequest<{message:string;request_pending:true}>("/api/v2/devstack/mcp/"+action,{method:"POST",body:{}});
+
+export interface MCPAuthorizationRequest {
+  id:string; client:string; created_at:string; scope:string;
+}
+export interface MCPConnection {
+  id:string;name:string;created_at:string;scope:string;
+}
+export const readMCPConnections=()=>
+  apiRequest<{connections:MCPConnection[]}>("/api/v2/devstack/mcp/connections");
+export const readMCPApproval=(id:string)=>
+  apiRequest<{request:MCPAuthorizationRequest}>("/api/v2/devstack/mcp/auth-requests/"+encodeURIComponent(id));
+export const decideMCPApproval=(id:string,action:"approve"|"deny")=>
+  apiRequest<{redirect:string}>("/api/v2/devstack/mcp/auth-requests/"+
+    encodeURIComponent(id)+"/"+action,{method:"POST",body:{}});
+export const revokeMCPConnection=(id:string)=>
+  apiRequest<{revoked:boolean}>("/api/v2/devstack/mcp/connections/"+encodeURIComponent(id),{method:"DELETE"});

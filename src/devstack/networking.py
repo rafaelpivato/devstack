@@ -34,6 +34,8 @@ UNIT = "/etc/systemd/system/devstack-public.service"
 RECONCILER = "/etc/systemd/system/devstack-network-reconcile.service"
 TIMER = "/etc/systemd/system/devstack-network-reconcile.timer"
 DROPIN = "/etc/systemd/system/devstack-control.service.d/10-public-ingress.conf"
+WEB_OAUTH_DROPIN = "/etc/systemd/system/devstack-web-v2.service.d/20-mcp-oauth.conf"
+OAUTH_DIR = Path("/var/lib/devstack-oauth")
 
 PUBLIC_UNIT = """# Managed by DevStack v0.7+
 [Unit]
@@ -51,6 +53,7 @@ RestartSec=3
 NoNewPrivileges=yes
 ProtectHome=yes
 ProtectSystem=strict
+ReadWritePaths=/var/lib/devstack-oauth
 PrivateTmp=yes
 PrivateDevices=yes
 CapabilityBoundingSet=
@@ -179,6 +182,32 @@ def prepare():
         run_command("groupadd", "--system", "devstackpublic", timeout=15)
     _atomic(Path(DROPIN),
             "# Managed by DevStack v0.7+\n[Service]\nSupplementaryGroups=docker devstackpublic\n")
+    # Private owner approval and public token verification share only this
+    # bounded store, never the Docker/controller administration socket.
+    _atomic(Path(WEB_OAUTH_DROPIN),
+            "# Managed by DevStack v0.7+\n[Service]\n"
+            "SupplementaryGroups=devstackpublic\n"
+            "ReadWritePaths=/var/lib/devstack-oauth\n")
+    import grp
+    gid = grp.getgrnam("devstackpublic").gr_gid
+    if OAUTH_DIR.is_symlink():
+        raise MCPManagementError("oauth_directory_unsafe")
+    OAUTH_DIR.mkdir(parents=True, exist_ok=True, mode=0o2770)
+    os.chown(OAUTH_DIR, 0, gid)
+    os.chmod(OAUTH_DIR, 0o2770)
+    from devstack.oauth_store import _new_state
+    for path, contents in (
+        (OAUTH_DIR / "state.json", json.dumps(_new_state()) + "\n"),
+        (OAUTH_DIR / "state.lock", ""),
+    ):
+        if path.is_symlink():
+            raise MCPManagementError("oauth_file_unsafe")
+        if not path.exists():
+            _atomic(path, contents, 0o660)
+        if not path.is_file() or path.stat().st_gid != gid:
+            raise MCPManagementError("oauth_file_unsafe")
+        os.chown(path, 0, gid)
+        os.chmod(path, 0o660)
     for name, body in (
             (UNIT, PUBLIC_UNIT), (RECONCILER, RECONCILE_UNIT),
             (TIMER, RECONCILE_TIMER)):

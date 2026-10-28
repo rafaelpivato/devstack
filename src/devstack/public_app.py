@@ -28,6 +28,8 @@ from starlette.routing import Route, Mount
 
 from devstack.control.ingress import _HEADERS, _MAX_BODY
 from devstack.mcp_gateway import make_server, transport_security, public_host
+from devstack.oauth_http import auth_routes, ProtectedMCP
+from devstack.oauth_store import OAuthStore
 
 INGRESS_SOCKET = "/run/devstack-control/ingress.sock"
 _ALLOWED_ROUTE = re.compile(r"[a-z][a-z0-9_-]{0,62}\Z")
@@ -170,8 +172,12 @@ async def health(_request: Request) -> Response:
 
 
 def create_app(hostname: str = "", *, mcp_enabled: bool = True,
-               webhooks_enabled: bool = True) -> Starlette:
-    mcp = make_server() if mcp_enabled else None
+               webhooks_enabled: bool = True,
+               auth_store: OAuthStore | None = None) -> Starlette:
+    # Empty hostname may occur only in old tests or a misconfigured host.
+    # Without a canonical pinned public FQDN, do not publish MCP.
+    mcp = make_server() if mcp_enabled and hostname else None
+    store = auth_store if auth_store is not None else OAuthStore()
     @asynccontextmanager
     async def lifespan(_app):
         if mcp is not None:
@@ -183,10 +189,13 @@ def create_app(hostname: str = "", *, mcp_enabled: bool = True,
     if webhooks_enabled:
         routes.append(Route("/hooks/{project}/{route}", webhook, methods=["POST"]))
     if mcp is not None:
-        routes.append(Mount("/", app=mcp.streamable_http_app(
-            stateless_http=True, json_response=True,
-            max_request_body_size=16384,
-            transport_security=transport_security(hostname))))
+        routes.extend(auth_routes(hostname, store))
+        routes.append(Mount("/", app=ProtectedMCP(
+            mcp.streamable_http_app(
+                stateless_http=True, json_response=True,
+                max_request_body_size=16384,
+                transport_security=transport_security(hostname)),
+            hostname=hostname, store=store)))
     return Starlette(routes=routes, lifespan=lifespan)
 
 
