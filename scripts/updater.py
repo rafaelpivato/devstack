@@ -307,7 +307,10 @@ def activate(
     current = root / "current"
     failed = state / ("failed-" + tag)
     if failed.exists():
-        return f"Skipping previously failed release {tag}; operator action required to retry"
+        # A previously rolled-back release is NOT a successful update. Older
+        # versions silently returned exit 0 and masked a failed upgrade in
+        # Web diagnostics. Require a corrected newer release instead.
+        raise RuntimeError(f"Release {tag} previously failed; install a corrected release")
     old = current_release(current)
     target = root / "releases" / tag
     if old == target and (target / ".ready").exists():
@@ -335,7 +338,7 @@ def activate(
             # The root updater runs the release-owned collision-safe setup.
             # It installs a symlink to /opt/devstack/current, never a copied CLI.
             execute(str(target / "venv" / "bin" / "python"), "-m",
-                    "devstack.cli.install", "--root", str(root), timeout=25)
+                    "devstack.cli.install", "--root", str(root), timeout=120)
     except Exception as exc:
         # Do not leave the new command dangling after rollback to v0.5.2.
         if (cli_available and not had_cli_link and cli_link.is_symlink()

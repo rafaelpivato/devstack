@@ -139,8 +139,13 @@ def updater_service_events(minutes: int) -> dict:
                 continue
             at_ns = boot_epoch_ns + int(value) * 1_000
             if cutoff_ns <= at_ns <= now_ns:
+                result = update_state()
+                failed = code == "updater-exited" and (
+                    result.get("phase") == "failed"
+                    or result.get("last_exit_code") not in ("0", "", None))
                 events.append({"at": at_ns // 1_000_000, "source": "updater",
-                               "level": "info", "code": code})
+                               "level": "error" if failed else "info",
+                               "code": "updater-failed" if failed else code})
         return {"events": events, "available": True}
     except (OSError, subprocess.SubprocessError, ValueError):
         return {"events": [], "available": False}

@@ -152,28 +152,29 @@ def main(argv: list[str] | None = None) -> int:
             # hook even though that updater knows nothing about networking.
             # Bootstrap dedicated public group/units, then restart controller
             # so its restricted ingress socket inherits the new group.
-            from devstack.networking import prepare, reconcile
+            from devstack.networking import prepare
             prepare()
-            subprocess.run(["systemctl", "try-restart", "devstack-web-v2.service"],
-                           check=True, timeout=45)
-            subprocess.run(["systemctl", "restart", "devstack-control.service"],
-                           check=True, timeout=45)
+            # The installed updater (including v0.7.3) allows only 25 seconds
+            # for this entire trusted postinstall. Never wait for a potentially
+            # slow Tailscale Funnel/HTTPS reconciliation here.
+            # The existing root-owned timer performs it independently.
+            subprocess.run(["systemctl", "--no-block", "try-restart",
+                            "devstack-web-v2.service", "devstack-control.service"],
+                           check=True, timeout=8)
             from devstack.mcp_management import install_units
             install_units()
-            # A temporary Tailscale failure is not an app rollback: the
-            # reconcile timer retries without exposing the private dashboard.
-            try:
-                reconcile()
-            except Exception as exc:
-                print("dev: network reconciliation pending: "
-                      + type(exc).__name__, file=sys.stderr, flush=True)
-            try:
-                subprocess.run(["systemctl", "start",
-                                "devstack-network-reconcile.timer"],
-                               check=True, timeout=20)
-            except (OSError, subprocess.SubprocessError):
-                print("dev: network retry timer unavailable",
-                      file=sys.stderr, flush=True)
+            # Critical: an already-active public process may still be serving
+            # the old *unauthenticated* MCP code. Queue a restart of the new
+            # wheel's ASGI entrypoint on every upgrade, even if the Funnel
+            # preference/environment is unchanged. Do not expose new ports.
+            subprocess.run(["systemctl", "--no-block", "try-restart",
+                            "devstack-public.service"],
+                           check=True, timeout=8)
+            # Start the existing idempotent root timer: it reconciles known
+            # Serve/Funnel layouts (with retry) outside the 25-second hook.
+            subprocess.run(["systemctl", "--no-block", "start",
+                            "devstack-network-reconcile.timer"],
+                           check=True, timeout=8)
         if args.user:
             authorize_operator(args.user)
     except (CLIInstallError, OSError, subprocess.CalledProcessError) as exc:
