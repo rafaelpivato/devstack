@@ -139,12 +139,13 @@ class OAuthStore:
                     "created_at": row["created_at"], "scope": row["scope"]}
         return self._read(read)
 
-    def decide(self, identifier: str, *, approve: bool, issuer: str) -> str:
+    def decide(self, identifier: str, *, approve: bool) -> str:
         def decide(data):
             row = data["pending"].pop(identifier, None)
             if not row:
                 raise OAuthError("request_not_found")
             redirect = row["redirect"]
+            issuer = row["resource"].removesuffix("/mcp")
             if not approve:
                 return redirect + "?" + urlencode({
                     "error": "access_denied", "state": row["state"], "iss": issuer,
