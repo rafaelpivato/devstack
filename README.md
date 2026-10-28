@@ -24,6 +24,10 @@ through the private :8443 dashboard. The owner can see the connection creation
 date and revoke access without any activity/last-used tracking. No external
 identity provider, additional daemon or developer account database is required.
 
+For v0.7.5, a failed release is no longer reported as a successful updater
+exit. The root-owned network reconciler runs independently of the short
+post-install deadline and the public MCP service reloads the selected wheel.
+
 The controller is internal and Docker-privileged; public webhook payloads
 go directly to the approved project container, using a narrow authorization
 socket. No additional reverse proxy or infrastructure container is needed.
