@@ -19,6 +19,11 @@ The React project-first mobile UI is canonical at `/`; prior `/__v06` bookmarks 
 DevStack uses two HTTP-facing native systemd services behind Tailscale:
 private dashboard via **Serve HTTPS 8443**, and opt-in public MCP/webhooks
 via **Funnel HTTPS 443** to one unprivileged `devstack-public` application.
+As of **v0.7.4**, MCP requests require a single-owner OAuth connection approved
+through the private :8443 dashboard. The owner can see the connection creation
+date and revoke access without any activity/last-used tracking. No external
+identity provider, additional daemon or developer account database is required.
+
 The controller is internal and Docker-privileged; public webhook payloads
 go directly to the approved project container, using a narrow authorization
 socket. No additional reverse proxy or infrastructure container is needed.

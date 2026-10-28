@@ -5,14 +5,15 @@ The single unprivileged `devstack-public` service handles MCP at
 Tailscale Funnel is the HTTPS :443 reverse proxy to that one local service.
 The dashboard remains private on Tailscale Serve HTTPS :8443.
 
-The public MCP test exposes only `devstack_status` and `devstack_ping`.
+The MCP endpoint exposes only `devstack_status` and `devstack_ping` in v0.7.4.
 It has no Docker privilege and no general controller administration socket.
 Controller health is obtained through the existing private loopback Web
 health API, with no sensitive project data returned.
 
-To connect, open Administration → ChatGPT / MCP on your private dashboard,
-explicitly enable the MCP public endpoint, and copy the URL into ChatGPT
-custom MCP setup, choosing No authentication for this constrained test.
+To connect, open Administration → ChatGPT / MCP on the private dashboard,
+explicitly enable the MCP public endpoint, and copy its URL into ChatGPT.
+Choose OAuth authentication. The login/consent browser must have access to
+Tailscale Serve :8443; approve the pending connection from that page.
 Use `devstack_status`, `devstack_ping`, then `devstack_status` to
 confirm the ephemeral last ping.
 
