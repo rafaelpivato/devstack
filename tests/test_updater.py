@@ -126,8 +126,8 @@ class DeploymentTests(unittest.TestCase):
             state = Path(d) / "state"
             state.mkdir()
             (state / "failed-v1.0.1").write_text("bad release")
-            status = updater.activate("v1.0.1", "rafaelpivato/devstack", root, state)
-            self.assertIn("Skipping", status)
+            with self.assertRaisesRegex(RuntimeError, "previously failed"):
+                updater.activate("v1.0.1", "rafaelpivato/devstack", root, state)
             execute.assert_not_called()
 
 

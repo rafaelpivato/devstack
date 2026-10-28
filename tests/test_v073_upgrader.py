@@ -15,9 +15,9 @@ class UpgradeTests(unittest.TestCase):
               patch.object(cli,"install_command",side_effect=record("cli")),
               patch.object(cli,"refresh_updater",side_effect=record("refresh")),
               patch("devstack.networking.prepare",side_effect=record("prepare")),
-              patch("devstack.networking.reconcile",side_effect=record("reconcile")),
               patch("devstack.mcp_management.install_units",side_effect=record("units")),
               patch.object(cli.subprocess,"run",side_effect=record("systemctl"))):
             self.assertEqual(cli.main([]),0)
-        self.assertLess(events.index("refresh"),events.index("reconcile"))
-        self.assertLess(events.index("prepare"),events.index("reconcile"))
+        self.assertLess(events.index("refresh"),events.index("prepare"))
+        self.assertNotIn("reconcile", events)
+        self.assertIn("systemctl", events)
