@@ -203,3 +203,31 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:va
  background:var(--code-bg);border:1px solid var(--line);border-radius:9px;padding:12px;
  font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
 @media(max-width:360px){.diagnostic-controls{gap:7px}.diagnostic-controls label{width:100%}}
+
+
+/* Single-purpose OAuth consent: no global navigation or unrelated dashboard. */
+.mcp-consent {min-height:100dvh;display:flex;flex-direction:column;align-items:center;
+ justify-content:center;padding:24px 16px calc(24px + env(safe-area-inset-bottom));}
+.mcp-consent__brand {display:flex;align-items:center;justify-content:center;gap:10px;
+ font-weight:740;font-size:1.04rem;letter-spacing:-.02em;margin-bottom:16px;}
+.mcp-consent__brand-mark {color:var(--accent);font-size:1.4rem;}
+.mcp-consent__card {width:100%;max-width:430px;padding:28px 24px;background:var(--panel);
+ border:1px solid var(--line);border-radius:18px;}
+.mcp-consent__eyebrow {text-align:center;color:var(--muted);font-size:.82rem;margin:0 0 14px;}
+.mcp-consent__icon {width:56px;height:56px;display:grid;place-items:center;
+ margin:0 auto 18px;border-radius:15px;background:var(--canvas);font-size:1.35rem;}
+.mcp-consent h1 {font-size:1.48rem;line-height:1.25;text-align:center;margin:0 0 12px;}
+.mcp-consent__description {color:var(--muted);line-height:1.6;text-align:center;margin:0 0 18px;}
+.mcp-consent__disclosure {border-top:1px solid var(--line);padding:16px 0;
+ font-size:.94rem;line-height:1.55;}
+.mcp-consent__disclosure p {margin:0 0 8px;}
+.mcp-consent__disclosure p:last-child {margin-bottom:0;}
+.mcp-consent__actions {display:grid;gap:10px;margin-top:10px;}
+.mcp-consent__actions button {width:100%;min-height:48px;border-radius:11px;padding:10px 16px;}
+.mcp-consent__approve {background:var(--accent);color:var(--canvas);border:1px solid var(--accent);
+ font-weight:700;}
+.mcp-consent__deny {background:transparent;border:1px solid var(--line);}
+.mcp-consent__actions button:disabled {opacity:.6;cursor:wait;}
+.mcp-consent__error {margin-top:12px;color:var(--warning);}
+.mcp-consent__footnote {color:var(--muted);font-size:.8rem;text-align:center;margin:14px auto 0;}
+@media (max-width:360px) {.mcp-consent__card {padding:22px 16px;}}

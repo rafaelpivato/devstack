@@ -76,7 +76,7 @@ def auth_routes(hostname: str, store: OAuthStore) -> list:
             return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
         # The browser must have tailnet access. Public Funnel never sees
         # the private approval page or receives an administrator cookie.
-        destination = issuer + ":8443/administration/mcp?" + urlencode(
+        destination = issuer + ":8443/connect/authorize?" + urlencode(
             {"oauth_request": identifier})
         return RedirectResponse(destination, status_code=303, headers={
             "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",

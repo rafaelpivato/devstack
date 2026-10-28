@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { readMCPStatus, requestMCPAction, readMCPConnections, readMCPApproval,
-  decideMCPApproval, revokeMCPConnection, type MCPAuthorizationRequest,
-  type MCPConnection } from "../../api/configuration";
+import { readMCPStatus, requestMCPAction, readMCPConnections,
+  revokeMCPConnection, type MCPConnection } from "../../api/configuration";
 import { useResource } from "../../hooks/useResource";
 import { Notice, Shell, Skeleton, Status } from "../../components/Shell";
 import { NavLink, type Navigator } from "../../navigation/useNavigation";
@@ -20,9 +19,6 @@ const FUNNEL_FIXES: Record<string,string> = {
 
 export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const [serial, setSerial] = useState(0);
-  const approvalId = new URLSearchParams(window.location.search).get("oauth_request");
-  const [approval, setApproval] = useState<MCPAuthorizationRequest|null>(null);
-  const [approvalError, setApprovalError] = useState<string|null>(null);
   const [connections, setConnections] = useState<MCPConnection[]>([]);
   const [connectionError, setConnectionError] = useState<string|null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -33,25 +29,6 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     }).catch(e=>{if(alive)setConnectionError(message(e));});
     return ()=>{alive=false;};
   },[serial]);
-  useEffect(()=>{
-    if(!approvalId)return;
-    let alive=true;
-    readMCPApproval(approvalId).then(result=>{
-      if(alive){setApproval(result.request);setApprovalError(null);}
-    }).catch(e=>{if(alive)setApprovalError(message(e));});
-    return ()=>{alive=false;};
-  },[approvalId,serial]);
-  const decide=async(action:"approve"|"deny")=>{
-    if(!approvalId||authBusy)return;
-    setAuthBusy(true);setApprovalError(null);
-    try{
-      const result=await decideMCPApproval(approvalId,action);
-      // Never redirect the browser to an attacker-supplied URL.
-      if(!/^https:\/\/chatgpt\.com\/connector_platform_oauth_redirect\?/.test(result.redirect))
-        throw Error("Unexpected OAuth redirect.");
-      window.location.assign(result.redirect);
-    }catch(e){setApprovalError(message(e));setAuthBusy(false);}
-  };
   const revoke=async(id:string)=>{
     if(authBusy||!window.confirm("Revoke this ChatGPT connection immediately?"))return;
     setAuthBusy(true);setConnectionError(null);
@@ -88,28 +65,9 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     }catch{setCopyFeedback("Clipboard unavailable. Select the URL to copy.");}
   };
   return <Shell title="ChatGPT / MCP" subtitle="Global — connectivity" navigation={navigation} back>
-    <Notice title="Owner-approved MCP">Public MCP requests require an OAuth connection
-      authorized through this private Tailscale dashboard. No DevStack accounts or passwords
-      are needed. Do not enter secrets as ping values.</Notice>
-    {approvalId&&<section className="card">
-      <h2>Authorize ChatGPT</h2>
-      {!approval&&!approvalError&&<p role="status">Loading the pending connection…</p>}
-      {approval&&<>
-        <p>ChatGPT requests access to this single-owner DevStack workstation.</p>
-        <div className="property"><span>Client</span><strong>{approval.client}</strong></div>
-        <div className="property"><span>Permission</span><strong>{approval.scope}</strong></div>
-        <p className="text-muted">Requested {new Date(approval.created_at).toLocaleString()}</p>
-        <p>Only status and ping are currently available. Future controller operations
-          will require their own security review.</p>
-        <div className="actions">
-          <button type="button" className="primary-button" disabled={authBusy}
-            onClick={()=>void decide("approve")}>Approve connection</button>
-          <button type="button" className="text-button" disabled={authBusy}
-            onClick={()=>void decide("deny")}>Deny</button>
-        </div>
-      </>}
-      {approvalError&&<Notice title="Cannot authorize connection" role="alert">{approvalError}</Notice>}
-    </section>}
+    <Notice title="Owner-approved MCP">A single authorization grants the connected
+      client access to all available DevStack MCP tools. Connection approval uses a
+      dedicated private page. Do not enter secrets as ping values.</Notice>
     <section className="card">
       <h2>Authorized connections</h2>
       <p className="text-muted">Only creation date is stored; DevStack does not track
