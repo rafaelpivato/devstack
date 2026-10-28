@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { apiRequest } from "../../api/client";
 import { readMCPStatus, requestMCPAction } from "../../api/configuration";
 import { useResource } from "../../hooks/useResource";
 import { Notice, Shell, Skeleton, Status } from "../../components/Shell";
@@ -47,9 +48,9 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
     }catch{setCopyFeedback("Clipboard unavailable. Select the URL to copy.");}
   };
   return <Shell title="ChatGPT / MCP" subtitle="Global — connectivity" navigation={navigation} back>
-    <Notice title="Opt-in public test">This publishes only the DevStack MCP status and ping tools.
-      Funnel is reachable from the public internet and has no authentication yet. Never enter secrets
-      as ping values. Your private DevStack dashboard stays on the tailnet.</Notice>
+    <Notice title="Owner-authorized MCP">MCP uses OAuth with approval through the private
+      Tailscale dashboard. Only status and ping are available until controller operations are reviewed.
+      Never enter secrets as ping values.</Notice>
     {state.kind==="loading"&&<Skeleton/>}
     {state.kind==="error"&&<Notice title="Cannot check MCP status" role="alert">{state.error.message}</Notice>}
     {current&&<section className="card">
@@ -87,7 +88,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       </Notice>}
     {!enabled&&<label className="confirm-label"><input type="checkbox"
       checked={accepted} onChange={e=>setAccepted(e.target.checked)}/>
-      I understand this temporarily exposes the unauthenticated status and ping tools publicly.
+      I understand the public endpoint accepts authenticated MCP connections and requires private dashboard approval.
     </label>}
     <div className="actions">
       <button type="button" className="primary-button"
@@ -104,6 +105,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
         No SSH is required for routine troubleshooting.</p>
     </Notice>}
     {feedback&&<Notice title="MCP request submitted">{feedback}</Notice>}
+    <ConnectedClients/>
     <section className="card">
       <h2>MCP troubleshooting</h2>
       <p>Gateway requests, controller health checks and Funnel lifecycle errors are
@@ -144,10 +146,48 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
         {current.webhooks_enabled?"Disable public webhooks":"Enable public webhooks"}
       </button></div>
     </section>}
-    <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL and add it
-      as a custom MCP server in ChatGPT web, choosing No authentication when available.
-      Test devstack_status and devstack_ping. Plugin availability and remote HTTPS support depend on your ChatGPT account and client. You may need to approve
-      Funnel in the Tailscale administration console on first use.</Notice>
+    <Notice title="Connecting ChatGPT">After enabling, copy the HTTPS URL into ChatGPT
+      and select OAuth authentication. With Tailscale connected, approve the request in the private
+      DevStack dashboard. Then test devstack_status and devstack_ping.</Notice>
     <p className="actions"><NavLink to={ADMIN_ROOT} navigate={navigation.navigate}>Administration →</NavLink></p>
   </Shell>;
+}
+
+type OAuthClient = {id:string;client:string;created_at:string};
+function ConnectedClients() {
+  const [items,setItems]=useState<OAuthClient[]|null>(null);
+  const [error,setError]=useState<string|null>(null);
+  const [busy,setBusy]=useState<string|null>(null);
+  const refresh=async()=>{
+    try{
+      const result=await apiRequest<{connections:OAuthClient[]}>("/api/v2/devstack/mcp/oauth/connections");
+      setItems(result.connections);setError(null);
+    }catch(e){setError(e instanceof Error?e.message:"Connections unavailable.");}
+  };
+  useEffect(()=>{void refresh();},[]);
+  const revoke=async(id:string)=>{
+    if(busy)return;
+    setBusy(id);setError(null);
+    try{
+      await apiRequest("/api/v2/devstack/mcp/oauth/connections/"+id+"/revoke",
+                       {method:"POST",body:{}});
+      await refresh();
+    }catch(e){setError(e instanceof Error?e.message:"Revocation failed.");}
+    finally{setBusy(null);}
+  };
+  return <section className="card">
+    <h2>Connected clients</h2>
+    <p className="text-muted">Connections approved by this workstation owner.
+      Only creation time is stored; no last-used tracking.</p>
+    {!items&&!error&&<p role="status">Loading connections…</p>}
+    {error&&<Notice title="Cannot load connections" role="alert">{error}</Notice>}
+    {items?.length===0&&<p className="text-muted">No active connections yet.</p>}
+    {items?.map(item=><div className="property" key={item.id}>
+      <span>{item.client}<small className="text-muted" style={{display:"block"}}>
+        Created {new Date(item.created_at).toLocaleString()}</small></span>
+      <button type="button" className="text-button" disabled={busy!==null}
+        onClick={()=>void revoke(item.id)}>{busy===item.id?"Revoking…":"Revoke"}</button>
+    </div>)}
+    <button type="button" className="text-button" onClick={()=>void refresh()}>Refresh clients</button>
+  </section>;
 }
