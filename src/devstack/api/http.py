@@ -194,7 +194,10 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         truncated = False
         try:
             result = call("diagnostics_snapshot", minutes=minutes)
-            events.extend(result["events"])
+            # Web reads its own live rings and updater state below. Avoid
+            # duplicating the controller's cached auxiliary events.
+            events.extend(row for row in result["events"]
+                          if row.get("source") in ("controller", "runtime"))
             sources.update({k: result["sources"][k] for k in ("controller", "runtime")})
             truncated = bool(result["truncated"])
         except (ControllerUnavailable, ControllerRejected, KeyError, ValueError, TypeError):

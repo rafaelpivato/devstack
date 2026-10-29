@@ -123,9 +123,31 @@ class Controller:
             except Exception:
                 runtime = {"events": [], "truncated": False}
                 runtime_status = "unavailable"
-            return {"events": events["events"] + runtime["events"],
-                    "truncated": events["truncated"] or runtime["truncated"],
-                    "sources": {"controller": controller_status, "runtime": runtime_status}}
+            # An existing root-owned bounded timer publishes allowlisted Web,
+            # updater and MCP data. The controller reads only that safe shared
+            # snapshot, never Web SQLite, journald, or private Web HTTP.
+            from devstack.mcp_diagnostics import snapshot as support_snapshot
+            support = support_snapshot(minutes, include_auxiliary=True)
+            auxiliary = support["auxiliary"]
+            combined = (events["events"] + runtime["events"] +
+                        support["events"] + auxiliary["web"]["events"] +
+                        auxiliary["updater"]["events"])
+            combined.sort(key=lambda row: (row["at"], row.get("source", "")))
+            clipped = len(combined) > 120
+            return {
+                "events": combined[-120:],
+                "truncated": bool(events["truncated"] or runtime["truncated"] or
+                                  support["truncated"] or clipped or
+                                  auxiliary["web"]["truncated"] or
+                                  auxiliary["updater"]["truncated"]),
+                "sources": {"controller": controller_status, "runtime": runtime_status,
+                            "web": auxiliary["web"]["status"],
+                            "updater": auxiliary["updater"]["status"],
+                            "mcp": "available" if support["available"] else "unavailable"},
+                "web_storage": auxiliary["web"]["storage"],
+                "updater_status": auxiliary["updater"]["updater_status"],
+                "support_captured_at": support["generated_at"],
+            }
         if operation == "projects":
             return {"projects": [
                 {"id": p.id, "slug": p.slug, "name": p.name}
