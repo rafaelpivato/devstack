@@ -470,3 +470,143 @@ class MCPReadClient:
         if result.get("project_id") != target:
             raise MCPReadError("branch_identity_mismatch")
         return {**self._project(target, "branch", repo), "result": result}
+
+    def create_project(self, slug: str, name: str) -> dict:
+        result = self._call("project_create", slug=_short_text(slug, "slug", 100),
+                            name=_short_text(name, "name", 150))
+        identifier = _uuid(result.get("id"))
+        registered = self._project_identity(identifier)
+        if registered["name"] != result.get("name"):
+            raise MCPReadError("project_identity_mismatch")
+        return {**self._project(identifier, "project_registry"), "created": True}
+
+    def import_project(self, url: str, slug: str, name: str,
+                       request_key: str | None = None) -> dict:
+        result = self._call("import_submit", url=_short_text(url, "url"),
+                            slug=_short_text(slug, "slug", 100),
+                            name=_short_text(name, "name", 150),
+                            request_key=_operation_key(request_key))
+        if not isinstance(result.get("id"), str):
+            raise MCPReadError("invalid_import_receipt")
+        return self._global("project_import", {"operation": result})
+
+    def import_status(self, operation_id: str) -> dict:
+        operation = _uuid(operation_id)
+        result = self._call("import_status", id=operation)
+        if result.get("id") != operation:
+            raise MCPReadError("operation_identity_mismatch")
+        if result.get("project_id"):
+            self._project_identity(_uuid(result["project_id"]))
+        return self._global("project_import", {"operation": result})
+
+    def rename_project(self, project_id: str, name: str) -> dict:
+        target = _uuid(project_id)
+        self._project_identity(target)
+        result = self._call("project_rename", project_id=target,
+                            name=_short_text(name, "name", 150))
+        if result.get("id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        return {**self._project(target, "project_registry"),
+                "project_details": _fields(result, ("id", "slug", "name"))}
+
+    def compose_config(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._call("compose_read", project_id=target)
+        if not isinstance(data.get("content"), str) or not isinstance(data.get("revision"), str):
+            raise MCPReadError("invalid_compose_config")
+        return {**self._project(target, "compose_config"), "config": data}
+
+    def compose_save(self, project_id: str, content: str, revision: str) -> dict:
+        target = _uuid(project_id)
+        if not isinstance(content, str) or not content or len(content.encode("utf-8")) > 48 * 1024:
+            raise MCPReadError("invalid_compose_content")
+        if revision != "none":
+            _revision(revision)
+        result = self._call("compose_save", project_id=target, content=content,
+                            revision=revision, timeout=180)
+        return {**self._project(target, "compose_config"), "result": result}
+
+    def project_settings(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._call("settings_review", project_id=target)
+        if not isinstance(data.get("revision"), str):
+            raise MCPReadError("invalid_settings_revision")
+        return {**self._project(target, "project_settings"), "settings": data}
+
+    def settings_save(self, project_id: str, revision: str,
+                      applications: list[dict], tasks: list[dict]) -> dict:
+        target = _uuid(project_id)
+        _revision(revision)
+        if (not isinstance(applications, list) or not isinstance(tasks, list)
+                or len(applications) > 30 or len(tasks) > 40):
+            raise MCPReadError("invalid_settings")
+        result = self._call("settings_replace_checked", project_id=target,
+                            revision=revision, applications=applications, tasks=tasks,
+                            timeout=180)
+        return {**self._project(target, "project_settings"), "result": result}
+
+    def source_review(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        result = self._call("source_review", project_id=target)
+        return {**self._project(target, "source_review"), "review": result}
+
+    def source_apply(self, project_id: str, revision: str, selected: list,
+                     overwrites: list) -> dict:
+        target = _uuid(project_id)
+        if not isinstance(selected, list) or not isinstance(overwrites, list):
+            raise MCPReadError("invalid_source_selection")
+        result = self._call("source_apply", project_id=target,
+                            revision=_revision(revision),
+                            selected=selected, overwrites=overwrites, timeout=180)
+        return {**self._project(target, "source_review"), "result": result}
+
+    def webhooks(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        result = self._call("webhooks", project_id=target)
+        return {**self._project(target, "webhooks"), "webhooks": result.get("webhooks", [])}
+
+    def webhook_upsert(self, project_id: str, route: str, service: str,
+                       port: int, destination: str) -> dict:
+        target = _uuid(project_id)
+        result = self._call("webhook_upsert", project_id=target,
+                            route=_short_text(route, "route", 63),
+                            service=_short_text(service, "service", 90),
+                            port=port, destination=_short_text(destination, "destination", 1024))
+        if result.get("route") != route:
+            raise MCPReadError("webhook_identity_mismatch")
+        return {**self._project(target, "webhook", source_name=route), "webhook": result}
+
+    def webhook_remove(self, project_id: str, route: str) -> dict:
+        target = _uuid(project_id)
+        route = _short_text(route, "route", 63)
+        result = self._call("webhook_remove", project_id=target, route=route)
+        if result.get("removed") is not True:
+            raise MCPReadError("invalid_webhook_receipt")
+        return {**self._project(target, "webhook", source_name=route), "removed": True}
+
+    def compose_action(self, project_id: str, action: str) -> dict:
+        target = _uuid(project_id)
+        if action not in ("build", "restart"):
+            raise MCPReadError("invalid_compose_action")
+        result = self._call("compose", project_id=target, action=action)
+        return {**self._project(target, "compose_job"), "action": action,
+                "job_id": _uuid(result.get("job_id")), "status": "submitted"}
+
+    def adhoc(self, project_id: str, kind: str, service: str, image: str,
+              network: str, command: list[str]) -> dict:
+        target = _uuid(project_id)
+        if (kind not in ("run", "image") or network not in ("none", "project")
+                or not isinstance(command, list) or not 1 <= len(command) <= 64
+                or any(not isinstance(arg, str) or not arg or len(arg) > 2048
+                       for arg in command)):
+            raise MCPReadError("invalid_adhoc_command")
+        result = self._call("adhoc", project_id=target, kind=kind,
+                            service=service, image=image, network=network,
+                            command=command)
+        return {**self._project(target, "adhoc_job"), "job_id": _uuid(result.get("job_id")),
+                "status": "submitted"}
+
+    def private_ports(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._call("private_ports", project_id=target)
+        return {**self._project(target, "private_ports"), "ports": data}
