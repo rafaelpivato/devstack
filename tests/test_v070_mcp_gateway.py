@@ -1,4 +1,4 @@
-"""MCP 0.7 tests: full MCP -> web /healthz -> controller Unix IPC."""
+"""MCP integration: direct controller Unix IPC, with no Web HTTP service."""
 import asyncio
 from pathlib import Path
 import socket
@@ -10,9 +10,7 @@ import time
 import unittest
 
 from mcp import Client
-from werkzeug.serving import make_server
 
-from devstack.api.http import create_app
 from devstack.control.daemon import ControlServer
 from devstack.mcp_gateway import (
     PingState, probe_controller, public_host, transport_security,
@@ -43,10 +41,9 @@ class PingStateTests(unittest.TestCase):
         self.assertIn("mynode.example.ts.net:*", security.allowed_hosts)
         self.assertNotIn("*", security.allowed_hosts)
 
-    def test_unreachable_web_reports_unavailable(self):
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            self.assertEqual(probe_controller(sock.getsockname()[1]), "unavailable")
+    def test_unreachable_controller_reports_unavailable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(probe_controller(Path(folder) / "absent.sock"), "unavailable")
 
 
 class FakeController:
@@ -59,26 +56,19 @@ class FakeController:
 
 
 class ProtocolTests(unittest.TestCase):
-    def test_live_mcp_web_and_unix_ipc(self):
+    def test_live_mcp_direct_unix_ipc_without_web(self):
         with tempfile.TemporaryDirectory() as folder:
             socket_path = Path(folder) / "control.sock"
             with ControlServer(socket_path, FakeController()) as controller:
                 ipc_thread = threading.Thread(target=controller.serve_forever, daemon=True)
                 ipc_thread.start()
-                web = create_app({
-                    "CONTROLLER_SOCKET": str(socket_path),
-                    "WEB_DIAGNOSTICS_PATH": str(Path(folder) / "web-events.sqlite3"),
-                })
-                web_server = make_server("127.0.0.1", 0, web)
-                web_thread = threading.Thread(target=web_server.serve_forever, daemon=True)
-                web_thread.start()
                 with socket.socket() as sock:
                     sock.bind(("127.0.0.1", 0))
                     mcp_port = sock.getsockname()[1]
                 proc = subprocess.Popen(
                     [sys.executable, "-m", "devstack.mcp_gateway",
                      "--port", str(mcp_port),
-                     "--web-port", str(web_server.server_port)],
+                     "--socket", str(socket_path)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 )
                 try:
@@ -102,6 +92,10 @@ class ProtocolTests(unittest.TestCase):
                                 "devstack_repository_status", "devstack_services",
                                 "devstack_service_logs", "devstack_jobs",
                                 "devstack_job_logs", "devstack_diagnostics",
+                                "devstack_transition", "devstack_transition_status",
+                                "devstack_repository_check", "devstack_repository_update",
+                                "devstack_service_action", "devstack_task_run",
+                                "devstack_job", "devstack_job_cancel",
                             })
                             first = await client.call_tool("devstack_status", {})
                             self.assertFalse(first.is_error)
@@ -134,7 +128,5 @@ class ProtocolTests(unittest.TestCase):
                     except subprocess.TimeoutExpired:
                         proc.kill()
                         proc.communicate(timeout=5)
-                    web_server.shutdown()
-                    web_thread.join(3)
                     controller.shutdown()
                     ipc_thread.join(3)

@@ -262,6 +262,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="DevStack MCP connectivity gateway")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--public-host", default=os.getenv("DEVSTACK_MCP_PUBLIC_HOST", ""))
+    parser.add_argument("--socket", type=Path, default=Path("/run/devstack-control/control.sock"))
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("MCP port must be between 1024 and 65535")
@@ -270,7 +271,7 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
     print("DEVSTACK_MCP gateway_started", file=sys.stderr, flush=True)
-    make_server().run(
+    make_server(socket_path=args.socket).run(
         transport="streamable-http", host="127.0.0.1", port=args.port,
         stateless_http=True, json_response=True,
         max_request_body_size=16384, transport_security=security,

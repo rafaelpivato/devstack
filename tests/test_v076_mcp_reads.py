@@ -1,13 +1,8 @@
-"""v0.7.6 MCP reads: concrete Web/controller bridge and project provenance."""
-import json
+"""MCP direct shared IPC: reads, resource provenance, and controller writes."""
 from pathlib import Path
 import tempfile
-import threading
 import unittest
-from urllib.parse import urlsplit
-from werkzeug.serving import make_server
 
-from devstack.api.http import create_app
 from devstack.mcp_reads import MCPReadClient, MCPReadError
 
 A = "11111111-1111-4111-8111-111111111111"
@@ -73,19 +68,9 @@ class MCPReadBridgeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.controller = StubController()
-        self.web = create_app({
-            "TESTING": True,
-            "WEB_DIAGNOSTICS_PATH": str(Path(self.tmp.name) / "web.sqlite"),
-            "WEB_DIAGNOSTICS_FALLBACK_PATH": str(Path(self.tmp.name) / "fallback.sqlite"),
-        }, transport=self.controller)
-        self.server = make_server("127.0.0.1", 0, self.web)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.client = MCPReadClient(self.server.server_port)
+        self.client = MCPReadClient(transport=self.controller)
 
     def tearDown(self):
-        self.server.shutdown()
-        self.thread.join(timeout=3)
         self.tmp.cleanup()
 
     def test_global_and_project_identity(self):
@@ -141,18 +126,13 @@ class MCPReadBridgeTests(unittest.TestCase):
             "services", "service_logs", "jobs", "job", "job_logs"
         } for op, _ in self.controller.calls))
 
-    def test_no_arbitrary_http_routing(self):
-        with self.assertRaises(MCPReadError):
-            self.client._get("https://evil.invalid/secret")
-        with self.assertRaises(MCPReadError):
-            self.client._get("/etc/passwd")
+    def test_no_web_http_dependency(self):
+        self.assertFalse(hasattr(self.client, "web_port"))
+        self.assertFalse(hasattr(self.client, "_get"))
         self.assertEqual(self.client.diagnostics(1)["source"]["type"], "diagnostics")
         self.assertEqual(self.client.diagnostics(1)["scope"], "devstack")
+        self.assertEqual(self.client.diagnostics(1)["sources"]["web"], "not_in_controller")
 
-    def test_private_consent_deep_link_is_allowed(self):
-        response = self.web.test_client().get("/connect/authorize?oauth_request=sample")
-        self.assertEqual(response.status_code, 200)
-        self.assertNotIn(b"sample", response.data)  # opaque approval request stays out of HTML
 
 
 if __name__ == "__main__":
