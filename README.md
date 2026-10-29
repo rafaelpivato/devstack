@@ -144,3 +144,17 @@ Global diagnostics now come strictly from the controller/runtime source;
 previously combined Web/updater/MCP diagnostic sources are explicitly labeled
 'not_in_controller' in this MCP tool. Those sources remain available from the
 private dashboard's diagnostics without coupling MCP to its Web server.
+
+## v0.7.8 — MCP workstation management
+
+The owner-authorized MCP plugin now exposes existing DevStack controller
+operations for:
+- Repository synchronization policies, service reaction mappings, bulk Git
+  update receipts, repository registration and branch preview/apply.
+- Project creation/import/rename, Compose/configuration review and save with
+  revision checks, source import review/apply, webhooks, project Compose jobs,
+  controlled disposable container commands and private port discovery.
+
+**All tools use the same versioned Unix controller IPC as Web and CLI.**
+No additional credentials, scopes, runtime, control plane, daemon or broker.
+See `docs/mcp-connectivity.md` for examples and operation constraints.

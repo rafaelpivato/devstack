@@ -84,3 +84,12 @@ project/resource IDs, Git HEAD preconditions, controller-owned durable
 transition receipts, and returned job IDs. No additional per-tool consent layer.
 The public systemd service joins `devstackipc` for the existing controller
 socket but never joins `docker`. The webhook ingress socket remains separate.
+
+## MCP v0.7.8 workstation management
+
+The owner-authorized MCP connection exposes **named** existing controller IPC
+operations for project/repository/workstation administration. Keep read/review
+and write/apply workflows revision-aware, durable operation identifiers scoped,
+and all responses grounded in canonical project/source identities. Do not expose
+a generic IPC relay or arbitrary host shell; do not duplicate controller logic.
+Existing Web/CLI validation and execution remain the sole authority.
