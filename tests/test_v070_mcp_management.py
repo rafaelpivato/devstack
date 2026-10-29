@@ -95,19 +95,21 @@ class FunnelErrorTests(unittest.TestCase):
             with self.assertRaises(manage.MCPManagementError) as ctx:
                 manage.run_command("tailscale", "funnel", "--yes", "--bg",
                                    "--https=10000", manage.TARGET, timeout=45)
-        self.assertEqual(ctx.exception.code, "funnel_setup_timeout")
+        self.assertEqual(ctx.exception.code, "funnel_timeout_unknown")
 
     def test_funnel_errors_are_safe_and_actionable(self):
         cases = [
             ("To enable Funnel, go to your tailnet's access controls",
-             "funnel_permission_required"),
+             "funnel_approval_required"),
             ("permission denied: node attribute funnel not permitted",
-             "funnel_permission_required"),
+             "funnel_policy_denied"),
             ("unable to create certificate: ACME rate limit",
              "funnel_certificate_failed"),
             ("HTTPS is not enabled for this tailnet", "funnel_https_required"),
             ("port already in use", "funnel_port_in_use"),
-            ("context deadline exceeded", "funnel_setup_timeout"),
+            ("context deadline exceeded", "funnel_timeout_unknown"),
+            ("certificate pending activation", "funnel_certificate_pending"),
+            ("requires approval from tailnet admin", "funnel_approval_required"),
             ("sensitive-token=abc123 unknown problem", "funnel_command_failed"),
         ]
         for stderr, expected in cases:

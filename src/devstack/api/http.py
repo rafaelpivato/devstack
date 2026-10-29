@@ -242,7 +242,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         except (OSError, ValueError, TypeError):
             sources["updater"] = "unavailable"
         mcp = mcp_diagnostics_snapshot(
-            minutes, Path(app.config["MCP_DIAGNOSTICS_PATH"]))
+            minutes, Path(app.config["MCP_DIAGNOSTICS_PATH"]), include_auxiliary=True)
         events.extend(mcp["events"])
         truncated = truncated or mcp["truncated"]
         sources["mcp"] = "available" if mcp["available"] else "unavailable"
@@ -265,6 +265,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
                               (web_primary_error or "storage_unavailable"),
             },
             "partial": any(value != "available" for value in sources.values()),
+            "network_preflight": mcp["network_preflight"],
         })
 
     @app.get("/api/v2/devstack/mcp")

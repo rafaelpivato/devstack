@@ -180,9 +180,10 @@ def capture_diagnostics() -> None:
     events.sort(key=lambda e: e["at"])
     truncated = len(events) > 120
     from devstack.diagnostics_bridge import capture_auxiliary
+    from devstack.funnel_preflight import capture_preflight
     doc = {"generated_at": now, "available": available,
            "events": events[-120:], "truncated": truncated,
-           "auxiliary": capture_auxiliary()}
+           "auxiliary": capture_auxiliary(), "network_preflight": capture_preflight()}
     atomic_result_file(SNAPSHOT_FILE, doc)
 
 
@@ -210,7 +211,7 @@ def classified_command_error(args: tuple[str, ...], exc: BaseException) -> str:
     funnel = args[:2] == ("tailscale", "funnel")
     if isinstance(exc, subprocess.TimeoutExpired):
         if funnel:
-            return "funnel_setup_timeout"
+            return "funnel_timeout_unknown"
         return "tailscale_command_timeout" if tailscale else "host_command_timeout"
 
     # Some clients write bytes, others text. Only classify fixed, safe phrases.
@@ -229,13 +230,27 @@ def classified_command_error(args: tuple[str, ...], exc: BaseException) -> str:
             )):
                 return "funnel_https_required"
             if any(s in detail for s in (
+                "certificate pending", "certificate is pending",
+                "certificate provisioning", "waiting for certificate",
+            )):
+                return "funnel_certificate_pending"
+            if any(s in detail for s in (
                 "certificate", "acme", "let's encrypt", "lets encrypt", "rate limit",
             )):
                 return "funnel_certificate_failed"
             if any(s in detail for s in (
-                "not allowed", "permission", "not authorized", "not permitted",
-                "funnel is disabled", "funnel is not enabled", "enable funnel",
-                "requires approval", "not enabled for",
+                "requires approval", "approval required",
+                "to enable funnel", "approve funnel",
+            )):
+                return "funnel_approval_required"
+            if any(s in detail for s in (
+                "not allowed", "not authorized", "not permitted",
+                "policy denied", "permission denied", "access denied",
+            )):
+                return "funnel_policy_denied"
+            if any(s in detail for s in (
+                "permission", "funnel is disabled", "funnel is not enabled",
+                "enable funnel", "not enabled for",
             )):
                 return "funnel_permission_required"
             if any(s in detail for s in (
@@ -243,7 +258,7 @@ def classified_command_error(args: tuple[str, ...], exc: BaseException) -> str:
             )):
                 return "funnel_port_in_use"
             if any(s in detail for s in ("deadline exceeded", "timed out", "timeout")):
-                return "funnel_setup_timeout"
+                return "funnel_timeout_unknown"
             return "funnel_command_failed"
         return "tailscale_command_failed"
     if args[:1] == ("systemctl",):
@@ -495,7 +510,10 @@ def status() -> dict:
         gateway = "running" if active.strip() == "active" else "stopped"
     except MCPManagementError:
         gateway = "stopped"
+    from devstack.mcp_diagnostics import snapshot as support_snapshot
+    preflight = support_snapshot(5, include_auxiliary=True)["network_preflight"]
     return {
+        "network_preflight": preflight,
         "gateway": gateway,
         "funnel": "enabled" if state["mcp"] and state["public_active"]
                   else "unknown" if state["phase"] == "unknown" else "disabled",

@@ -147,6 +147,7 @@ class Controller:
                 "web_storage": auxiliary["web"]["storage"],
                 "updater_status": auxiliary["updater"]["updater_status"],
                 "support_captured_at": support["generated_at"],
+                "network_preflight": support["network_preflight"],
             }
         if operation == "projects":
             return {"projects": [
