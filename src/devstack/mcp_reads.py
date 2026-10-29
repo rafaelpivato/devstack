@@ -43,6 +43,25 @@ def _fields(value: dict, allowed: tuple[str, ...]) -> dict:
     return {field: value[field] for field in allowed if field in value}
 
 
+def _operation_key(value: str | None) -> str:
+    key = uuid4().hex if value is None else value
+    if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key):
+        raise MCPReadError("invalid_request_key")
+    return key
+
+
+def _revision(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+        raise MCPReadError("invalid_revision")
+    return value
+
+
+def _short_text(value: str, label: str, limit: int = 2048) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > limit:
+        raise MCPReadError("invalid_" + label)
+    return value
+
+
 class MCPReadClient:
     def __init__(self, socket_path: Path = Path("/run/devstack-control/control.sock"),
                  *, transport=None):
@@ -346,3 +365,248 @@ class MCPReadClient:
         return {**self._project(target, "job", job),
                 "job": _fields(data, ("id", "status", "cancel_policy",
                                        "started_ns", "finished_ns", "exit_code"))}
+
+    # v0.7.8: these methods are thin clients of existing controller IPC
+    # operations. The controller remains the sole execution/validation authority.
+
+    def _repo_identity(self, project_id: str, repository_id: str) -> tuple[str, str, str]:
+        target, repo = _uuid(project_id), _uuid(repository_id)
+        detail = self.project(target)
+        name = next((item["name"] for item in detail["repositories"]
+                     if item["id"] == repo), None)
+        if name is None:
+            raise MCPReadError("repository_not_in_project")
+        return target, repo, name
+
+    def repository_sync(self, project_id: str, repository_id: str) -> dict:
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_sync_state", project_id=target, repository_id=repo)
+        return {**self._project(target, "repository_sync", repo, name), "sync": result}
+
+    def repository_sync_policy(self, project_id: str, repository_id: str,
+                               policy: str) -> dict:
+        if policy not in ("manual", "check", "update"):
+            raise MCPReadError("invalid_sync_policy")
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_sync_policy", project_id=target,
+                            repository_id=repo, policy=policy)
+        return {**self._project(target, "repository_sync", repo, name), "sync": result}
+
+    def repository_reactions(self, project_id: str, repository_id: str) -> dict:
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_reactions", project_id=target, repository_id=repo)
+        return {**self._project(target, "repository_reactions", repo, name),
+                "services": result.get("services", []),
+                "events": result.get("events", [])}
+
+    def repository_reaction_policy(self, project_id: str, repository_id: str,
+                                   service: str, action: str) -> dict:
+        if action not in ("none", "restart", "redeploy"):
+            raise MCPReadError("invalid_reaction_action")
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_reaction_policy", project_id=target,
+                            repository_id=repo, service=_short_text(service, "service", 90),
+                            action=action)
+        return {**self._project(target, "repository_reactions", repo, name),
+                "services": result.get("services", []),
+                "events": result.get("events", [])}
+
+    def repository_bulk_update(self, project_id: str,
+                               request_key: str | None = None) -> dict:
+        target = _uuid(project_id)
+        context = self._project(target, "repository_bulk_update")
+        result = self._call("repository_bulk_submit", project_id=target,
+                            request_key=_operation_key(request_key))
+        if result.get("project_id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        return {**context, "operation": result}
+
+    def repository_bulk_status(self, project_id: str, operation_id: str) -> dict:
+        target, operation = _uuid(project_id), _uuid(operation_id)
+        result = self._call("repository_bulk_status", project_id=target, id=operation)
+        if result.get("project_id") != target or result.get("id") != operation:
+            raise MCPReadError("operation_identity_mismatch")
+        return {**self._project(target, "repository_bulk_update", operation),
+                "operation": result}
+
+    def repository_add(self, project_id: str, url: str, name: str,
+                       branch: str = "", request_key: str | None = None) -> dict:
+        target = _uuid(project_id)
+        context = self._project(target, "repository_add")
+        result = self._call("repository_add_submit", project_id=target,
+                            url=_short_text(url, "url"),
+                            name=_short_text(name, "repository_name", 120),
+                            branch=branch, request_key=_operation_key(request_key))
+        if result.get("project_id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        return {**context, "operation": result}
+
+    def repository_add_status(self, project_id: str, operation_id: str) -> dict:
+        target, operation = _uuid(project_id), _uuid(operation_id)
+        result = self._call("repository_add_status", project_id=target, id=operation)
+        if result.get("project_id") != target or result.get("id") != operation:
+            raise MCPReadError("operation_identity_mismatch")
+        return {**self._project(target, "repository_add", operation),
+                "operation": result}
+
+    def branch_preview(self, project_id: str, branch: str,
+                       repository_id: str | None = None) -> dict:
+        target = _uuid(project_id)
+        repo = self._repo_identity(target, repository_id)[1] if repository_id else None
+        result = self._call("branch_preview", project_id=target,
+                            branch=_short_text(branch, "branch", 200), repository_id=repo,
+                            timeout=180)
+        if result.get("project_id") != target or result.get("repository_id") != repo:
+            raise MCPReadError("branch_identity_mismatch")
+        return {**self._project(target, "branch_preview", repo), "preview": result}
+
+    def branch_apply(self, project_id: str, branch: str, revision: str,
+                     repository_id: str | None = None) -> dict:
+        target = _uuid(project_id)
+        repo = self._repo_identity(target, repository_id)[1] if repository_id else None
+        result = self._call("branch_apply", project_id=target,
+                            branch=_short_text(branch, "branch", 200),
+                            repository_id=repo, revision=_revision(revision), timeout=180)
+        if result.get("project_id") != target:
+            raise MCPReadError("branch_identity_mismatch")
+        return {**self._project(target, "branch", repo), "result": result}
+
+    def create_project(self, slug: str, name: str) -> dict:
+        result = self._call("project_create", slug=_short_text(slug, "slug", 100),
+                            name=_short_text(name, "name", 150))
+        identifier = _uuid(result.get("id"))
+        registered = self._project_identity(identifier)
+        if registered["name"] != result.get("name"):
+            raise MCPReadError("project_identity_mismatch")
+        return {**self._project(identifier, "project_registry"), "created": True}
+
+    def import_project(self, url: str, slug: str, name: str,
+                       request_key: str | None = None) -> dict:
+        result = self._call("import_submit", url=_short_text(url, "url"),
+                            slug=_short_text(slug, "slug", 100),
+                            name=_short_text(name, "name", 150),
+                            request_key=_operation_key(request_key))
+        if not isinstance(result.get("id"), str):
+            raise MCPReadError("invalid_import_receipt")
+        return self._global("project_import", {"operation": result})
+
+    def import_status(self, operation_id: str) -> dict:
+        operation = _uuid(operation_id)
+        result = self._call("import_status", id=operation)
+        if result.get("id") != operation:
+            raise MCPReadError("operation_identity_mismatch")
+        if result.get("project_id"):
+            self._project_identity(_uuid(result["project_id"]))
+        return self._global("project_import", {"operation": result})
+
+    def rename_project(self, project_id: str, name: str) -> dict:
+        target = _uuid(project_id)
+        self._project_identity(target)
+        result = self._call("project_rename", project_id=target,
+                            name=_short_text(name, "name", 150))
+        if result.get("id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        return {**self._project(target, "project_registry"),
+                "project_details": _fields(result, ("id", "slug", "name"))}
+
+    def compose_config(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._call("compose_read", project_id=target)
+        if not isinstance(data.get("content"), str) or not isinstance(data.get("revision"), str):
+            raise MCPReadError("invalid_compose_config")
+        return {**self._project(target, "compose_config"), "config": data}
+
+    def compose_save(self, project_id: str, content: str, revision: str) -> dict:
+        target = _uuid(project_id)
+        if not isinstance(content, str) or not content or len(content.encode("utf-8")) > 48 * 1024:
+            raise MCPReadError("invalid_compose_content")
+        if revision != "none":
+            _revision(revision)
+        result = self._call("compose_save", project_id=target, content=content,
+                            revision=revision, timeout=180)
+        return {**self._project(target, "compose_config"), "result": result}
+
+    def project_settings(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._call("settings_review", project_id=target)
+        if not isinstance(data.get("revision"), str):
+            raise MCPReadError("invalid_settings_revision")
+        return {**self._project(target, "project_settings"), "settings": data}
+
+    def settings_save(self, project_id: str, revision: str,
+                      applications: list[dict], tasks: list[dict]) -> dict:
+        target = _uuid(project_id)
+        _revision(revision)
+        if (not isinstance(applications, list) or not isinstance(tasks, list)
+                or len(applications) > 30 or len(tasks) > 40):
+            raise MCPReadError("invalid_settings")
+        result = self._call("settings_replace_checked", project_id=target,
+                            revision=revision, applications=applications, tasks=tasks,
+                            timeout=180)
+        return {**self._project(target, "project_settings"), "result": result}
+
+    def source_review(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        result = self._call("source_review", project_id=target)
+        return {**self._project(target, "source_review"), "review": result}
+
+    def source_apply(self, project_id: str, revision: str, selected: list,
+                     overwrites: list) -> dict:
+        target = _uuid(project_id)
+        if not isinstance(selected, list) or not isinstance(overwrites, list):
+            raise MCPReadError("invalid_source_selection")
+        result = self._call("source_apply", project_id=target,
+                            revision=_revision(revision),
+                            selected=selected, overwrites=overwrites, timeout=180)
+        return {**self._project(target, "source_review"), "result": result}
+
+    def webhooks(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        result = self._call("webhooks", project_id=target)
+        return {**self._project(target, "webhooks"), "webhooks": result.get("webhooks", [])}
+
+    def webhook_upsert(self, project_id: str, route: str, service: str,
+                       port: int, destination: str) -> dict:
+        target = _uuid(project_id)
+        result = self._call("webhook_upsert", project_id=target,
+                            route=_short_text(route, "route", 63),
+                            service=_short_text(service, "service", 90),
+                            port=port, destination=_short_text(destination, "destination", 1024))
+        if result.get("route") != route:
+            raise MCPReadError("webhook_identity_mismatch")
+        return {**self._project(target, "webhook", source_name=route), "webhook": result}
+
+    def webhook_remove(self, project_id: str, route: str) -> dict:
+        target = _uuid(project_id)
+        route = _short_text(route, "route", 63)
+        result = self._call("webhook_remove", project_id=target, route=route)
+        if result.get("removed") is not True:
+            raise MCPReadError("invalid_webhook_receipt")
+        return {**self._project(target, "webhook", source_name=route), "removed": True}
+
+    def compose_action(self, project_id: str, action: str) -> dict:
+        target = _uuid(project_id)
+        if action not in ("build", "restart"):
+            raise MCPReadError("invalid_compose_action")
+        result = self._call("compose", project_id=target, action=action)
+        return {**self._project(target, "compose_job"), "action": action,
+                "job_id": _uuid(result.get("job_id")), "status": "submitted"}
+
+    def adhoc(self, project_id: str, kind: str, service: str, image: str,
+              network: str, command: list[str]) -> dict:
+        target = _uuid(project_id)
+        if (kind not in ("run", "image") or network not in ("none", "project")
+                or not isinstance(command, list) or not 1 <= len(command) <= 64
+                or any(not isinstance(arg, str) or not arg or len(arg) > 2048
+                       for arg in command)):
+            raise MCPReadError("invalid_adhoc_command")
+        result = self._call("adhoc", project_id=target, kind=kind,
+                            service=service, image=image, network=network,
+                            command=command)
+        return {**self._project(target, "adhoc_job"), "job_id": _uuid(result.get("job_id")),
+                "status": "submitted"}
+
+    def private_ports(self, project_id: str) -> dict:
+        target = _uuid(project_id)
+        data = self._call("private_ports", project_id=target)
+        return {**self._project(target, "private_ports"), "ports": data}

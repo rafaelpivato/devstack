@@ -94,3 +94,42 @@ devstack_job_cancel (independent jobs only). The existing controller owns all
 validation, changes and operation state. Outputs echo canonical project IDs.
 MCP diagnostics include controller/runtime events; sources outside the
 controller are explicitly 'not_in_controller', not silently assumed healthy.
+
+## v0.7.8 — Full owner workstation management
+
+The same single-owner OAuth approval enables the new MCP tools. No reauthorization
+or additional permissions should be needed after an upgrade. MCP stays an
+independent direct client of the existing controller IPC socket, not the private
+Web HTTP service.
+
+Repository tools:
+`devstack_repository_sync`, `devstack_repository_sync_policy`,
+`devstack_repository_reactions`, `devstack_repository_reaction_policy`,
+`devstack_repository_update_all`, `devstack_repository_update_all_status`,
+`devstack_repository_add`, `devstack_repository_add_status`,
+`devstack_branch_preview`, `devstack_branch_apply`.
+
+Workstation tools:
+`devstack_project_create`, `devstack_project_import`,
+`devstack_project_import_status`, `devstack_project_rename`,
+`devstack_compose_config`, `devstack_compose_save`,
+`devstack_project_settings`, `devstack_project_settings_save`,
+`devstack_source_review`, `devstack_source_apply`, `devstack_webhooks`,
+`devstack_webhook_upsert`, `devstack_webhook_remove`,
+`devstack_compose_action`, `devstack_adhoc`,
+`devstack_private_ports`.
+
+Follow the controller's exact existing Web workflows: run `branch_preview`
+before `branch_apply` using the returned revision; inspect Compose content
+and its revision before saving; inspect settings and include the complete
+application/task collection plus its revision in a save operation. Import,
+repository registration and bulk update return durable operation IDs; query
+their respective status tools. Compose and ad-hoc actions return project job IDs
+queried by `devstack_job`. Controller validation decides when operations may
+run; for example, repository registration requires an inactive runtime.
+
+Container command execution is limited to existing controller-validated
+disposable Compose/image commands; no arbitrary host shell, host filesystem,
+direct Docker socket, raw IPC operation tool or new permission system. The
+public MCP request body cap is 64 KiB, consistent with existing controller
+message limits; particularly large Compose files may still exceed the cap.
