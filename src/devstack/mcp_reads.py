@@ -1,17 +1,17 @@
-"""Bounded, explicitly project-scoped MCP reads via the existing private Web API.
+"""MCP is an independent client of the shared DevStack controller IPC.
 
-Public gateway never gets Docker, project workspace, controller Unix IPC, or
-host journal access. Each literal allowlisted GET reaches Web :8765, whose
-existing administrative controller client enforces resource ownership.
+The OAuth-protected public process uses the same exact-shape Unix protocol
+as Web and CLI; it never imports controller internals or accesses Docker.
+Project and resource context are validated by the existing controller.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from http.client import HTTPConnection, HTTPException
-import json
+from pathlib import Path
 import re
 
-MAX_BODY = 192 * 1024
+from devstack.ipc.client import send, ControllerUnavailable, ControllerRejected
+
 PROJECT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z", re.I)
 CONTAINER_ID = re.compile(r"[a-f0-9]{64}\Z")
 MAX_PROJECTS = 100
@@ -43,34 +43,32 @@ def _fields(value: dict, allowed: tuple[str, ...]) -> dict:
 
 
 class MCPReadClient:
-    def __init__(self, web_port: int = 8765):
-        if type(web_port) is not int or not 1024 <= web_port <= 65535:
-            raise ValueError("invalid_web_port")
-        self.web_port = web_port
+    def __init__(self, socket_path: Path = Path("/run/devstack-control/control.sock"),
+                 *, transport=None):
+        self.socket_path = Path(socket_path)
+        self.transport = transport
 
-    def _get(self, path: str, *, timeout: int = 8) -> dict:
-        # Paths are constructed below from static templates and validated IDs;
-        # arbitrary Web requests are intentionally not supported.
-        if (not path.startswith("/api/v2/") or len(path) > 260
-                or type(timeout) is not int or not 1 <= timeout <= 30):
-            raise MCPReadError("invalid_read_route")
-        connection = HTTPConnection("127.0.0.1", self.web_port, timeout=timeout)
+    def _call(self, operation: str, *, timeout: int = 30, **fields) -> dict:
+        """Use the exact same versioned Unix IPC contract as Web and CLI."""
+        if type(timeout) is not int or not 1 <= timeout <= 240:
+            raise MCPReadError("invalid_timeout")
         try:
-            connection.request("GET", path, headers={"Accept": "application/json"})
-            response = connection.getresponse()
-            raw = response.read(MAX_BODY + 1)
-            if len(raw) > MAX_BODY:
-                raise MCPReadError("response_too_large")
-            if response.status != 200:
-                raise MCPReadError("read_unavailable" if response.status >= 500 else "resource_unavailable")
-            result = json.loads(raw)
+            result = (self.transport(operation, **fields) if self.transport is not None
+                      else send(self.socket_path, operation, timeout=timeout, **fields))
             if not isinstance(result, dict):
-                raise MCPReadError("invalid_response")
+                raise MCPReadError("invalid_controller_response")
             return result
-        except (OSError, TimeoutError, HTTPException, UnicodeError, json.JSONDecodeError) as exc:
-            raise MCPReadError("web_unavailable") from exc
-        finally:
-            connection.close()
+        except (ControllerUnavailable, ControllerRejected) as exc:
+            raise MCPReadError("controller_unavailable" if isinstance(exc, ControllerUnavailable)
+                               else "controller_rejected_" + exc.code[:60]) from exc
+
+    def probe(self) -> str:
+        try:
+            result = self._call("health", timeout=2)
+            return "connected" if result.get("alive") is True else "unavailable"
+        except MCPReadError as exc:
+            return ("recovery_required" if str(exc).startswith("controller_rejected_")
+                    else "unavailable")
 
     @staticmethod
     def _global(source: str, data: dict) -> dict:
@@ -78,7 +76,7 @@ class MCPReadClient:
                 "captured_at": _stamp(), **data}
 
     def projects(self) -> dict:
-        values = self._get("/api/v2/projects").get("projects")
+        values = self._call("projects").get("projects")
         if not isinstance(values, list) or len(values) > MAX_PROJECTS:
             raise MCPReadError("invalid_projects")
         entries = []
@@ -89,7 +87,7 @@ class MCPReadClient:
         return self._global("project_registry", {"projects": entries, "truncated": False})
 
     def runtime(self) -> dict:
-        value = self._get("/api/v2/runtime")
+        value = self._call("status")
         project = None
         if value.get("project_id") is not None:
             project = self._project_identity(value["project_id"])
@@ -116,7 +114,7 @@ class MCPReadClient:
 
     def project(self, project_id: str) -> dict:
         target = _uuid(project_id)
-        data = self._get("/api/v2/projects/" + target)
+        data = self._call("project_detail", project_id=target)
         entry = data.get("project", {})
         if not isinstance(entry, dict) or entry.get("id") != target:
             raise MCPReadError("project_identity_mismatch")
@@ -141,7 +139,7 @@ class MCPReadClient:
         if not any(row.get("id") == repo for row in detail["repositories"]):
             raise MCPReadError("repository_not_in_project")
         name = next(row["name"] for row in detail["repositories"] if row["id"] == repo)
-        data = self._get(f"/api/v2/projects/{target}/repositories/{repo}", timeout=15)
+        data = self._call("repository_status", project_id=target, repository_id=repo, timeout=30)
         status = _fields(data, ("branch", "head", "upstream", "ahead", "behind",
                                 "dirty", "status", "working_tree", "staged", "unstaged",
                                 "untracked", "detached"))
@@ -154,7 +152,7 @@ class MCPReadClient:
 
     def services(self, project_id: str) -> dict:
         target = _uuid(project_id)
-        data = self._get(f"/api/v2/projects/{target}/services", timeout=30)
+        data = self._call("services", project_id=target, timeout=60)
         if data.get("project_id") != target:
             raise MCPReadError("project_identity_mismatch")
         services = data.get("services", [])
@@ -170,7 +168,7 @@ class MCPReadClient:
             raise MCPReadError("invalid_tail")
         # Existing controller validates active project, activation generation,
         # project-owned Compose labels, and exact container identity.
-        data = self._get(f"/api/v2/projects/{target}/services/{container}/logs?tail={tail}", timeout=18)
+        data = self._call("service_logs", project_id=target, container_id=container, tail=tail, timeout=30)
         if data.get("container_id") != container or not isinstance(data.get("service"), str):
             raise MCPReadError("container_identity_mismatch")
         return {**self._project(target, "service_logs", container, data["service"]),
@@ -179,7 +177,7 @@ class MCPReadClient:
 
     def jobs(self, project_id: str) -> dict:
         target = _uuid(project_id)
-        data = self._get(f"/api/v2/projects/{target}/jobs")
+        data = self._call("jobs", project_id=target)
         jobs = data.get("jobs")
         if not isinstance(jobs, list) or len(jobs) > 40:
             raise MCPReadError("invalid_jobs")
@@ -196,10 +194,10 @@ class MCPReadClient:
             raise MCPReadError("invalid_offset")
         # Validate ownership even for empty logs. The existing job endpoint
         # rejects IDs belonging to another project.
-        detail = self._get(f"/api/v2/projects/{target}/jobs/{job}")
+        detail = self._call("job", project_id=target, id=job)
         if detail.get("project_id") != target or detail.get("id") != job:
             raise MCPReadError("job_identity_mismatch")
-        data = self._get(f"/api/v2/projects/{target}/jobs/{job}/logs?offset={offset}")
+        data = self._call("job_logs", project_id=target, id=job, offset=offset)
         return {**self._project(target, "job_logs", job),
                 "status": detail.get("status"), "offset": data.get("offset"),
                 "next_offset": data.get("next_offset"), "complete": data.get("complete"),
@@ -208,8 +206,20 @@ class MCPReadClient:
     def diagnostics(self, minutes: int = 5) -> dict:
         if type(minutes) is not int or minutes not in (1, 5, 30):
             raise MCPReadError("invalid_window")
-        data = self._get(f"/api/v2/devstack/diagnostics?minutes={minutes}")
+        data = self._call("diagnostics_snapshot", minutes=minutes)
+        events = data.get("events", [])
+        if not isinstance(events, list):
+            raise MCPReadError("invalid_diagnostics")
+        sources = data.get("sources", {})
         return self._global("diagnostics", {"minutes": minutes,
-            "sources": data.get("sources", {}),
-            "events": data.get("events", [])[:250],
-            "truncated": bool(data.get("truncated", False)) or len(data.get("events", [])) > 250})
+            "sources": {
+                "controller": sources.get("controller", "unavailable"),
+                "runtime": sources.get("runtime", "unavailable"),
+                # Other diagnostics live outside the controller; do not
+                # silently rely on private Web HTTP or imply full coverage.
+                "web": "not_in_controller",
+                "updater": "not_in_controller",
+                "mcp": "not_in_controller",
+            },
+            "events": events[:250],
+            "truncated": bool(data.get("truncated", False)) or len(events) > 250})
