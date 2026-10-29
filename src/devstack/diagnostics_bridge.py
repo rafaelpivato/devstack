@@ -72,7 +72,12 @@ def _web_snapshot(primary: Path, fallback: Path, web_user: str, now_ms: int) -> 
         primary_events = _read_web(primary, uid, now_ms)
         primary_ok = True
     except (OSError, RuntimeError, sqlite3.Error, ValueError) as exc:
-        error_code = storage_failure_code(exc, primary)
+        if isinstance(exc, (sqlite3.Error, OSError)):
+            error_code = storage_failure_code(exc, primary)
+        elif not primary.parent.is_dir():
+            error_code = "directory_missing"
+        else:
+            error_code = "storage_unavailable"
         try:
             if primary.is_file() and primary.stat().st_uid != uid:
                 error_code = "ownership_mismatch"

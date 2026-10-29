@@ -131,7 +131,7 @@ class MCPReadBridgeTests(unittest.TestCase):
         self.assertFalse(hasattr(self.client, "_get"))
         self.assertEqual(self.client.diagnostics(1)["source"]["type"], "diagnostics")
         self.assertEqual(self.client.diagnostics(1)["scope"], "devstack")
-        self.assertEqual(self.client.diagnostics(1)["sources"]["web"], "not_in_controller")
+        self.assertEqual(self.client.diagnostics(1)["sources"]["web"], "unavailable")
 
 
 

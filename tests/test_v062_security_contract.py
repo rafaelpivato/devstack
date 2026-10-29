@@ -40,7 +40,10 @@ class DiagnosticsSecurityTests(unittest.TestCase):
         }
         controller.registry=Mock()
         result=controller.handle({"op":"diagnostics_snapshot","minutes":5})
-        self.assertEqual(result["sources"],{"controller":"unavailable","runtime":"available"})
+        self.assertEqual(result["sources"]["controller"], "unavailable")
+        self.assertEqual(result["sources"]["runtime"], "available")
+        self.assertEqual(result["sources"]["web"], "unavailable")
+        self.assertEqual(result["sources"]["updater"], "unavailable")
         self.assertEqual(len(result["events"]),1)
         with self.assertRaises(ProtocolError):
             controller.handle({"op":"diagnostics_snapshot","minutes":True})
