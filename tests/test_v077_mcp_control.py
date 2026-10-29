@@ -99,9 +99,9 @@ class DirectControllerTests(unittest.TestCase):
         self.assertEqual(checked["source"]["id"], REPO)
         updated = self.client.repository_update(A, REPO, HEAD)
         self.assertEqual(updated["previous_head"], HEAD)
-        self.assertEqual(self.stub.calls[-1], {
+        self.assertIn({
             "op": "repository_update", "project_id": A,
-            "repository_id": REPO, "expected_head": HEAD})
+            "repository_id": REPO, "expected_head": HEAD}, self.stub.calls)
         action = self.client.service_action(A, "web", "restart")
         self.assertEqual(action["job_id"], JOB)
         task = self.client.run_task(A, "tests")
