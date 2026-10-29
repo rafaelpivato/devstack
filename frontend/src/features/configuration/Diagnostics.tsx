@@ -5,6 +5,17 @@ import {Notice,Shell,Skeleton} from "../../components/Shell";
 import type {Navigator} from "../../navigation/useNavigation";
 
 const WINDOWS=[1,5,30] as const;
+const WEB_STORAGE_HINTS:Record<string,string>={
+  directory_missing:"Persistent state directory is missing. The upgrade repair should provision it.",
+  ownership_mismatch:"The Web service cannot own its persistent state. Report this code after the upgrade.",
+  permission_denied:"Persistent storage is not writable by the Web service.",
+  read_only:"Persistent storage is read-only under the current systemd sandbox.",
+  sqlite_locked:"The persistent events database is locked. Retry after a short interval.",
+  sqlite_corrupt:"The persistent events database is damaged and needs bounded recovery.",
+  storage_full:"Persistent storage has no remaining capacity.",
+  unsafe_path:"The persistent storage path failed safety checks.",
+  storage_unavailable:"The persistent Web events store is unavailable.",
+};
 export function DiagnosticsScreen({navigation}:{navigation:Navigator}){
   const [minutes,setMinutes]=useState<1|5|30>(5);
   const [refresh,setRefresh]=useState(0);
@@ -45,6 +56,13 @@ export function DiagnosticsScreen({navigation}:{navigation:Navigator}){
         <div className="section-head">Source coverage</div>
         {(Object.keys(data.sources) as Array<keyof typeof data.sources>).map(source=>
           <div className="property" key={source}><span>{source}</span><strong>{data.sources[source]}</strong></div>)}
+        {data.web_storage.mode!=="persistent"&&<Notice title="Web event persistence degraded" role="alert">
+          {data.web_storage.mode==="volatile"
+            ?"Web events are temporarily stored until the Web service restarts. "
+            :"Web event storage is unavailable. "}
+          {WEB_STORAGE_HINTS[data.web_storage.error_code||""]||WEB_STORAGE_HINTS.storage_unavailable}
+          {" "}Safe diagnostic code: <code>{data.web_storage.error_code||"storage_unavailable"}</code>.
+        </Notice>}
         {data.partial&&<Notice title="Incomplete snapshot" role="alert">Some sources were unavailable or returned status only. No events does not imply no errors.</Notice>}
         {data.truncated&&<Notice title="Truncated events" role="alert">The bounded maximum was reached. Narrow the time window for more detail.</Notice>}
         {data.updater_status&&<details className="technical-details">

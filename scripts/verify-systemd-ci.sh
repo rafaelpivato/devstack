@@ -28,6 +28,7 @@ cleanup() {
     devstack-ci-control.service 2>/dev/null || :
   rm -f "$control_unit" "$web_unit" "$request_path" "$request_service" \
     "$update_target" /run/devstack-ci-update-sentinel
+  rm -rf /etc/systemd/system/devstack-ci-web.service.d /var/lib/devstack-ci-web
   systemctl daemon-reload
 }
 trap cleanup EXIT
@@ -81,7 +82,22 @@ sed \
   -e "s|/etc/devstack/app.env|$envfile|g" \
   -e "s|/opt/devstack/current/venv|$root/venv|g" \
   -e 's|127.0.0.1:8765|127.0.0.1:18765|g' \
+  -e '/^StateDirectory=/d' \
+  -e '/^StateDirectoryMode=/d' \
   deploy/devstack-web-v2.service > "$web_unit"
+
+# Reproduce an upgraded host: the installed service predates StateDirectory.
+# The exact release-owned repair must add scoped persistent state without SSH
+# or granting Docker, journal, or host permissions.
+"$root/venv/bin/python" - <<'PY'
+from pathlib import Path
+from devstack.diagnostics_deploy import ensure_state_directory
+unit = Path("/etc/systemd/system/devstack-ci-web.service")
+dropin = Path("/etc/systemd/system/devstack-ci-web.service.d/10-diagnostics-state.conf")
+assert ensure_state_directory(unit, dropin, "devstack-ci-web")
+assert not ensure_state_directory(unit, dropin, "devstack-ci-web")
+assert "StateDirectoryMode=0700" in dropin.read_text()
+PY
 
 # Exercise the exact path-watcher privilege handoff with a harmless
 # CI-only root service rather than contacting or installing a real release.
@@ -108,6 +124,32 @@ for attempt in $(seq 1 45); do
   sleep 1
 done
 cat /tmp/devstack-ci-health.json
+
+# Exercise persistent diagnostics through actual Gunicorn + systemd sandbox,
+# not merely runuser (which bypasses service mount restrictions).
+test "$(stat -c '%a' /var/lib/devstack-ci-web)" = "700"
+test "$(stat -c '%U' /var/lib/devstack-ci-web)" = "$web"
+curl -fsS 'http://127.0.0.1:18765/api/v2/devstack/diagnostics?minutes=5' > /tmp/devstack-ci-diag-before.json
+systemctl restart devstack-ci-web.service
+for attempt in $(seq 1 45); do
+  if curl -fsS 'http://127.0.0.1:18765/api/v2/devstack/diagnostics?minutes=5' > /tmp/devstack-ci-diag-after.json; then
+    break
+  fi
+  sleep 1
+done
+"$root/venv/bin/python" - <<'PY'
+import json
+from pathlib import Path
+before=json.loads(Path("/tmp/devstack-ci-diag-before.json").read_text())
+after=json.loads(Path("/tmp/devstack-ci-diag-after.json").read_text())
+assert before["sources"]["web"] == "available", before["sources"]
+assert after["sources"]["web"] == "available", after["sources"]
+assert after["web_storage"] == {"mode":"persistent","error_code":None}, after["web_storage"]
+startup=[event for event in after["events"] if event["source"] == "web"
+         and event["code"] == "web-started"]
+assert len(startup) >= 2, startup
+PY
+echo "Persistent Web diagnostic events survive systemd Web service restart: PASS"
 "$root/venv/bin/python" - <<'PY'
 import json, urllib.request
 with urllib.request.urlopen("http://127.0.0.1:18765/healthz", timeout=3) as r:
