@@ -45,7 +45,7 @@ Requires=devstack-control.service
 [Service]
 Type=simple
 DynamicUser=yes
-SupplementaryGroups=devstackpublic
+SupplementaryGroups=devstackpublic devstackipc
 EnvironmentFile=-/etc/devstack-public.env
 ExecStart=/opt/devstack/current/venv/bin/python -m devstack.public_app
 Restart=on-failure

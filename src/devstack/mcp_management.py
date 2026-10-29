@@ -34,12 +34,13 @@ UNIT_FILES = {
     "devstack-mcp.service": """# Managed by DevStack v0.7+
 [Unit]
 Description=DevStack MCP gateway (opt-in)
-After=devstack-web-v2.service tailscaled.service
-Requires=devstack-web-v2.service
+After=devstack-control.service tailscaled.service
+Requires=devstack-control.service
 
 [Service]
 Type=simple
 DynamicUser=yes
+SupplementaryGroups=devstackipc
 EnvironmentFile=/etc/devstack-mcp.env
 ExecStart=/opt/devstack/current/venv/bin/devstack-mcp
 Restart=on-failure
