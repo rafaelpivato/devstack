@@ -82,7 +82,8 @@ def storage_failure_code(exc: Exception, path: Path) -> str:
     import stat
 
     if isinstance(exc, sqlite3.Error):
-        code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+        raw = getattr(exc, "sqlite_errorcode", None)
+        code = (raw & 0xFF) if isinstance(raw, int) else 0
         if code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
             return "sqlite_locked"
         if code in (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB):

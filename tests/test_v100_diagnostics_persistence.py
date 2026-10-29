@@ -50,7 +50,7 @@ class StorageFailureTests(unittest.TestCase):
                              "read_only")
             self.assertEqual(storage_failure_code(OSError(errno.EACCES, "secret"), path),
                              "permission_denied")
-            with patch("devstack.diagnostics.os.geteuid", return_value=os.geteuid()+1):
+            with patch("os.geteuid", return_value=os.geteuid()+1):
                 self.assertEqual(storage_failure_code(RuntimeError("secret"), path),
                                  "ownership_mismatch")
 
