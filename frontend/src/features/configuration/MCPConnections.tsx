@@ -8,7 +8,11 @@ import { ADMIN_ROOT, adminUrl } from "../../navigation/routes";
 import { message } from "./Common";
 
 const FUNNEL_FIXES: Record<string,string> = {
-  funnel_setup_timeout: "Funnel setup did not finish within 45 seconds. This may be a first-time tailnet approval or HTTPS certificate delay. Review the Tailscale admin console and retry here; no SSH is needed.",
+  funnel_setup_timeout: "Funnel setup did not finish within 45 seconds; approval or certificate status is not verified. Check preflight and retry here.",
+  funnel_timeout_unknown: "Funnel timed out; this alone does not prove that an approval is required. Check the read-only readiness report and retry here.",
+  funnel_approval_required: "Tailscale requested Funnel approval. Open Tailscale administration in your browser, complete approval, then retry Enable MCP here.",
+  funnel_policy_denied: "Tailscale denied Funnel access by policy. Review node and tailnet Funnel permissions in Tailscale administration, then retry here.",
+  funnel_certificate_pending: "The HTTPS certificate is still pending. Check Tailscale HTTPS settings and try enabling again later.",
   funnel_permission_required: "Approve Funnel access in the Tailscale admin console and retry here. Check the tailnet Funnel policy and node permissions.",
   funnel_https_required: "Enable MagicDNS and HTTPS certificates for your tailnet in the Tailscale admin console, then retry.",
   funnel_certificate_failed: "Tailscale could not issue its HTTPS certificate. Check the tailnet HTTPS settings and certificate rate limits before retrying.",
@@ -47,6 +51,7 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
   const state = useResource(load, 5000);
   const current = state.kind==="ready"?state.data:null;
   const enabled = current?.funnel==="enabled";
+  const preflight = current?.network_preflight;
   const request = async(action:"enable"|"disable"|"disable_webhooks"|"enable_webhooks")=>{
     if(busy||(action==="enable"&&!accepted)||(action==="disable_webhooks"&&!acceptedWebhookDisable)||(action==="enable_webhooks"&&!acceptedWebhookEnable))return;
     setBusy(true);setError(null);setFeedback(null);
@@ -104,6 +109,43 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
         {copyFeedback&&<p role="status">{copyFeedback}</p>}
       </div>}
     </section>}
+    {current&&<section className="card">
+      <h2>Tailscale / Funnel readiness</h2>
+      <p className="text-muted">Read-only checks refresh about once a minute. They verify
+        local setup, not whether an external ChatGPT client can reach the server.</p>
+      {preflight&&<>
+        <div className="property"><span>Local readiness</span>
+          <Status text={preflight.health} kind={preflight.health==="ready"?"positive":
+            preflight.health==="disabled"?"neutral":"warning"}/></div>
+        <div className="property"><span>Tailscale</span><strong>{preflight.tailscale}</strong></div>
+        <div className="property"><span>Device identity</span><strong>{preflight.identity.replaceAll("_"," ")}</strong></div>
+        <div className="property"><span>Private dashboard route</span>
+          <strong>{preflight.private_dashboard.replaceAll("_"," ")}</strong></div>
+        <div className="property"><span>Public MCP Funnel route</span>
+          <strong>{preflight.public_funnel}</strong></div>
+        <div className="property"><span>Local gateway HTTP health</span>
+          <strong>{preflight.gateway.replaceAll("_"," ")}</strong></div>
+        {preflight.health==="unknown"&&<Notice title="Preflight unavailable">
+          The diagnostics collector has not produced a recent verified snapshot.
+          Refresh after setup; no settings have been changed.</Notice>}
+        {preflight.tailscale==="disconnected"&&<Notice title="Tailscale not connected">
+          Complete first-time Tailscale enrollment before enabling public MCP.</Notice>}
+        {preflight.identity==="changed"&&<Notice title="Device identity changed" role="alert">
+          DevStack refuses to publish through a different node or tailnet.
+          Review the device in Tailscale administration; no automatic reset is performed.</Notice>}
+        {preflight.private_dashboard==="migration_required"&&<Notice title="Network reconciliation pending">
+          The existing reconciler must finish moving the private dashboard to HTTPS 8443.
+          It will retry without a manual reset.</Notice>}
+        {preflight.public_funnel==="pending"&&<Notice title="Public Funnel not yet configured">
+          DevStack has requested public MCP, but its final route is not confirmed.
+          Check the last action below. You can retry Enable MCP after resolving the issue.</Notice>}
+        {preflight.gateway==="unavailable"&&<Notice title="Local public gateway unavailable">
+          Funnel may be configured, but the local HTTP health check failed.
+          Review the MCP diagnostics; do not expose the private dashboard to diagnose this.</Notice>}
+      </>}
+      <p className="text-muted">An externally reachable HTTPS connection is
+        confirmed only by a separate off-server test or a successful ChatGPT tool call.</p>
+    </section>}
     {current&&!current.installed&&<Notice title="Host setup missing" role="alert">
       The installed release did not provision the MCP service. Use the supported release updater
       to install the latest version before enabling this connection.</Notice>}
@@ -147,7 +189,9 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
           <p>Error code: <code>{current.last_result}</code></p>
           <p>{FUNNEL_FIXES[current.last_result] ??
             "Open diagnostics for the matching event and share the copied snapshot. No SSH is required."}</p>
-          {["funnel_setup_timeout","funnel_permission_required","funnel_https_required","funnel_certificate_failed"].includes(current.last_result)
+          {["funnel_setup_timeout","funnel_timeout_unknown","funnel_permission_required",
+             "funnel_approval_required","funnel_policy_denied","funnel_https_required",
+             "funnel_certificate_pending","funnel_certificate_failed"].includes(current.last_result)
             && <p><a href="https://login.tailscale.com/admin" target="_blank" rel="noreferrer">
               Open Tailscale administration</a></p>}
         </Notice>}

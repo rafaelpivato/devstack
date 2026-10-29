@@ -182,6 +182,18 @@ assert result["auxiliary"]["web"]["storage"]["mode"] == "persistent"
 PY
 rm -f /run/devstack-ci-support-snapshot.json
 echo "Sanitized Web source readable through controller identity: PASS"
+
+# No Tailscale enrollment in the disposable Ubuntu runner: first-time
+# preflight must return safe, fixed fields and never require SSH or mutate routes.
+"$root/venv/bin/python" - <<'PY'
+from devstack.funnel_preflight import capture_preflight, validate_preflight, unknown
+result=capture_preflight()
+assert validate_preflight(result)==result
+assert result["health"] in {"unknown","attention","disabled","ready"}
+assert result["external_reachability"]=="not_tested"
+assert not any(k in result for k in ("url","hostname","node_id","token","tailnet"))
+PY
+echo "Fresh Ubuntu safe read-only Funnel preflight: PASS"
 "$root/venv/bin/python" - <<'PY'
 import json, urllib.request
 with urllib.request.urlopen("http://127.0.0.1:18765/healthz", timeout=3) as r:
