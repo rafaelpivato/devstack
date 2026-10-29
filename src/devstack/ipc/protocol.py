@@ -7,7 +7,7 @@ from __future__ import annotations
 
 MAX_MESSAGE = 64 * 1024
 PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 3
+PROTOCOL_MINOR = 4
 
 # Request shapes are intentionally exact, not permissive. Optional values
 # still occupy their named fields (typically as JSON null).
@@ -44,6 +44,8 @@ _OPERATION_FIELDS = {
     "compose_save": ("project_id", "content", "revision"),
     "settings_read": ("project_id",),
     "settings_replace": ("project_id", "applications", "tasks"),
+    "settings_review": ("project_id",),
+    "settings_replace_checked": ("project_id", "applications", "tasks", "revision"),
     "webhooks": ("project_id",),
     "webhook_upsert": ("project_id", "route", "service", "port", "destination"),
     "webhook_remove": ("project_id", "route"),
