@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+from uuid import uuid4
 
 from devstack.ipc.client import send, ControllerUnavailable, ControllerRejected
 
@@ -223,3 +224,125 @@ class MCPReadClient:
             },
             "events": events[:250],
             "truncated": bool(data.get("truncated", False)) or len(events) > 250})
+
+
+    def transition(self, action: str, project_id: str | None = None,
+                   request_key: str | None = None) -> dict:
+        """Submit the same durable, idempotent transition as the Web/CLI."""
+        if action not in ("activate", "switch", "deactivate", "reconcile"):
+            raise MCPReadError("invalid_transition")
+        if action in ("activate", "switch"):
+            if project_id is None:
+                raise MCPReadError("project_required")
+            project_id = _uuid(project_id)
+            context = self._project(project_id, "runtime_transition")
+        elif project_id is not None:
+            raise MCPReadError("unexpected_project")
+        else:
+            context = self._global("runtime_transition", {})
+        key = uuid4().hex if request_key is None else request_key
+        if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key):
+            raise MCPReadError("invalid_request_key")
+        receipt = self._call("transition_submit", action=action,
+                             project_id=project_id, request_key=key, timeout=30)
+        if receipt.get("action") != action or receipt.get("project_id") != project_id:
+            raise MCPReadError("transition_identity_mismatch")
+        return {**context, "operation": _fields(receipt, (
+            "id", "action", "project_id", "status", "error_code",
+            "started_ns", "finished_ns", "result"))}
+
+    def transition_status(self, operation_id: str) -> dict:
+        key = _uuid(operation_id)
+        data = self._call("transition_status", id=key)
+        if data.get("id") != key:
+            raise MCPReadError("transition_identity_mismatch")
+        target = data.get("project_id")
+        context = (self._project(_uuid(target), "runtime_transition", key)
+                   if target is not None else self._global("runtime_transition", {}))
+        return {**context, "operation": _fields(data, (
+            "id", "action", "project_id", "status", "error_code",
+            "started_ns", "finished_ns", "result"))}
+
+    def repository_check(self, project_id: str, repository_id: str) -> dict:
+        target, repo = _uuid(project_id), _uuid(repository_id)
+        before = self.project(target)
+        name = next((x["name"] for x in before["repositories"]
+                     if x.get("id") == repo), None)
+        if name is None:
+            raise MCPReadError("repository_not_in_project")
+        data = self._call("repository_check", project_id=target,
+                          repository_id=repo, timeout=180)
+        return {**self._project(target, "repository", repo, name),
+                "repository_status": _fields(data, (
+                    "branch", "head", "upstream", "ahead", "behind", "dirty")),
+                "sync": _fields(data.get("sync", {}), (
+                    "policy", "status", "error_code", "last_checked_ns",
+                    "last_updated_ns", "ahead", "behind", "head"))}
+
+    def repository_update(self, project_id: str, repository_id: str,
+                          expected_head: str) -> dict:
+        target, repo = _uuid(project_id), _uuid(repository_id)
+        if not isinstance(expected_head, str) or not re.fullmatch(r"[a-f0-9]{40,64}", expected_head):
+            raise MCPReadError("invalid_expected_head")
+        before = self.project(target)
+        name = next((x["name"] for x in before["repositories"]
+                     if x.get("id") == repo), None)
+        if name is None:
+            raise MCPReadError("repository_not_in_project")
+        # Controller enforces clean worktree, matching HEAD, coordinator lock,
+        # active-project reconciliation and configured service reactions.
+        data = self._call("repository_update", project_id=target,
+                          repository_id=repo, expected_head=expected_head, timeout=180)
+        return {**self._project(target, "repository", repo, name),
+                "previous_head": expected_head,
+                "repository_status": _fields(data, (
+                    "branch", "head", "upstream", "ahead", "behind", "dirty")),
+                "sync": _fields(data.get("sync", {}), (
+                    "policy", "status", "error_code", "last_checked_ns",
+                    "last_updated_ns", "ahead", "behind", "head")),
+                "note": "Configured service reactions may run after this update."}
+
+    def service_action(self, project_id: str, service: str, action: str) -> dict:
+        target = _uuid(project_id)
+        if action not in ("restart", "redeploy"):
+            raise MCPReadError("invalid_service_action")
+        if not isinstance(service, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,90}", service):
+            raise MCPReadError("invalid_service")
+        # Controller verifies active generation, configured Compose service
+        # and maintenance admission; it owns the resulting asynchronous job.
+        result = self._call("compose_service", project_id=target,
+                            service=service, action=action, timeout=30)
+        if not isinstance(result.get("job_id"), str):
+            raise MCPReadError("invalid_job_receipt")
+        return {**self._project(target, "service", service, service),
+                "action": action, "job_id": _uuid(result["job_id"]), "status": "submitted"}
+
+    def run_task(self, project_id: str, task_name: str) -> dict:
+        target = _uuid(project_id)
+        if not isinstance(task_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,90}", task_name):
+            raise MCPReadError("invalid_task_name")
+        # Resolve the existing task name before execution; no arbitrary command.
+        detail = self.project(target)
+        if not any(row.get("name") == task_name for row in detail["tasks"]):
+            raise MCPReadError("task_not_in_project")
+        result = self._call("task", project_id=target, name=task_name, timeout=30)
+        return {**self._project(target, "task", source_name=task_name),
+                "job_id": _uuid(result["job_id"]), "status": "submitted"}
+
+    def job_detail(self, project_id: str, job_id: str) -> dict:
+        target, job = _uuid(project_id), _uuid(job_id)
+        data = self._call("job", project_id=target, id=job)
+        if data.get("id") != job or data.get("project_id") != target:
+            raise MCPReadError("job_identity_mismatch")
+        return {**self._project(target, "job", job),
+                "job": _fields(data, ("id", "kind", "status", "action", "cancel_policy",
+                                       "started_ns", "finished_ns", "exit_code"))}
+
+    def cancel_job(self, project_id: str, job_id: str) -> dict:
+        target, job = _uuid(project_id), _uuid(job_id)
+        data = self._call("job_cancel", project_id=target, id=job, timeout=60)
+        if data.get("id") != job or data.get("project_id") != target:
+            raise MCPReadError("job_identity_mismatch")
+        return {**self._project(target, "job", job),
+                "job": _fields(data, ("id", "status", "cancel_policy",
+                                       "started_ns", "finished_ns", "exit_code"))}
