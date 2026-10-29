@@ -60,7 +60,7 @@ fi
 
 install -d -m 0700 -o "$controller" -g "$controller" "$state"
 install -d -m 0750 -o root -g "$ipc" /etc/devstack-ci
-printf 'DEVSTACK_SECRET_KEY=ci-test-only-secret-not-for-real-deployments\nDEVSTACK_SECURE_COOKIES=0\nDEVSTACK_CONTROL_SOCKET=%s\n' \
+printf 'DEVSTACK_SECRET_KEY=ci-test-only-secret-not-for-real-deployments\nDEVSTACK_SECURE_COOKIES=0\nDEVSTACK_CONTROL_SOCKET=%s\nDEVSTACK_WEB_DIAGNOSTICS_PATH=/var/lib/devstack-ci-web/diagnostics.sqlite3\n' \
   "$socket" > "$envfile"
 chown root:"$ipc" "$envfile"
 chmod 0640 "$envfile"
