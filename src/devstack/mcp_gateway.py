@@ -255,6 +255,90 @@ def make_server(
         return reader.cancel_job(project_id, job_id)
 
 
+
+    # v0.7.8: repository operations share the existing controller operations.
+    @mcp.tool(title="Repository synchronization policy",
+              annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+    def devstack_repository_sync(project_id: str, repository_id: str) -> dict:
+        """Read automatic Git synchronization state and policy for one repository."""
+        return reader.repository_sync(project_id, repository_id)
+
+    @mcp.tool(title="Set repository synchronization policy",
+              annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                          idempotent_hint=True, open_world_hint=False))
+    def devstack_repository_sync_policy(project_id: str, repository_id: str,
+                                        policy: str) -> dict:
+        """Set policy to manual, check or update. 'update' enables automatic
+        Git fast-forwards, potentially triggering configured service reactions."""
+        return reader.repository_sync_policy(project_id, repository_id, policy)
+
+    @mcp.tool(title="Repository service reactions",
+              annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+    def devstack_repository_reactions(project_id: str, repository_id: str) -> dict:
+        """Read repository-to-service mappings, actions and recent reactions."""
+        return reader.repository_reactions(project_id, repository_id)
+
+    @mcp.tool(title="Set repository service reaction",
+              annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                          idempotent_hint=True, open_world_hint=False))
+    def devstack_repository_reaction_policy(project_id: str, repository_id: str,
+                                            service: str, action: str) -> dict:
+        """Map one repository update to one Compose service action:
+        none, restart or redeploy. Applies to future successful Git updates."""
+        return reader.repository_reaction_policy(project_id, repository_id,
+                                                 service, action)
+
+    @mcp.tool(title="Update all project repositories",
+              annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                          idempotent_hint=False, open_world_hint=False))
+    def devstack_repository_update_all(project_id: str,
+                                       request_key: str | None = None) -> dict:
+        """Submit a controller-owned, asynchronous project Git update batch.
+        A stable optional 32-digit hex request_key ensures idempotent retries.
+        Individual updates can trigger configured service reactions."""
+        return reader.repository_bulk_update(project_id, request_key)
+
+    @mcp.tool(title="Project repository update batch status",
+              annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+    def devstack_repository_update_all_status(project_id: str, operation_id: str) -> dict:
+        """Read status and per-repository results for a controller update batch."""
+        return reader.repository_bulk_status(project_id, operation_id)
+
+    @mcp.tool(title="Register project repository",
+              annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                          idempotent_hint=False, open_world_hint=False))
+    def devstack_repository_add(project_id: str, url: str, name: str,
+                                branch: str = "",
+                                request_key: str | None = None) -> dict:
+        """Clone/register a GitHub repository in an INACTIVE project.
+        Controller validates GitHub source and durable operation ownership."""
+        return reader.repository_add(project_id, url, name, branch, request_key)
+
+    @mcp.tool(title="Repository registration operation status",
+              annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+    def devstack_repository_add_status(project_id: str, operation_id: str) -> dict:
+        """Read verified status of one repository-registration operation."""
+        return reader.repository_add_status(project_id, operation_id)
+
+    @mcp.tool(title="Preview project branch switch",
+              annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                          idempotent_hint=True, open_world_hint=False))
+    def devstack_branch_preview(project_id: str, branch: str,
+                                repository_id: str | None = None) -> dict:
+        """Fetch and inspect a branch switch preview and opaque revision.
+        Supply repository_id to target one repository or omit for all."""
+        return reader.branch_preview(project_id, branch, repository_id)
+
+    @mcp.tool(title="Apply reviewed branch switch",
+              annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True,
+                                          idempotent_hint=False, open_world_hint=False))
+    def devstack_branch_apply(project_id: str, branch: str, revision: str,
+                              repository_id: str | None = None) -> dict:
+        """Apply the controller's reviewed branch preview with its exact revision.
+        A stale preview is rejected; multi-repository partial results are reported."""
+        return reader.branch_apply(project_id, branch, revision, repository_id)
+
+
     return mcp
 
 
