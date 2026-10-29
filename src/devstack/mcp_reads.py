@@ -43,6 +43,25 @@ def _fields(value: dict, allowed: tuple[str, ...]) -> dict:
     return {field: value[field] for field in allowed if field in value}
 
 
+def _operation_key(value: str | None) -> str:
+    key = uuid4().hex if value is None else value
+    if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key):
+        raise MCPReadError("invalid_request_key")
+    return key
+
+
+def _revision(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+        raise MCPReadError("invalid_revision")
+    return value
+
+
+def _short_text(value: str, label: str, limit: int = 2048) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > limit:
+        raise MCPReadError("invalid_" + label)
+    return value
+
+
 class MCPReadClient:
     def __init__(self, socket_path: Path = Path("/run/devstack-control/control.sock"),
                  *, transport=None):
@@ -346,3 +365,108 @@ class MCPReadClient:
         return {**self._project(target, "job", job),
                 "job": _fields(data, ("id", "status", "cancel_policy",
                                        "started_ns", "finished_ns", "exit_code"))}
+
+    # v0.7.8: these methods are thin clients of existing controller IPC
+    # operations. The controller remains the sole execution/validation authority.
+
+    def _repo_identity(self, project_id: str, repository_id: str) -> tuple[str, str, str]:
+        target, repo = _uuid(project_id), _uuid(repository_id)
+        detail = self.project(target)
+        name = next((item["name"] for item in detail["repositories"]
+                     if item["id"] == repo), None)
+        if name is None:
+            raise MCPReadError("repository_not_in_project")
+        return target, repo, name
+
+    def repository_sync(self, project_id: str, repository_id: str) -> dict:
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_sync_state", project_id=target, repository_id=repo)
+        return {**self._project(target, "repository_sync", repo, name), "sync": result}
+
+    def repository_sync_policy(self, project_id: str, repository_id: str,
+                               policy: str) -> dict:
+        if policy not in ("manual", "check", "update"):
+            raise MCPReadError("invalid_sync_policy")
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_sync_policy", project_id=target,
+                            repository_id=repo, policy=policy)
+        return {**self._project(target, "repository_sync", repo, name), "sync": result}
+
+    def repository_reactions(self, project_id: str, repository_id: str) -> dict:
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_reactions", project_id=target, repository_id=repo)
+        return {**self._project(target, "repository_reactions", repo, name),
+                "services": result.get("services", []),
+                "events": result.get("events", [])}
+
+    def repository_reaction_policy(self, project_id: str, repository_id: str,
+                                   service: str, action: str) -> dict:
+        if action not in ("none", "restart", "redeploy"):
+            raise MCPReadError("invalid_reaction_action")
+        target, repo, name = self._repo_identity(project_id, repository_id)
+        result = self._call("repository_reaction_policy", project_id=target,
+                            repository_id=repo, service=_short_text(service, "service", 90),
+                            action=action)
+        return {**self._project(target, "repository_reactions", repo, name),
+                "services": result.get("services", []),
+                "events": result.get("events", [])}
+
+    def repository_bulk_update(self, project_id: str,
+                               request_key: str | None = None) -> dict:
+        target = _uuid(project_id)
+        context = self._project(target, "repository_bulk_update")
+        result = self._call("repository_bulk_submit", project_id=target,
+                            request_key=_operation_key(request_key))
+        if result.get("project_id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        return {**context, "operation": result}
+
+    def repository_bulk_status(self, project_id: str, operation_id: str) -> dict:
+        target, operation = _uuid(project_id), _uuid(operation_id)
+        result = self._call("repository_bulk_status", project_id=target, id=operation)
+        if result.get("project_id") != target or result.get("id") != operation:
+            raise MCPReadError("operation_identity_mismatch")
+        return {**self._project(target, "repository_bulk_update", operation),
+                "operation": result}
+
+    def repository_add(self, project_id: str, url: str, name: str,
+                       branch: str = "", request_key: str | None = None) -> dict:
+        target = _uuid(project_id)
+        context = self._project(target, "repository_add")
+        result = self._call("repository_add_submit", project_id=target,
+                            url=_short_text(url, "url"),
+                            name=_short_text(name, "repository_name", 120),
+                            branch=branch, request_key=_operation_key(request_key))
+        if result.get("project_id") != target:
+            raise MCPReadError("project_identity_mismatch")
+        return {**context, "operation": result}
+
+    def repository_add_status(self, project_id: str, operation_id: str) -> dict:
+        target, operation = _uuid(project_id), _uuid(operation_id)
+        result = self._call("repository_add_status", project_id=target, id=operation)
+        if result.get("project_id") != target or result.get("id") != operation:
+            raise MCPReadError("operation_identity_mismatch")
+        return {**self._project(target, "repository_add", operation),
+                "operation": result}
+
+    def branch_preview(self, project_id: str, branch: str,
+                       repository_id: str | None = None) -> dict:
+        target = _uuid(project_id)
+        repo = self._repo_identity(target, repository_id)[1] if repository_id else None
+        result = self._call("branch_preview", project_id=target,
+                            branch=_short_text(branch, "branch", 200), repository_id=repo,
+                            timeout=180)
+        if result.get("project_id") != target or result.get("repository_id") != repo:
+            raise MCPReadError("branch_identity_mismatch")
+        return {**self._project(target, "branch_preview", repo), "preview": result}
+
+    def branch_apply(self, project_id: str, branch: str, revision: str,
+                     repository_id: str | None = None) -> dict:
+        target = _uuid(project_id)
+        repo = self._repo_identity(target, repository_id)[1] if repository_id else None
+        result = self._call("branch_apply", project_id=target,
+                            branch=_short_text(branch, "branch", 200),
+                            repository_id=repo, revision=_revision(revision), timeout=180)
+        if result.get("project_id") != target:
+            raise MCPReadError("branch_identity_mismatch")
+        return {**self._project(target, "branch", repo), "result": result}
