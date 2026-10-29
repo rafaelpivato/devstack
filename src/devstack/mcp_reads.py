@@ -242,7 +242,8 @@ class MCPReadClient:
             "partial": any(value != "available" for value in coverage.values()),
             "web_storage": storage,
             "updater_status": data.get("updater_status"),
-            "support_captured_at": data.get("support_captured_at")})
+            "support_captured_at": data.get("support_captured_at"),
+            "network_preflight": data.get("network_preflight")})
 
 
     def transition(self, action: str, project_id: str | None = None,

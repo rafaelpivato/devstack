@@ -68,10 +68,20 @@ export function validateCollection(value:unknown):value is SettingsCollection {
   return apps&&tasks;
 }
 
+export interface NetworkPreflight {
+  health:"ready"|"disabled"|"attention"|"unknown";
+  tailscale:"connected"|"disconnected"|"unknown";
+  identity:"verified"|"not_configured"|"changed"|"unknown";
+  private_dashboard:"ready"|"migration_required"|"missing"|"unknown";
+  public_funnel:"configured"|"disabled"|"pending"|"unknown";
+  gateway:"ready"|"unavailable"|"not_checked";
+  external_reachability:"not_tested";
+}
 export interface MCPStatus {
   gateway:"running"|"stopped";funnel:"enabled"|"disabled"|"unknown";
   url:string|null; private_url?:string|null; network_phase?:string; migration_required?:boolean; legacy_webhooks_active?:boolean; webhooks_enabled?:boolean;
   request_pending:boolean; request_state:string; last_result:string|null; installed:boolean;
+  network_preflight?:NetworkPreflight;
 }
 export const readMCPStatus=(signal?:AbortSignal)=>
   apiRequest<MCPStatus>("/api/v2/devstack/mcp",{signal});

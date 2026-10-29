@@ -10,6 +10,7 @@ export interface DiagnosticSnapshot {
   sources:Record<DiagnosticSource,string>;
   web_storage:{mode:"persistent"|"volatile"|"unavailable";error_code:string|null};
   updater_status:{phase:string;unit_state:string;last_result:string;last_exit_code:string}|null;
+  network_preflight?:import("./configuration").NetworkPreflight;
 }
 export function readDiagnostics(minutes:1|5|30,signal?:AbortSignal):Promise<DiagnosticSnapshot>{
   return apiRequest<DiagnosticSnapshot>("/api/v2/devstack/diagnostics?minutes="+minutes,{signal});
@@ -27,6 +28,13 @@ export function diagnosticText(snapshot:DiagnosticSnapshot):string{
     snapshot.partial?"WARNING: Some sources are unavailable or partial.":"All listed sources available.",
     snapshot.truncated?"WARNING: Event list truncated.":"Event list not truncated.",
   ];
+  if(snapshot.network_preflight){
+    const p=snapshot.network_preflight;
+    lines.push("Local Funnel preflight: health="+p.health+", tailscale="+p.tailscale+
+      ", identity="+p.identity+", private="+p.private_dashboard+
+      ", public="+p.public_funnel+", gateway="+p.gateway+
+      ", external="+p.external_reachability);
+  }
   if(snapshot.updater_status){
     const u=snapshot.updater_status;
     lines.push("Updater (sampled): phase="+u.phase+", unit="+u.unit_state+

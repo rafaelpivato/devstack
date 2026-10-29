@@ -45,12 +45,16 @@ def snapshot(minutes: int, path: Path = DEFAULT_SNAPSHOT, *, include_auxiliary: 
         if include_auxiliary:
             result["generated_at"] = timestamp
             result["auxiliary"] = _validate_auxiliary(payload.get("auxiliary"), cutoff, now)
+            from devstack.funnel_preflight import validate_preflight
+            result["network_preflight"] = validate_preflight(payload.get("network_preflight"))
         return result
     except (OSError, ValueError, KeyError, TypeError, AttributeError, UnicodeError):
         result = {"events": [], "truncated": False, "available": False}
         if include_auxiliary:
             result["generated_at"] = None
             result["auxiliary"] = _validate_auxiliary(None, 0, 0)
+            from devstack.funnel_preflight import unknown
+            result["network_preflight"] = unknown()
         return result
 
 
