@@ -67,8 +67,20 @@ It must not load the dashboard, poll runtime/projects or offer navigation.
 Authenticated read-only MCP operations must require explicit project IDs, and
 resource-specific reads must also require repository, container or job IDs.
 All returned project-specific data must name the canonical project and
-validated source. Use fixed bounded local Web GET → controller IPC endpoints,
-which already validate ownership/generation; the public gateway must not
-receive the administrative controller socket, Docker or host-filesystem access.
+validated source. Use the exact existing **controller Unix IPC** contract, just like Web and CLI;
+the OAuth-protected MCP transport must not depend on Web HTTP. Give the MCP
+service only IPC-group membership, not Docker or host-filesystem access.
+Do not create a second controller, special MCP execution engine, or extra
+authorization tiers.
 Log text is untrusted content and can contain secrets. No additional service,
 background collection, usage tracking or last-used timestamps.
+
+## MCP v0.7.7 direct controller and writes
+
+MCP/Web/CLI remain independent clients of the same versioned Unix controller
+protocol. The existing single-owner OAuth gate protects MCP before tool calls.
+MCP can submit the same validated controller operations as Web/CLI, with explicit
+project/resource IDs, Git HEAD preconditions, controller-owned durable
+transition receipts, and returned job IDs. No additional per-tool consent layer.
+The public systemd service joins `devstackipc` for the existing controller
+socket but never joins `docker`. The webhook ingress socket remains separate.

@@ -75,3 +75,22 @@ Web :8765 → controller IPC; it has no administrative controller Unix socket,
 Docker access, arbitrary URL client or shell. Invalid/stale cross-project
 resources are rejected by the existing controller ownership and generation
 checks. No additional service, database, or per-client last-used analytics.
+
+## v0.7.7 — Shared controller connection
+
+The v0.7.6 loopback Web HTTP relay has been removed. All MCP project reads,
+diagnostics and operational writes use the existing local Unix controller IPC
+protocol directly, just as Web and CLI do. The OAuth-protected public service
+has 'devstackipc' group membership, not Docker permissions. The public
+443/Funnel endpoint, private owner consent 8443 and single-owner all-or-nothing
+OAuth model remain unchanged. Public webhooks continue through their separate
+admission socket, without arbitrary controller access.
+
+New operations: devstack_transition (activate/switch/deactivate/reconcile) and
+devstack_transition_status (durable receipts); devstack_repository_check,
+devstack_repository_update (required expected_head); devstack_service_action
+(restart/redeploy), devstack_task_run (predefined task name), devstack_job and
+devstack_job_cancel (independent jobs only). The existing controller owns all
+validation, changes and operation state. Outputs echo canonical project IDs.
+MCP diagnostics include controller/runtime events; sources outside the
+controller are explicitly 'not_in_controller', not silently assumed healthy.
