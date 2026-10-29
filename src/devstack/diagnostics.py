@@ -107,7 +107,9 @@ def storage_failure_code(exc: Exception, path: Path) -> str:
         try:
             info = candidate.lstat()
         except FileNotFoundError:
-            return "directory_missing" if is_dir else "storage_unavailable"
+            if is_dir:
+                return "directory_missing"
+            break  # SQLite may have failed to create the database file.
         except PermissionError:
             return "permission_denied"
         except OSError:
@@ -119,11 +121,12 @@ def storage_failure_code(exc: Exception, path: Path) -> str:
             return "unsafe_path"
         if info.st_uid != os.geteuid():
             return "ownership_mismatch"
+        if is_dir:
+            try:
+                if os.statvfs(candidate).f_flag & getattr(os, "ST_RDONLY", 1):
+                    return "read_only"
+            except OSError:
+                pass
         if not os.access(candidate, os.W_OK | (os.X_OK if is_dir else os.R_OK)):
             return "permission_denied"
-    try:
-        if os.statvfs(path.parent).f_flag & getattr(os, "ST_RDONLY", 1):
-            return "read_only"
-    except OSError:
-        pass
     return "storage_unavailable"
