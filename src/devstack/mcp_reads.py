@@ -231,18 +231,18 @@ class MCPReadClient:
         if not isinstance(events, list):
             raise MCPReadError("invalid_diagnostics")
         sources = data.get("sources", {})
+        coverage = {name: sources.get(name, "unavailable")
+                    for name in ("controller", "runtime", "web", "updater", "mcp")}
+        storage = data.get("web_storage")
+        if not isinstance(storage, dict):
+            storage = {"mode": "unavailable", "error_code": "storage_unavailable"}
         return self._global("diagnostics", {"minutes": minutes,
-            "sources": {
-                "controller": sources.get("controller", "unavailable"),
-                "runtime": sources.get("runtime", "unavailable"),
-                # Other diagnostics live outside the controller; do not
-                # silently rely on private Web HTTP or imply full coverage.
-                "web": "not_in_controller",
-                "updater": "not_in_controller",
-                "mcp": "not_in_controller",
-            },
-            "events": events[:250],
-            "truncated": bool(data.get("truncated", False)) or len(events) > 250})
+            "sources": coverage, "events": events[-120:],
+            "truncated": bool(data.get("truncated", False)) or len(events) > 120,
+            "partial": any(value != "available" for value in coverage.values()),
+            "web_storage": storage,
+            "updater_status": data.get("updater_status"),
+            "support_captured_at": data.get("support_captured_at")})
 
 
     def transition(self, action: str, project_id: str | None = None,

@@ -150,6 +150,38 @@ startup=[event for event in after["events"] if event["source"] == "web"
 assert len(startup) >= 2, startup
 PY
 echo "Persistent Web diagnostic events survive systemd Web service restart: PASS"
+
+# Use the actual unprivileged Web-owned SQLite database and updater properties.
+# Root collects only allowlisted values; controller UID can read the sanitized
+# file without access to the original Web database or the system journal.
+"$root/venv/bin/python" - <<'PY'
+from pathlib import Path
+import json, os
+from devstack.diagnostics_bridge import capture_auxiliary
+payload = capture_auxiliary(primary=Path("/var/lib/devstack-ci-web/diagnostics.sqlite3"),
+                            fallback=Path("/run/devstack-update-request/web-diagnostics.sqlite3"),
+                            web_user="devstack-ci-web")
+assert payload["web"]["status"] == "available", payload["web"]
+assert payload["web"]["storage"]["mode"] == "persistent", payload["web"]
+assert any(event["code"] == "web-started" for event in payload["web"]["events"])
+target=Path("/run/devstack-ci-support-snapshot.json")
+target.write_text(json.dumps({"generated_at":__import__("time").time_ns()//1000000,
+                              "available": True,"events":[],"truncated":False,
+                              "auxiliary":payload}))
+target.chmod(0o644)
+PY
+runuser -u "$controller" -- env PYTHONPATH="$PWD/src" "$root/venv/bin/python" - <<'PY'
+from pathlib import Path
+from devstack.mcp_diagnostics import snapshot
+result=snapshot(5,Path("/run/devstack-ci-support-snapshot.json"),
+                include_auxiliary=True)
+assert result["auxiliary"]["web"]["status"] == "available", result
+assert any(event["code"] == "web-started"
+           for event in result["auxiliary"]["web"]["events"])
+assert result["auxiliary"]["web"]["storage"]["mode"] == "persistent"
+PY
+rm -f /run/devstack-ci-support-snapshot.json
+echo "Sanitized Web source readable through controller identity: PASS"
 "$root/venv/bin/python" - <<'PY'
 import json, urllib.request
 with urllib.request.urlopen("http://127.0.0.1:18765/healthz", timeout=3) as r:

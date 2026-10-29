@@ -179,8 +179,10 @@ def capture_diagnostics() -> None:
                        "level": level, "code": "mcp-" + code.replace("_", "-")})
     events.sort(key=lambda e: e["at"])
     truncated = len(events) > 120
+    from devstack.diagnostics_bridge import capture_auxiliary
     doc = {"generated_at": now, "available": available,
-           "events": events[-120:], "truncated": truncated}
+           "events": events[-120:], "truncated": truncated,
+           "auxiliary": capture_auxiliary()}
     atomic_result_file(SNAPSHOT_FILE, doc)
 
 
