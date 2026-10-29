@@ -124,3 +124,23 @@ project ID and the response names the verified project and source. The public
 MCP process still cannot access administrative controller IPC, Docker or host
 files; reads go through fixed, bounded local Web read endpoints. There are no
 new write operations, long-running log subscriptions or tracking fields.
+
+## v0.7.7 — MCP direct controller IPC and operations
+
+After owner-approved OAuth, MCP connects to the **same local Unix controller
+socket** as Web and CLI, not through private HTTP Web :8765. The managed public
+service joins the existing 'devstackipc' group; Docker privilege and host
+filesystem access remain exclusive to the controller. MCP and Web can restart
+independently. No new controller, broker, approval tiers or infrastructure.
+
+In addition to v0.7.6 project-scoped reads, MCP can submit durable runtime
+transitions, check/fetch and safely fast-forward repositories, restart/redeploy
+one Compose service, execute existing saved tasks and cancel eligible independent
+jobs. Transitions return operation IDs; asynchronous jobs return job IDs.
+The controller validates exact project/resource ownership, runtime generation,
+repository expected HEAD and existing job admission/cancellation rules.
+
+Global diagnostics now come strictly from the controller/runtime source;
+previously combined Web/updater/MCP diagnostic sources are explicitly labeled
+'not_in_controller' in this MCP tool. Those sources remain available from the
+private dashboard's diagnostics without coupling MCP to its Web server.
