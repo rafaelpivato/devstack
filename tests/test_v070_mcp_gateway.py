@@ -96,6 +96,19 @@ class ProtocolTests(unittest.TestCase):
                                 "devstack_repository_check", "devstack_repository_update",
                                 "devstack_service_action", "devstack_task_run",
                                 "devstack_job", "devstack_job_cancel",
+                                "devstack_repository_sync", "devstack_repository_sync_policy",
+                                "devstack_repository_reactions", "devstack_repository_reaction_policy",
+                                "devstack_repository_update_all", "devstack_repository_update_all_status",
+                                "devstack_repository_add", "devstack_repository_add_status",
+                                "devstack_branch_preview", "devstack_branch_apply",
+                                "devstack_project_create", "devstack_project_import",
+                                "devstack_project_import_status", "devstack_project_rename",
+                                "devstack_compose_config", "devstack_compose_save",
+                                "devstack_project_settings", "devstack_project_settings_save",
+                                "devstack_source_review", "devstack_source_apply",
+                                "devstack_webhooks", "devstack_webhook_upsert",
+                                "devstack_webhook_remove", "devstack_compose_action",
+                                "devstack_adhoc", "devstack_private_ports",
                             })
                             first = await client.call_tool("devstack_status", {})
                             self.assertFalse(first.is_error)
