@@ -72,3 +72,57 @@ class DiagnosticStore:
         events = [{"at": ns // 1_000_000, "source": source, "level": level,
                    "code": code} for ns, source, level, code in rows[:MAX_EVENTS]]
         return {"events": events, "truncated": len(rows) > MAX_EVENTS}
+
+
+# Public diagnostics expose only these static categories, never exceptions,
+# path names or host output. All probing happens under the Web service UID.
+def storage_failure_code(exc: Exception, path: Path) -> str:
+    import errno
+    import os
+    import stat
+
+    if isinstance(exc, sqlite3.Error):
+        code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+        if code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            return "sqlite_locked"
+        if code in (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB):
+            return "sqlite_corrupt"
+        if code == sqlite3.SQLITE_READONLY:
+            return "read_only"
+        if code == sqlite3.SQLITE_PERM:
+            return "permission_denied"
+        if code == sqlite3.SQLITE_FULL:
+            return "storage_full"
+    if isinstance(exc, OSError):
+        if exc.errno == errno.EROFS:
+            return "read_only"
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            return "permission_denied"
+        if exc.errno == errno.ENOSPC:
+            return "storage_full"
+
+    path = Path(path)
+    for candidate, is_dir in ((path.parent, True), (path, False)):
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            return "directory_missing" if is_dir else "storage_unavailable"
+        except PermissionError:
+            return "permission_denied"
+        except OSError:
+            return "storage_unavailable"
+        if stat.S_ISLNK(info.st_mode):
+            return "unsafe_path"
+        if not (stat.S_ISDIR(info.st_mode) if is_dir
+                else stat.S_ISREG(info.st_mode)):
+            return "unsafe_path"
+        if info.st_uid != os.geteuid():
+            return "ownership_mismatch"
+        if not os.access(candidate, os.W_OK | (os.X_OK if is_dir else os.R_OK)):
+            return "permission_denied"
+    try:
+        if os.statvfs(path.parent).f_flag & getattr(os, "ST_RDONLY", 1):
+            return "read_only"
+    except OSError:
+        pass
+    return "storage_unavailable"

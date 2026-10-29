@@ -21,7 +21,7 @@ from flask import (
 from werkzeug.exceptions import HTTPException
 
 from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
-from devstack.diagnostics import DiagnosticStore, MAX_EVENTS
+from devstack.diagnostics import DiagnosticStore, MAX_EVENTS, storage_failure_code
 from devstack.mcp_diagnostics import snapshot as mcp_diagnostics_snapshot, DEFAULT_SNAPSHOT as MCP_DIAGNOSTICS_PATH
 from devstack.mcp_management import MCPManagementError, request_action as request_mcp_action, status as mcp_status
 from devstack.oauth_store import OAuthError, OAuthStore, STORE as MCP_OAUTH_STORE
@@ -203,6 +203,7 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         # put recent events into the volatile fallback.
         web_primary = False
         web_fallback = False
+        web_primary_error = None
         for name, store in web_stores():
             try:
                 data = store.snapshot(minutes)
@@ -212,8 +213,9 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
                     web_primary = True
                 else:
                     web_fallback = True
-            except (OSError, RuntimeError, ValueError, sqlite3.Error):
-                pass
+            except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+                if name == "WEB_DIAGNOSTICS_PATH":
+                    web_primary_error = storage_failure_code(exc, store.path)
         if web_primary:
             sources["web"] = "available"
         elif web_fallback:
@@ -253,6 +255,12 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             "version": installed_version(), "minutes": minutes,
             "events": events, "truncated": truncated,
             "sources": sources, "updater_status": safe_update,
+            "web_storage": {
+                "mode": "persistent" if web_primary else
+                        "volatile" if web_fallback else "unavailable",
+                "error_code": None if web_primary else
+                              (web_primary_error or "storage_unavailable"),
+            },
             "partial": any(value != "available" for value in sources.values()),
         })
 

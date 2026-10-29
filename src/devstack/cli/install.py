@@ -152,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
             # hook even though that updater knows nothing about networking.
             # Bootstrap dedicated public group/units, then restart controller
             # so its restricted ingress socket inherits the new group.
+            from devstack.diagnostics_deploy import ensure_state_directory
+            ensure_state_directory()
             from devstack.networking import prepare
             prepare()
             # The installed updater (including v0.7.3) allows only 25 seconds
