@@ -5,6 +5,7 @@ const base:DiagnosticSnapshot={
   events:[{at:1792699200000,source:"controller",level:"info",code:"controller-started"}],
   truncated:false,partial:false,
   sources:{controller:"available",web:"available",runtime:"available",updater:"available",mcp:"available"},
+  web_storage:{mode:"persistent",error_code:null},
   updater_status:{phase:"idle",unit_state:"inactive",last_result:"success",last_exit_code:"0"}
 };
 describe("copyable DevStack global diagnostics",()=>{
@@ -16,6 +17,7 @@ describe("copyable DevStack global diagnostics",()=>{
     expect(text).toContain("mcp=available");
     expect(text).toContain("[controller/info] controller-started");
     expect(text).toContain("phase=idle");
+    expect(text).toContain("Web event storage: persistent");
   });
   it("clearly warns on unavailable components, truncation and empty events",()=>{
     const text=diagnosticText({...base,events:[],partial:true,truncated:true,
@@ -23,6 +25,13 @@ describe("copyable DevStack global diagnostics",()=>{
     expect(text).toContain("WARNING: Some sources are unavailable");
     expect(text).toContain("WARNING: Event list truncated");
     expect(text).toContain("No allowlisted events");
+  });
+  it("copies only the bounded storage reason when volatile fallback is active",()=>{
+    const text=diagnosticText({...base,partial:true,
+      sources:{...base.sources,web:"partial (volatile fallback)"},
+      web_storage:{mode:"volatile",error_code:"permission_denied"}});
+    expect(text).toContain("Web event storage: volatile (reason=permission_denied)");
+    expect(text).not.toContain("/var/lib/");
   });
   it("contains no user-initiated upload, credential or arbitrary host output contract",()=>{
     const text=diagnosticText(base);

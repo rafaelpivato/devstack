@@ -118,6 +118,8 @@ class DiagnosticHttpTests(unittest.TestCase):
         self.assertEqual(data["sources"]["controller"], "unavailable")
         self.assertEqual(data["sources"]["updater"], "partial (status only)")
         self.assertTrue(data["partial"])
+        self.assertEqual(data["web_storage"]["mode"], "persistent")
+        self.assertIsNone(data["web_storage"]["error_code"])
         self.assertEqual(data["updater_status"]["phase"], "failed")
 
     def test_web_logs_survive_primary_storage_failure(self):
@@ -146,6 +148,9 @@ class DiagnosticHttpTests(unittest.TestCase):
                            return_value={"events": [], "available": True}):
                     snapshot = client.get("/api/v2/devstack/diagnostics?minutes=5").get_json()
             self.assertEqual(snapshot["sources"]["web"], "partial (volatile fallback)")
+            self.assertEqual(snapshot["web_storage"], {
+                "mode": "volatile", "error_code": "directory_missing"})
+            self.assertNotIn(str(folder), str(snapshot))
             codes = [event["code"] for event in snapshot["events"]]
             self.assertIn("web-mcp-request-failed", codes)
 

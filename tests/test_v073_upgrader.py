@@ -16,6 +16,8 @@ class UpgradeTests(unittest.TestCase):
         with (patch.object(cli.os, "geteuid", return_value=0),
               patch.object(cli, "install_command", side_effect=record("cli")),
               patch.object(cli, "refresh_updater", side_effect=record("refresh")),
+              patch("devstack.diagnostics_deploy.ensure_state_directory",
+                    side_effect=record("diagnostics")),
               patch("devstack.networking.prepare", side_effect=record("prepare")),
               patch("devstack.networking.reconcile", side_effect=AssertionError(
                   "Never synchronously reconcile inside the 25s old updater hook")),
@@ -23,7 +25,8 @@ class UpgradeTests(unittest.TestCase):
               patch.object(cli.subprocess, "run", side_effect=record("systemctl"))):
             self.assertEqual(cli.main([]), 0)
         labels = [entry[0] for entry in operations]
-        self.assertLess(labels.index("refresh"), labels.index("prepare"))
+        self.assertLess(labels.index("refresh"), labels.index("diagnostics"))
+        self.assertLess(labels.index("diagnostics"), labels.index("prepare"))
         self.assertLess(labels.index("prepare"), labels.index("units"))
         commands = [args[0] for label, args, _ in operations if label == "systemctl"]
         self.assertIn(["systemctl", "--no-block", "try-restart",
