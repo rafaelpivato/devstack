@@ -48,11 +48,13 @@ class NamingTests(unittest.TestCase):
                 networking, "classify", side_effect=[("private_ready", False, False),
                                                       ("private_ready", False, False)]), patch.object(
                 networking, "read_preferences", return_value={"mcp": False, "webhooks": False}), patch.object(
-                naming, "run_command") as cmd:
+                naming, "run_command") as cmd, patch.object(
+                networking, "repair_renamed_hostname", return_value=True) as repair:
             from contextlib import nullcontext
             lock.return_value = nullcontext()
             self.assertEqual(naming._apply("new", OLD), ("renamed", NEW))
             cmd.assert_called_once_with("tailscale", "set", "--hostname=new", timeout=25)
+            repair.assert_called_once_with(NEW)
 
     def test_failed_command_does_not_refresh_public_or_routes(self):
         with patch.object(networking, "network_lock") as lock, patch.object(
@@ -75,7 +77,8 @@ class NamingTests(unittest.TestCase):
                 networking, "classify", side_effect=[("private_ready", False, False),
                                                       ("private_ready", False, False)]), patch.object(
                 networking, "read_preferences", return_value={"mcp": False, "webhooks": False}), patch.object(
-                naming, "run_command"):
+                naming, "run_command"), patch.object(
+                networking, "repair_renamed_hostname", return_value=True):
             from contextlib import nullcontext
             lock.return_value = nullcontext()
             self.assertEqual(naming._apply("new", OLD), ("renamed_with_suffix", suffixed))
