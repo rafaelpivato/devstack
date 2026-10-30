@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from devstack.api.http import create_app
 
 from devstack import tailscale_naming as naming, networking
 from devstack.mcp_management import MCPManagementError
@@ -88,3 +89,76 @@ class NamingTests(unittest.TestCase):
                 result = naming._safe_result()
         self.assertIsNone(result["old_dns"])
         self.assertEqual(result["new_urls"]["mcp_url"], "https://" + NEW + "/mcp")
+
+class NamingApiTests(unittest.TestCase):
+    def setUp(self):
+        self.app = create_app({"TESTING": True, "SECRET_KEY": "test",
+                               "SESSION_COOKIE_SECURE": False})
+        self.client = self.app.test_client()
+        with self.client.session_transaction() as session:
+            session["_csrf"] = "fixed-token"
+        self.headers = {"X-CSRF-Token": "fixed-token"}
+        self.url = "/api/v2/devstack/network/tailscale/rename"
+
+    def test_cannot_rename_without_csrf_or_with_invalid_payload(self):
+        with patch("devstack.api.http.request_tailscale_rename") as request:
+            body = {"name": "devstack", "expected_dns": OLD}
+            self.assertEqual(self.client.post(self.url, json=body).status_code, 403)
+            for invalid in ({"name": "devstack"},
+                            {**body, "extra": "cmd"}, ["devstack", OLD],
+                            {"name": 55, "expected_dns": OLD},
+                            {"name": "x", "expected_dns": None}):
+                with self.subTest(invalid=invalid):
+                    self.assertEqual(self.client.post(
+                        self.url, json=invalid, headers=self.headers).status_code, 400)
+            request.assert_not_called()
+
+    def test_rename_queues_only_exact_validated_shape(self):
+        with patch("devstack.api.http.request_tailscale_rename") as request:
+            data = {"name": "devstack", "expected_dns": OLD}
+            response = self.client.post(self.url, json=data, headers=self.headers)
+            self.assertEqual(response.status_code, 202)
+            request.assert_called_once_with("devstack", OLD)
+
+    def test_invalid_name_from_server_is_bounded(self):
+        with patch("devstack.api.http.request_tailscale_rename",
+                   side_effect=MCPManagementError("invalid_name")):
+            response = self.client.post(self.url, json={
+                "name": "bad;rm", "expected_dns": OLD}, headers=self.headers)
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("rm -", response.get_data(as_text=True))
+
+
+class RootHandoffTests(unittest.TestCase):
+    def test_root_worker_refuses_unowned_pending_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            marker = Path(folder) / "tailscale-rename"
+            marker.write_text(json.dumps({"name": "devstack", "expected_dns": OLD}))
+            marker.chmod(0o644)  # never accept a world-readable request
+            with patch.object(naming, "REQUEST_FILE", marker), patch.object(
+                    naming, "RESULT_FILE", Path(folder) / "result"), patch.object(
+                    naming.os, "geteuid", return_value=0), patch.object(
+                    naming, "log_event"), patch.object(naming, "_apply") as apply:
+                with self.assertRaises(MCPManagementError):
+                    naming.apply_pending()
+                apply.assert_not_called()
+
+    def test_root_worker_uses_fixed_checked_payload_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            marker = Path(folder) / "tailscale-rename"
+            marker.write_text(json.dumps({"name": "devstack", "expected_dns": OLD}))
+            marker.chmod(0o600)
+            result_path = Path(folder) / "result"
+            from types import SimpleNamespace
+            account = SimpleNamespace(pw_uid=marker.stat().st_uid)
+            with patch.object(naming, "REQUEST_FILE", marker), patch.object(
+                    naming, "RESULT_FILE", result_path), patch.object(
+                    naming.os, "geteuid", return_value=0), patch.object(
+                    naming.pwd, "getpwnam", return_value=account), patch.object(
+                    naming, "log_event"), patch.object(naming, "_apply",
+                    return_value=("renamed", NEW)) as apply:
+                naming.apply_pending()
+            apply.assert_called_once_with("devstack", OLD)
+            self.assertFalse(marker.exists())
+            self.assertEqual(json.loads(result_path.read_text())["new_dns"], NEW)
+
