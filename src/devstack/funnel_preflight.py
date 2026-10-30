@@ -11,7 +11,7 @@ from pathlib import Path
 import subprocess
 from urllib.request import urlopen
 
-from devstack.tailscale_layout import identify
+from devstack.mcp_management import MCPManagementError
 from devstack.mcp_management import HOST_PATTERN, PIN_FILE
 
 # Enumerated output is validated once more by the snapshot reader.
@@ -21,12 +21,18 @@ PRIVATE = frozenset({"ready", "migration_required", "missing", "unknown"})
 FUNNEL = frozenset({"configured", "disabled", "pending", "unknown"})
 GATEWAY = frozenset({"ready", "unavailable", "not_checked"})
 HEALTH = frozenset({"ready", "disabled", "attention", "unknown"})
+REASONS = frozenset({"none", "snapshot_unavailable", "tailscale_status_unavailable",
+    "tailscale_disconnected", "identity_invalid", "identity_not_configured",
+    "identity_changed", "identity_unavailable", "serve_status_unavailable",
+    "routes_unrecognized", "preferences_unavailable", "private_route_migration",
+    "public_route_pending", "gateway_unavailable"})
 
 
 def unknown() -> dict:
     return {"health": "unknown", "tailscale": "unknown", "identity": "unknown",
             "private_dashboard": "unknown", "public_funnel": "unknown",
-            "gateway": "not_checked", "external_reachability": "not_tested"}
+            "gateway": "not_checked", "external_reachability": "not_tested",
+            "reason": "snapshot_unavailable"}
 
 
 def _json_status(*args: str) -> dict:
@@ -54,21 +60,28 @@ def _gateway_ready() -> bool:
 
 
 def capture_preflight(pin_path: Path = PIN_FILE) -> dict:
-    """No changes to node, Serve/Funnel or enabled integrations."""
+    """Report local readiness without changing the pinned node or Serve/Funnel.
+
+    The *current* reconciler's exact route classifier is the authority.
+    tailscale_layout.identify describes a historical /mcp-/hooks-path topology
+    and must NOT classify the reconciler's current public root proxy on :443.
+    """
     state = unknown()
     try:
         status = _json_status("tailscale", "status", "--json")
     except ValueError:
+        state["reason"] = "tailscale_status_unavailable"
         return state
     if status.get("BackendState") != "Running":
-        state.update(tailscale="disconnected", health="attention")
+        state.update(tailscale="disconnected", health="attention",
+                     reason="tailscale_disconnected")
         return state
     state["tailscale"] = "connected"
     self_node = status.get("Self")
     self_node = self_node if isinstance(self_node, dict) else {}
     host = self_node.get("DNSName")
     if not isinstance(host, str) or not HOST_PATTERN.fullmatch(host.rstrip(".").lower()):
-        state["health"] = "attention"
+        state.update(health="attention", reason="identity_invalid")
         return state
     host = host.rstrip(".").lower()
     try:
@@ -77,49 +90,73 @@ def capture_preflight(pin_path: Path = PIN_FILE) -> dict:
             raise ValueError("unsafe_pin")
         pin = json.loads(pin_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        state["identity"] = "not_configured"
+        state.update(identity="not_configured", reason="identity_not_configured")
     except (OSError, ValueError, TypeError):
-        state["identity"] = "unknown"
+        state.update(identity="unknown", reason="identity_unavailable")
     else:
         actual = {"node_id": self_node.get("ID"),
                   "tailnet": (status.get("CurrentTailnet") or {}).get("Name")}
         state["identity"] = "verified" if pin == actual else "changed"
+        if state["identity"] != "verified":
+            state["reason"] = "identity_changed"
+
+    # The public gateway check is intentionally independent of route matching.
+    # On a mismatched Serve config this can still identify a healthy loopback
+    # gateway, without ever claiming public Funnel reachability.
+    from devstack.networking import read_preferences, classify
     try:
-        topology = identify(host, _json_status("tailscale", "serve", "status", "--json"))
-    except (ValueError, AttributeError, KeyError, TypeError):
-        state["health"] = "attention"
-        return state
-    if topology.phase in ("new", "private_ready", "public_ready"):
-        state["private_dashboard"] = "ready"
-    elif topology.phase in ("legacy", "dual_private"):
-        state["private_dashboard"] = "migration_required"
-    else:
-        state["private_dashboard"] = "missing"
-    try:
-        from devstack.networking import read_preferences
         intent = read_preferences()
     except (OSError, ValueError, TypeError, RuntimeError):
         intent = None
+    if intent is not None and intent["mcp"]:
+        state["gateway"] = "ready" if _gateway_ready() else "unavailable"
+
+    try:
+        routes = _json_status("tailscale", "serve", "status", "--json")
+    except ValueError:
+        state.update(health="attention", reason="serve_status_unavailable")
+        return state
+    try:
+        phase, _, _ = classify(host, routes)
+    except MCPManagementError:
+        state.update(health="attention", reason="routes_unrecognized")
+        return state
+
+    if phase in ("new", "private_ready", "public_ready"):
+        state["private_dashboard"] = "ready"
+    elif phase in ("legacy", "dual_private"):
+        state["private_dashboard"] = "migration_required"
+    else:
+        state["private_dashboard"] = "missing"
+
     if intent is None:
         state["public_funnel"] = "unknown"
+        if state["reason"] == "snapshot_unavailable":
+            state["reason"] = "preferences_unavailable"
     elif not intent["mcp"]:
         state["public_funnel"] = "disabled"
-    elif topology.phase == "new" and topology.mcp:
+    elif phase == "new":
+        # Current reconciler: public :443 is a root proxy to the unified
+        # OAuth-protected MCP/webhook process, not a legacy /mcp handler.
         state["public_funnel"] = "configured"
     else:
         state["public_funnel"] = "pending"
-    if state["public_funnel"] == "configured":
-        state["gateway"] = "ready" if _gateway_ready() else "unavailable"
-    if state["identity"] != "verified" or state["private_dashboard"] != "ready":
+
+    if state["identity"] != "verified":
         state["health"] = "attention"
+    elif state["private_dashboard"] != "ready":
+        state["health"] = "attention"
+        state["reason"] = "private_route_migration"
     elif state["public_funnel"] == "disabled":
-        state["health"] = "disabled"
+        state.update(health="disabled", reason="none")
     elif state["public_funnel"] == "configured" and state["gateway"] == "ready":
-        state["health"] = "ready"
+        state.update(health="ready", reason="none")
     elif state["public_funnel"] == "unknown":
         state["health"] = "unknown"
     else:
         state["health"] = "attention"
+        state["reason"] = ("gateway_unavailable" if state["gateway"] == "unavailable"
+                           else "public_route_pending")
     return state
 
 
@@ -131,6 +168,10 @@ def validate_preflight(value) -> dict:
     for field, allowed in (("health", HEALTH), ("tailscale", CONNECTIVITY),
                            ("identity", IDENTITY), ("private_dashboard", PRIVATE),
                            ("public_funnel", FUNNEL), ("gateway", GATEWAY)):
-        if type(value.get(field)) is str and value[field] in allowed:
-            safe[field] = value[field]
+        field_value = value.get(field)
+        if type(field_value) is str and field_value in allowed:
+            safe[field] = field_value
+    reason = value.get("reason")
+    if type(reason) is str and reason in REASONS:
+        safe["reason"] = reason
     return safe

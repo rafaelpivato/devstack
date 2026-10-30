@@ -33,7 +33,8 @@ export function diagnosticText(snapshot:DiagnosticSnapshot):string{
     lines.push("Local Funnel preflight: health="+p.health+", tailscale="+p.tailscale+
       ", identity="+p.identity+", private="+p.private_dashboard+
       ", public="+p.public_funnel+", gateway="+p.gateway+
-      ", external="+p.external_reachability);
+      ", external="+p.external_reachability+
+      ", reason="+(p.reason??"not_reported"));
   }
   if(snapshot.updater_status){
     const u=snapshot.updater_status;

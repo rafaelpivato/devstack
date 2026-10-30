@@ -76,6 +76,10 @@ export interface NetworkPreflight {
   public_funnel:"configured"|"disabled"|"pending"|"unknown";
   gateway:"ready"|"unavailable"|"not_checked";
   external_reachability:"not_tested";
+  reason?:"none"|"snapshot_unavailable"|"tailscale_status_unavailable"|"tailscale_disconnected"|
+    "identity_invalid"|"identity_not_configured"|"identity_changed"|"identity_unavailable"|
+    "serve_status_unavailable"|"routes_unrecognized"|"preferences_unavailable"|
+    "private_route_migration"|"public_route_pending"|"gateway_unavailable";
 }
 export interface MCPStatus {
   gateway:"running"|"stopped";funnel:"enabled"|"disabled"|"unknown";
