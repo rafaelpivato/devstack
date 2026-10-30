@@ -16,6 +16,7 @@ import { ConfigurationHome, ComposeEditor, DefinitionsEditor, ProjectNameEditor 
 import { WebhookEditor } from "./features/configuration/WebhookEditor";
 import { AdministrationHome, GitHubSSHScreen, UpdatesScreen } from "./features/configuration/Administration";
 import { MCPConnectionsScreen } from "./features/configuration/MCPConnections";
+import { TailscaleNetworkScreen } from "./features/configuration/TailscaleNetwork";
 import { MCPConsentScreen } from "./features/configuration/MCPConsent";
 import {DiagnosticsScreen} from "./features/configuration/Diagnostics";
 import {CreateProjectScreen,ImportProjectScreen,ImportReceiptScreen} from "./features/projects/ProjectManagement";
@@ -38,6 +39,8 @@ function DevStackApp() {
   if(navigation.route.kind==="administration")return <AdministrationHome navigation={navigation}/>;
   if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="updates")
     return <UpdatesScreen runtime={runtime.kind==="ready"?runtime.data:null} navigation={navigation}/>;
+  if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="network")
+    return <TailscaleNetworkScreen navigation={navigation}/>;
   if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="mcp")
     return <MCPConnectionsScreen navigation={navigation}/>;
   if(navigation.route.kind==="admin-detail"&&navigation.route.screen==="diagnostics")

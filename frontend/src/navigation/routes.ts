@@ -13,7 +13,7 @@ export type Lane = typeof LANES[number];
 export type AppRoute =
   | {kind: "entry"} | {kind:"projects"}
   | {kind:"project-create"} | {kind:"project-import"} | {kind:"project-import-receipt"; operationId:string}
-  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"|"diagnostics"|"mcp"}
+  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"|"diagnostics"|"mcp"|"network"|"network"}
   | {kind:"config-detail";projectId:string;screen:"compose"|"definitions"|"webhooks"|"name"}
   | {kind:"project"; projectId:string}
   | {kind:"lane"; projectId:string; lane:Lane}
@@ -98,6 +98,7 @@ export function routeFor(pathname: string): AppRoute {
   if(pathname===adminUrl("updates"))return {kind:"admin-detail",screen:"updates"};
   if(pathname===adminUrl("diagnostics"))return {kind:"admin-detail",screen:"diagnostics"};
   if(pathname===adminUrl("mcp"))return {kind:"admin-detail",screen:"mcp"};
+  if(pathname===adminUrl("network"))return {kind:"admin-detail",screen:"network"};
   if (pathname === OPERATIONS_URL) return {kind:"runtime-operations"};
   if (pathname === globalActionUrl("deactivate")) return {kind:"runtime-global-action",action:"deactivate"};
   if (pathname === globalActionUrl("reconcile")) return {kind:"runtime-global-action",action:"reconcile"};

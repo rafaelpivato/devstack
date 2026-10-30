@@ -109,6 +109,28 @@ Unit=devstack-mcp-apply.service
 [Install]
 WantedBy=multi-user.target
 """,
+    "devstack-tailscale-rename.service": """# Managed by DevStack v0.7+
+[Unit]
+Description=Apply one validated Tailscale device rename
+After=network-online.target tailscaled.service
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/devstack/current/venv/bin/python -m devstack.tailscale_naming --apply
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+TimeoutStartSec=90
+""",
+    "devstack-tailscale-rename.path": """# Managed by DevStack v0.7+
+[Unit]
+Description=Watch private DevStack Tailscale device rename requests
+[Path]
+PathExists=/run/devstack-update-request/tailscale-rename
+Unit=devstack-tailscale-rename.service
+[Install]
+WantedBy=multi-user.target
+""",
 }
 
 
@@ -138,7 +160,8 @@ def capture_diagnostics() -> None:
             "journalctl", "--no-pager", "--output=json", "--since=-30min",
             "--lines=240", "--unit=devstack-mcp.service",
             "--unit=devstack-mcp-apply.service",
-            "--unit=devstack-public.service", timeout=8,
+            "--unit=devstack-public.service",
+            "--unit=devstack-tailscale-rename.service", timeout=8,
         )
         available = True
     except MCPManagementError:
@@ -158,7 +181,8 @@ def capture_diagnostics() -> None:
             continue
         level = "error" if str(entry.get("PRIORITY")) in ("0", "1", "2", "3") else "info"
         unit = str(entry.get("_SYSTEMD_UNIT") or entry.get("UNIT") or "")
-        if unit not in {"devstack-mcp.service", "devstack-mcp-apply.service", "devstack-public.service"}:
+        if unit not in {"devstack-mcp.service", "devstack-mcp-apply.service", "devstack-public.service",
+                        "devstack-tailscale-rename.service"}:
             continue
         message = entry.get("MESSAGE", "")
         if not isinstance(message, str):
@@ -585,6 +609,8 @@ def install_units(root: Path = Path("/opt/devstack"),
         run_command("systemctl", "enable", "--now", "devstack-mcp-apply.path",
                     timeout=25)
         run_command("systemctl", "enable", "--now", "devstack-mcp-diagnostics.timer",
+                    timeout=25)
+        run_command("systemctl", "enable", "--now", "devstack-tailscale-rename.path",
                     timeout=25)
 
 

@@ -38,6 +38,20 @@ if ! command -v tailscale >/dev/null 2>&1; then
   apt-get install -y -qq tailscale
 fi
 
+# Optional name applies ONLY at first enrollment, never implicitly on upgrade.
+# Validate before running any privileged Tailscale command or authentication.
+hostname_arg=()
+if [[ -n "${DEVSTACK_TAILSCALE_HOSTNAME:-}" ]]; then
+  requested_name="${DEVSTACK_TAILSCALE_HOSTNAME}"
+  if (( ${#requested_name} > 63 )) ||
+     [[ ! "$requested_name" =~ ^[a-z]([a-z0-9-]*[a-z0-9])?$ ]] ||
+     [[ "$requested_name" == "localhost" ]]; then
+    echo "Invalid DEVSTACK_TAILSCALE_HOSTNAME: use 1–63 lowercase DNS-label characters, starting with a letter." >&2
+    exit 1
+  fi
+  hostname_arg=("--hostname=$requested_name")
+fi
+
 systemctl enable --now tailscaled
 if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/null 2>&1; then
   # Automatic re-enrollment after first activation is forbidden.
@@ -55,7 +69,7 @@ if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/n
       echo "Tailscale auth key file must be root-owned and inaccessible to other users." >&2
       exit 1
     fi
-    tailscale up "--auth-key=file:$key_file"
+    tailscale up "--auth-key=file:$key_file" "${hostname_arg[@]}"
   elif [[ "${TAILSCALE_BROWSER_ACTIVATION:-0}" == "1" ]]; then
     # Print the login URL to cloud-init output. Do not block indefinitely:
     # a systemd timer finishes private Serve configuration after approval.
@@ -65,14 +79,14 @@ if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/n
       # Capture machine-readable browser URL without writing it to boot logs.
       # The setup page discloses it only after a valid one-time secret.
       umask 077
-      if tailscale up --json --timeout=20s > "$TAILSCALE_LOGIN_JSON_FILE"; then
+      if tailscale up --json --timeout=20s "${hostname_arg[@]}" > "$TAILSCALE_LOGIN_JSON_FILE"; then
         echo "Tailscale authorized during bootstrap."
       else
         echo "Tailscale authorization pending; use the temporary setup page."
       fi
       chown devstack:devstack "$TAILSCALE_LOGIN_JSON_FILE"
       chmod 0600 "$TAILSCALE_LOGIN_JSON_FILE"
-    elif tailscale up --timeout=20s; then
+    elif tailscale up --timeout=20s "${hostname_arg[@]}"; then
       echo "Tailscale activated during bootstrap."
     else
       echo "DEVSTACK ACTIVATION: pending browser approval."
@@ -84,7 +98,7 @@ if ! python3 /usr/local/lib/devstack/private_access.py --check-connected >/dev/n
     fi
   else
     echo "Sign in to Tailscale using the browser URL printed below."
-    tailscale up
+    tailscale up "${hostname_arg[@]}"
   fi
 fi
 python3 /usr/local/lib/devstack/private_access.py
