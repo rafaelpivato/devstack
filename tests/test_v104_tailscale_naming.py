@@ -162,3 +162,52 @@ class RootHandoffTests(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertEqual(json.loads(result_path.read_text())["new_dns"], NEW)
 
+
+class PropagationAndIsolationTests(unittest.TestCase):
+    def test_pending_dns_is_not_reported_as_collision(self):
+        from contextlib import nullcontext
+        with patch.object(networking, "network_lock", return_value=nullcontext()), patch.object(
+                naming, "pinned_hostname", return_value=OLD), patch.object(
+                naming, "json_command", return_value=networking.expected(OLD, new_private=True)), patch.object(
+                networking, "read_preferences", return_value={"mcp": False, "webhooks": False}), patch.object(
+                naming, "run_command") as command, patch.object(
+                naming.time, "sleep") as sleep, patch.object(
+                networking, "_public_env") as env:
+            with self.assertRaises(MCPManagementError) as exc:
+                naming._apply("new", OLD)
+        self.assertEqual(exc.exception.code, "dns_propagation_pending")
+        command.assert_called_once_with("tailscale", "set", "--hostname=new", timeout=25)
+        self.assertEqual(sleep.call_count, 5)
+        env.assert_not_called()
+
+    def test_unrecognized_serve_state_blocks_mutation(self):
+        from contextlib import nullcontext
+        with patch.object(networking, "network_lock", return_value=nullcontext()), patch.object(
+                naming, "pinned_hostname", return_value=OLD), patch.object(
+                naming, "json_command", return_value={"Foreign": "route"}), patch.object(
+                naming, "run_command") as command:
+            with self.assertRaises(MCPManagementError) as exc:
+                naming._apply("new", OLD)
+        self.assertEqual(exc.exception.code, "routes_unrecognized")
+        command.assert_not_called()
+
+    def test_out_of_band_rename_is_reflected_in_live_status(self):
+        changed = {**STATE, "Self": {**STATE["Self"], "DNSName": NEW + "."}}
+        with patch.object(naming, "json_command", return_value=changed), patch.object(
+                networking, "summary", return_value={"private_url": "https://" + NEW + ":8443/",
+                                                       "url": None, "phase": "private_ready"}), patch.object(
+                naming, "_safe_result", return_value=None):
+            self.assertEqual(naming.status()["fqdn"], NEW)
+
+    def test_diagnostic_collector_includes_only_bounded_rename_unit(self):
+        from devstack import mcp_management
+        from unittest.mock import Mock
+        with patch.object(mcp_management, "run_command", return_value=""), patch.object(
+                mcp_management, "atomic_result_file") as record, patch(
+                "devstack.diagnostics_bridge.capture_auxiliary", return_value={}), patch(
+                "devstack.funnel_preflight.capture_preflight", return_value={}):
+            mcp_management.capture_diagnostics()
+        self.assertTrue(record.called)
+        self.assertIsInstance(record.call_args.args[1]["events"], list)
+        self.assertIn("devstack-tailscale-rename.service",
+                      mcp_management.UNIT_FILES)
