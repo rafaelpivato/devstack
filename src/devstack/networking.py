@@ -196,7 +196,7 @@ def repair_renamed_hostname(host: str) -> bool:
     log_event("hostname_rebind_requested")
     try:
         # Fixed argv; only this exact validated, size-bounded config is sent.
-        result = subprocess.run(
+        subprocess.run(
             ["tailscale", "serve", "set-raw"], input=json.dumps(desired, separators=(",", ":")),
             capture_output=True, text=True, check=True, timeout=25,
         )
@@ -206,7 +206,13 @@ def repair_renamed_hostname(host: str) -> bool:
     # Read-back is mandatory. A CLI exit code alone is not confirmation.
     if pinned_hostname() != host:
         raise MCPManagementError("hostname_rebind_identity_changed")
-    if json_command("tailscale", "serve", "status", "--json") != desired:
+    # Some Tailscale versions omit empty TCP/Web/AllowFunnel fields from JSON.
+    # The existing strict classifier normalizes that representation.
+    try:
+        verified_phase, _, _ = state(host)
+    except MCPManagementError as exc:
+        raise MCPManagementError("hostname_rebind_unverified") from exc
+    if verified_phase != phase:
         raise MCPManagementError("hostname_rebind_unverified")
     log_event("hostname_rebind_succeeded")
     return True
