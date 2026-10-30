@@ -134,6 +134,84 @@ def state(host):
     return classify(host, json_command("tailscale", "serve", "status", "--json"))
 
 
+def repair_renamed_hostname(host: str) -> bool:
+    """Rebind a *known* node-level Serve/Funnel map from the old FQDN.
+
+    Called only by the existing root-owned network/rename broker under
+    network_lock(), after its pinned node/tailnet identity has been verified.
+    Tailscale's documented 'serve set-config' only changes Services, not
+    node-level TCP/Web/AllowFunnel routes. Its existing 'serve set-raw'
+    operation is therefore required for this one narrowly verified rebind.
+    Never reset Serve/Funnel or clear an unknown/foreign configuration.
+    """
+    raw = json_command("tailscale", "serve", "status", "--json")
+    try:
+        classify(host, raw)
+        return False  # already repaired (safe under timer retries)
+    except MCPManagementError as exc:
+        if exc.code != "unknown_tailscale_routes":
+            raise
+    if not isinstance(raw, dict) or set(raw) - {"TCP", "Web", "AllowFunnel"}:
+        raise MCPManagementError("hostname_rebind_unrecognized")
+    web = raw.get("Web") or {}
+    if not isinstance(web, dict) or not web:
+        raise MCPManagementError("hostname_rebind_unrecognized")
+    names = set()
+    for key in web:
+        if not isinstance(key, str) or ":" not in key:
+            raise MCPManagementError("hostname_rebind_unrecognized")
+        candidate, sep, port = key.rpartition(":")
+        if not sep or port not in ("443", "8443"):
+            raise MCPManagementError("hostname_rebind_unrecognized")
+        names.add(candidate)
+    if len(names) != 1:
+        raise MCPManagementError("hostname_rebind_unrecognized")
+    previous = next(iter(names))
+    # The old name may change, but the tailnet suffix must be identical.
+    if (previous == host or "." not in host or "." not in previous
+            or previous.split(".", 1)[1] != host.split(".", 1)[1]
+            or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", previous.split(".", 1)[0])):
+        raise MCPManagementError("hostname_rebind_unrecognized")
+    try:
+        phase, _, _ = classify(previous, raw)
+    except MCPManagementError as exc:
+        raise MCPManagementError("hostname_rebind_unrecognized") from exc
+    if phase not in ("new", "private_ready"):
+        raise MCPManagementError("hostname_rebind_unrecognized")
+    prefs = read_preferences()
+    # The old public visibility must agree with the persisted operator intent.
+    # In particular NEVER introduce public :443 from an inactive preference.
+    if prefs is None or (phase == "new") != any(prefs.values()):
+        raise MCPManagementError("hostname_rebind_intent_mismatch")
+
+    # No other DevStack writer can race us under network_lock. Refuse a
+    # third-party Tailscale edit observed between initial inspection and apply.
+    if pinned_hostname() != host or json_command(
+            "tailscale", "serve", "status", "--json") != raw:
+        raise MCPManagementError("hostname_rebind_changed")
+
+    desired = expected(host, new_private=True, public=phase == "new")
+    if desired["TCP"] != raw.get("TCP"):
+        raise MCPManagementError("hostname_rebind_unrecognized")
+    log_event("hostname_rebind_requested")
+    try:
+        # Fixed argv; only this exact validated, size-bounded config is sent.
+        result = subprocess.run(
+            ["tailscale", "serve", "set-raw"], input=json.dumps(desired, separators=(",", ":")),
+            capture_output=True, text=True, check=True, timeout=25,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log_event("hostname_rebind_failed")
+        raise MCPManagementError("hostname_rebind_command_failed") from exc
+    # Read-back is mandatory. A CLI exit code alone is not confirmation.
+    if pinned_hostname() != host:
+        raise MCPManagementError("hostname_rebind_identity_changed")
+    if json_command("tailscale", "serve", "status", "--json") != desired:
+        raise MCPManagementError("hostname_rebind_unverified")
+    log_event("hostname_rebind_succeeded")
+    return True
+
+
 def read_preferences() -> dict | None:
     if PREFS.is_symlink():
         raise MCPManagementError("preferences_unsafe")
@@ -291,7 +369,16 @@ def _reconcile_locked():
         if exc.code in ("tailscale_disconnected", "private_tailscale_not_configured"):
             return "awaiting_tailscale"
         raise
-    phase, old_hooks, old_mcp = state(host)
+    try:
+        phase, old_hooks, old_mcp = state(host)
+    except MCPManagementError as exc:
+        if exc.code != "unknown_tailscale_routes":
+            raise
+        # A hostname rename can leave fully managed Serve/Funnel handlers
+        # keyed to the previous FQDN. Repair on ordinary root timer retry,
+        # including after an unattended release upgrade with broken HTTPS.
+        repair_renamed_hostname(host)
+        phase, old_hooks, old_mcp = state(host)
     prefs = read_preferences()
     if prefs is None:
         prefs = {"mcp": old_mcp, "webhooks": old_hooks}

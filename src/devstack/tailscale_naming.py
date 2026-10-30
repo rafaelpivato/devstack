@@ -164,11 +164,12 @@ def _apply(name: str, expected: str) -> tuple[str, str]:
                 time.sleep(1)
         if new == old:
             raise MCPManagementError("dns_propagation_pending")
-        try:
-            after_phase, _, _ = networking.classify(
-                new, json_command("tailscale", "serve", "status", "--json"))
-        except MCPManagementError as exc:
-            raise MCPManagementError("routes_unrecognized") from exc
+        # Tailscale may retain old hostname keys in its node-level
+        # Serve/Funnel config. The same strictly guarded repair also runs
+        # from the standard network timer after a failed/interrupted rename.
+        networking.repair_renamed_hostname(new)
+        after_phase, _, _ = networking.classify(
+            new, json_command("tailscale", "serve", "status", "--json"))
         if after_phase != phase:
             raise MCPManagementError("routes_changed")
         # Existing TLS routing must remain managed. Only refresh the OAuth
