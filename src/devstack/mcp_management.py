@@ -161,7 +161,8 @@ def capture_diagnostics() -> None:
             "--lines=240", "--unit=devstack-mcp.service",
             "--unit=devstack-mcp-apply.service",
             "--unit=devstack-public.service",
-            "--unit=devstack-tailscale-rename.service", timeout=8,
+            "--unit=devstack-tailscale-rename.service",
+            "--unit=devstack-network-reconcile.service", timeout=8,
         )
         available = True
     except MCPManagementError:
@@ -182,7 +183,7 @@ def capture_diagnostics() -> None:
         level = "error" if str(entry.get("PRIORITY")) in ("0", "1", "2", "3") else "info"
         unit = str(entry.get("_SYSTEMD_UNIT") or entry.get("UNIT") or "")
         if unit not in {"devstack-mcp.service", "devstack-mcp-apply.service", "devstack-public.service",
-                        "devstack-tailscale-rename.service"}:
+                        "devstack-tailscale-rename.service", "devstack-network-reconcile.service"}:
             continue
         message = entry.get("MESSAGE", "")
         if not isinstance(message, str):
@@ -190,7 +191,7 @@ def capture_diagnostics() -> None:
         match = re.fullmatch(r"DEVSTACK_MCP ([a-z_]{3,55})", message)
         if match:
             code = match.group(1)
-            if code.startswith(("funnel_error_", "gateway_process_error", "status_unavailable")):
+            if code.startswith(("funnel_error_", "gateway_process_error", "status_unavailable", "hostname_rebind_failed")):
                 level = "error"
         elif level == "error":
             code = ("gateway_process_error" if unit == "devstack-mcp.service"
