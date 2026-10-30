@@ -114,6 +114,9 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
       <p className="text-muted">Read-only checks refresh about once a minute. They verify
         local setup, not whether an external ChatGPT client can reach the server.</p>
       {preflight&&<>
+        {preflight.reason&&preflight.reason!=="none"&&<p className="text-muted">
+          Readiness reason: <code>{preflight.reason.replaceAll("_"," ")}</code>.
+          This reports only local configuration and never verifies external access.</p>}
         <div className="property"><span>Local readiness</span>
           <Status text={preflight.health} kind={preflight.health==="ready"?"positive":
             preflight.health==="disabled"?"neutral":"warning"}/></div>
@@ -125,6 +128,14 @@ export function MCPConnectionsScreen({navigation}:{navigation:Navigator}) {
           <strong>{preflight.public_funnel}</strong></div>
         <div className="property"><span>Local gateway HTTP health</span>
           <strong>{preflight.gateway.replaceAll("_"," ")}</strong></div>
+        {preflight.reason==="routes_unrecognized"&&<Notice title="Tailscale routes need review">
+          DevStack cannot classify the configured Serve/Funnel routes using the
+          expected topology. It will not reset them; check diagnostics or report a bug.
+        </Notice>}
+        {preflight.reason==="serve_status_unavailable"&&<Notice title="Tailscale route status unavailable">
+          DevStack could not read Tailscale's read-only route status. This does not
+          by itself mean your public MCP connection has failed.
+        </Notice>}
         {preflight.health==="unknown"&&<Notice title="Preflight unavailable">
           The diagnostics collector has not produced a recent verified snapshot.
           Refresh after setup; no settings have been changed.</Notice>}
