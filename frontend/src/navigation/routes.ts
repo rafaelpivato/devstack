@@ -13,7 +13,7 @@ export type Lane = typeof LANES[number];
 export type AppRoute =
   | {kind: "entry"} | {kind:"projects"}
   | {kind:"project-create"} | {kind:"project-import"} | {kind:"project-import-receipt"; operationId:string}
-  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"|"diagnostics"|"mcp"|"network"|"network"}
+  | {kind:"administration"} | {kind:"admin-detail";screen:"ssh"|"updates"|"diagnostics"|"mcp"|"network"}
   | {kind:"config-detail";projectId:string;screen:"compose"|"definitions"|"webhooks"|"name"}
   | {kind:"project"; projectId:string}
   | {kind:"lane"; projectId:string; lane:Lane}
@@ -82,7 +82,7 @@ export function globalActionUrl(action:"deactivate"|"reconcile"):string {
 }
 export const OPERATIONS_URL=ROUTE_PREFIX+"/runtime/operations";
 export const ADMIN_ROOT=ROUTE_PREFIX+"/administration";
-export function adminUrl(screen:"ssh"|"updates"|"diagnostics"|"mcp"):string{return ADMIN_ROOT+"/"+screen;}
+export function adminUrl(screen:"ssh"|"updates"|"diagnostics"|"mcp"|"network"):string{return ADMIN_ROOT+"/"+screen;}
 export function configUrl(id:string,screen:"compose"|"definitions"|"webhooks"|"name"):string {
   return laneUrl(id,"configuration")+"/"+screen;
 }

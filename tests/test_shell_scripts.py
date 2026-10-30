@@ -26,6 +26,15 @@ class BootstrapScriptTests(unittest.TestCase):
         self.assertIn("TAILSCALE_BROWSER_ACTIVATION", script)
         self.assertIn("tailscale up --timeout=20s", script)
 
+    def test_hostname_option_applies_to_all_initial_login_modes(self):
+        script = (ROOT / "scripts/enable-tailscale.sh").read_text()
+        self.assertIn('DEVSTACK_TAILSCALE_HOSTNAME', script)
+        self.assertIn('"--hostname=$requested_name"', script)
+        self.assertIn('tailscale up --json --timeout=20s "${hostname_arg[@]}"', script)
+        self.assertIn('tailscale up --timeout=20s "${hostname_arg[@]}"', script)
+        self.assertIn('tailscale up "--auth-key=file:$key_file" "${hostname_arg[@]}"', script)
+        self.assertIn('tailscale up "${hostname_arg[@]}"', script)
+
     def test_install_is_opt_in(self):
         script = (ROOT / "scripts/install.sh").read_text()
         self.assertIn('DEVSTACK_TAILSCALE:-0', script)
