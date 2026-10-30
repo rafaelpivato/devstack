@@ -24,6 +24,7 @@ from devstack.ipc.client import ControllerRejected, ControllerUnavailable, send
 from devstack.diagnostics import DiagnosticStore, MAX_EVENTS, storage_failure_code
 from devstack.mcp_diagnostics import snapshot as mcp_diagnostics_snapshot, DEFAULT_SNAPSHOT as MCP_DIAGNOSTICS_PATH
 from devstack.mcp_management import MCPManagementError, request_action as request_mcp_action, status as mcp_status
+from devstack.tailscale_naming import request_rename as request_tailscale_rename, status as tailscale_naming_status
 from devstack.oauth_store import OAuthError, OAuthStore, STORE as MCP_OAUTH_STORE
 from devstack.update_control import (
     UpdateControlError, installed_version, latest_version, update_state,
@@ -289,6 +290,27 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
         return jsonify({"message": "MCP " + action + " queued", "request_pending": True}), 202
 
 
+    @app.get("/api/v2/devstack/network/tailscale")
+    def tailscale_network_api():
+        return jsonify(tailscale_naming_status())
+
+    @app.post("/api/v2/devstack/network/tailscale/rename")
+    def tailscale_rename_api():
+        body = request.get_json(silent=True) if request.is_json else None
+        if (not isinstance(body, dict) or set(body) != {"name", "expected_dns"}
+                or not isinstance(body["name"], str)
+                or not isinstance(body["expected_dns"], str)):
+            abort(400)
+        try:
+            request_tailscale_rename(body["name"], body["expected_dns"])
+        except MCPManagementError as exc:
+            record_web("web-tailscale-rename-rejected", level="warning")
+            code = 422 if exc.code == "invalid_name" else 409
+            # Fixed safe error identifiers, never host stderr or privileged data.
+            return jsonify({"ok": False, "message": "Tailscale rename not queued: " + exc.code}), code
+        record_web("web-tailscale-rename-requested")
+        return jsonify({"message": "Tailscale rename queued", "request_pending": True}), 202
+
     def oauth_store():
         return OAuthStore(Path(app.config["MCP_OAUTH_STORE_PATH"]))
 
@@ -387,7 +409,8 @@ def create_app(config: dict | None = None, *, transport=None) -> Flask:
             segments == ["administration"] or
             segments == ["connect", "authorize"] or
             segments in (["administration", "ssh"], ["administration", "updates"],
-                         ["administration", "diagnostics"], ["administration", "mcp"]) or
+                         ["administration", "diagnostics"], ["administration", "mcp"],
+                         ["administration", "network"]) or
             segments in (["runtime", "deactivate"], ["runtime", "reconcile"],
                          ["runtime", "operations"]) or
             (len(segments) == 3 and segments[:2] == ["runtime", "operations"]
