@@ -35,6 +35,9 @@ export function TailscaleNetworkScreen({navigation}:{navigation:Navigator}){
   const [success,setSuccess]=useState<string|null>(null);
   const data=state.kind==="ready"?state.data:null;
   const proposed=name.trim();
+  // Preview only: collisions can result in a different effective FQDN.
+  const proposedDns=data?.fqdn && validName(proposed)
+    ? proposed+"."+data.fqdn.split(".").slice(1).join(".") : null;
   const canSubmit=!!data?.connected && !!data.fqdn && !data.request_pending &&
     !busy && confirmed && validName(proposed) && proposed!==data.name;
   const run=async()=>{
@@ -84,7 +87,12 @@ export function TailscaleNetworkScreen({navigation}:{navigation:Navigator}){
         spellCheck={false} onChange={e=>{setName(e.target.value);setConfirmed(false);}}
         placeholder="my-devstack" />
       {name && !validName(proposed)&&<p role="alert">Invalid name. Use a lowercase DNS label, not a URL or FQDN.</p>}
-      <Notice title="Existing links may stop working">Bookmarks, ChatGPT MCP connection settings and GitHub/Twilio webhook callbacks may require manual updates after renaming. DevStack does not update external accounts or create public DNS records.</Notice>
+      {proposedDns && <Notice title="Proposed links — not yet assigned">
+        <CopyLink title="Proposed private dashboard" url={"https://"+proposedDns+":8443/"}/>
+        <CopyLink title="Proposed MCP address" url={"https://"+proposedDns+"/mcp"}/>
+        Tailscale may assign a suffix if the name is already taken. The confirmed FQDN will appear in the operation result.
+      </Notice>}
+      <Notice title="Existing links may stop working">Bookmarks, ChatGPT MCP connection settings and GitHub/Twilio webhook callbacks may require manual updates after renaming. DevStack does not update external accounts or create public DNS records. Certificate names may appear in public certificate transparency logs.</Notice>
       <label className="confirm-label">
         <input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>
         I understand I may need to reconnect ChatGPT MCP and update external registered callback URLs.

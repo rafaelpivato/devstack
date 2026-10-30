@@ -25,7 +25,7 @@ REQUEST_FILE = REQUEST_DIR / "tailscale-rename"
 RESULT_FILE = Path("/run/devstack-tailscale-rename-result.json")
 NAME_RE = re.compile(r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 RESERVED = frozenset({"localhost"})
-RESULT_CODES = frozenset({"renamed", "renamed_with_suffix", "no_change", "invalid_name",
+RESULT_CODES = frozenset({"renamed", "renamed_with_suffix", "no_change", "dns_propagation_pending", "invalid_name",
     "request_invalid", "stale_hostname", "identity_changed", "routes_unrecognized",
     "routes_changed", "network_unavailable", "tailscale_disconnected",
     "tailscale_command_timeout", "tailscale_command_failed",
@@ -152,7 +152,17 @@ def _apply(name: str, expected: str) -> tuple[str, str]:
         if name == old.split(".")[0]:
             return "no_change", old
         run_command("tailscale", "set", "--hostname=" + name, timeout=25)
-        new = pinned_hostname()  # same device/tailnet, read effective FQDN
+        # Control-plane DNSName may lag the CLI acknowledgement. Never report
+        # success or a fabricated collision suffix while the old name remains.
+        new = old
+        for attempt in range(6):
+            new = pinned_hostname()  # same device/tailnet on every read
+            if new != old:
+                break
+            if attempt != 5:
+                time.sleep(1)
+        if new == old:
+            raise MCPManagementError("dns_propagation_pending")
         try:
             after_phase, _, _ = networking.classify(
                 new, json_command("tailscale", "serve", "status", "--json"))
