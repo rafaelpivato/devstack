@@ -29,6 +29,7 @@ RESULT_CODES = frozenset({"renamed", "renamed_with_suffix", "no_change", "dns_pr
     "request_invalid", "stale_hostname", "identity_changed", "routes_unrecognized",
     "routes_changed", "network_unavailable", "tailscale_disconnected",
     "tailscale_command_timeout", "tailscale_command_failed",
+    "tailscale_identity_changed", "private_tailscale_not_configured",
     "public_gateway_unavailable", "failed"})
 
 

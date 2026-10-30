@@ -11,6 +11,20 @@ const validName = (name:string) =>
   name.length<=63 && /^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(name) &&
   name!=="localhost";
 
+function resultGuidance(code:string):string {
+  if(code==="renamed"||code==="renamed_with_suffix"||code==="no_change")
+    return "Check the actual assigned name and update any bookmarks, MCP connections or external callbacks. HTTPS certificate readiness is not verified.";
+  if(code==="dns_propagation_pending")
+    return "Tailscale accepted the command but still reported the previous name. Refresh status; do not request another rename until the actual DNS name is known.";
+  if(code==="stale_hostname")
+    return "The device name changed since this page loaded. Refresh status before retrying.";
+  if(code==="tailscale_identity_changed")
+    return "The pinned device or tailnet identity changed. Stop and use DevStack diagnostics; do not re-enroll automatically.";
+  if(code==="routes_unrecognized"||code==="routes_changed")
+    return "The Serve/Funnel configuration could not be verified. The worker did not reset routes. Inspect DevStack diagnostics before retrying.";
+  return "The operation was not verified. Refresh live status and inspect Administration → Diagnostics before retrying.";
+}
+
 function CopyLink({title,url}:{title:string;url:string|null}){
   const [copied,setCopied]=useState(false);
   if(!url)return <p className="text-muted">{title}: unavailable</p>;
@@ -77,7 +91,7 @@ export function TailscaleNetworkScreen({navigation}:{navigation:Navigator}){
         <CopyLink title="New private link" url={result.new_urls.private_url}/>
         <CopyLink title="New MCP link" url={result.new_urls.mcp_url}/>
       </>}
-      <p>External DNS / TLS reachability is not tested by this status. If pending, retry the new address later; use Administration → Diagnostics for bounded events.</p>
+      <p>{resultGuidance(result.code)}</p>
     </section>}
     <section className="card">
       <h2>Rename this device</h2>
