@@ -164,13 +164,14 @@ def validate_preflight(value) -> dict:
     """Never forward arbitrary data from a root-owned JSON snapshot."""
     safe = unknown()
     if not isinstance(value, dict):
-        reason = value.get("reason")
-    if type(reason) is str and reason in REASONS:
-        safe["reason"] = reason
-    return safe
+        return safe
     for field, allowed in (("health", HEALTH), ("tailscale", CONNECTIVITY),
                            ("identity", IDENTITY), ("private_dashboard", PRIVATE),
                            ("public_funnel", FUNNEL), ("gateway", GATEWAY)):
-        if type(value.get(field)) is str and value[field] in allowed:
-            safe[field] = value[field]
+        field_value = value.get(field)
+        if type(field_value) is str and field_value in allowed:
+            safe[field] = field_value
+    reason = value.get("reason")
+    if type(reason) is str and reason in REASONS:
+        safe["reason"] = reason
     return safe
