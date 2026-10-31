@@ -111,11 +111,9 @@ class PrivatePortsAPITests(unittest.TestCase):
             self.assertEqual(data["project_id"], self.a)
             self.assertTrue(data["tailscale_available"])
             self.assertEqual(len(data["ports"]), 3)
-            self.assertEqual(len(data["applications"]), 2)
-            self.assertEqual({x["name"] for x in data["applications"]},
-                             {"Django", "Other web endpoint"})
-            self.assertEqual(data["applications"][0]["url"],
-                             f"http://{IP}:18080/")
+            # Discovered bindings remain diagnostic-only; application URLs
+            # come from explicit project configuration, not port matching.
+            self.assertEqual(data["applications"], [])
             self.assertEqual(self.backend.lookups[-1],
                              (self.a, activated["generation"], IP))
             # Neither selecting nor querying B accesses active A's ports.
