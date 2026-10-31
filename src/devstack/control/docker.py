@@ -86,11 +86,21 @@ def compose_id(identifier: str) -> str:
 
 
 def _execute(argv: list[str], timeout: int = 240) -> str:
+    kwargs = {
+        "stdin": subprocess.DEVNULL, "capture_output": True,
+        "text": True, "check": False, "timeout": timeout,
+    }
+    if argv[:2] == ["docker", "compose"]:
+        # This is an authoritative controller-provided value, never a
+        # caller-supplied host bind. It is used by imported Compose manifests
+        # at validation, preview, build, activation and cleanup time.
+        from devstack.control.private_ports import tailscale_ipv4
+
+        env = os.environ.copy()
+        env["DEVSTACK_TAILSCALE_IPV4"] = tailscale_ipv4() or "127.0.0.1"
+        kwargs["env"] = env
     try:
-        result = subprocess.run(
-            argv, stdin=subprocess.DEVNULL, capture_output=True,
-            text=True, check=False, timeout=timeout,
-        )
+        result = subprocess.run(argv, **kwargs)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise DockerControlError("Docker operation failed or exceeded its time limit") from exc
     if result.returncode:
