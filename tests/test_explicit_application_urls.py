@@ -11,6 +11,11 @@ from devstack.projects.workspaces import WorkspaceStore
 from devstack.control.daemon import Controller
 
 
+class FakeDocker:
+    def owned(self):
+        return []
+
+
 class ApplicationURLManifestTests(unittest.TestCase):
     def test_multiple_bookmarks_can_share_port_without_service(self):
         config = (
@@ -61,7 +66,7 @@ class ApplicationURLPersistenceTests(unittest.TestCase):
         self.root = Path(tmp.name)
         self.controller = Controller(
             Database(self.root / "controller.sqlite3"),
-            WorkspaceStore(self.root / "projects"),
+            WorkspaceStore(self.root / "projects"), FakeDocker(),
         )
         self.controller.coordinator.reconcile()
         self.id = self.controller.provisioner.create_empty("bookmarks", "Bookmarks").id
