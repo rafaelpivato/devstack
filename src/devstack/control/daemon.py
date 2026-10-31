@@ -28,6 +28,7 @@ from .docker import DockerBackend
 from .jobs import JobSupervisor
 from .observability import ContainerObservability
 from .private_ports import PrivateApplicationPorts
+from devstack.projects.manifest import application_row
 from .imports import ImportSupervisor
 from .repository_add import RepositoryAddSupervisor
 from .transitions import TransitionSupervisor
@@ -160,7 +161,7 @@ class Controller:
             repositories = self.registry.repositories(identifier)
             with self.registry.database.transaction() as con:
                 apps = con.execute(
-                    "SELECT name,service,port FROM applications WHERE project_id=? "
+                    "SELECT name,service,port,url FROM applications WHERE project_id=? "
                     "ORDER BY name", (identifier,)
                 ).fetchall()
                 tasks = con.execute(
@@ -175,7 +176,7 @@ class Controller:
                 ],
                 "linked_source": self._has_linked_source(identifier),
                 "last_repository_update": self._last_repository_update(identifier),
-                "applications": [dict(row) for row in apps],
+                "applications": [application_row(row["name"], row["service"], row["port"], row["url"]) for row in apps],
                 "tasks": [dict(row) for row in tasks],
             }
         if operation == "project_rename":

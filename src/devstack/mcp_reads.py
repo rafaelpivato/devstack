@@ -147,7 +147,7 @@ class MCPReadClient:
             raise MCPReadError("project_identity_mismatch")
         return {**result,
                 "repositories": [_fields(row, ("id", "name")) for row in repositories],
-                "applications": [_fields(row, ("name", "service", "port"))
+                "applications": [_fields(row, ("name", "url", "service", "port"))
                                  for row in data.get("applications", [])[:100]],
                 "tasks": [_fields(row, ("name", "service", "mode"))
                           for row in data.get("tasks", [])[:100]],

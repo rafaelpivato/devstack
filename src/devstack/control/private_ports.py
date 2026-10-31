@@ -48,31 +48,11 @@ class PrivateApplicationPorts:
                 return {"project_id": identifier, "active": True,
                         "tailscale_available": False, "ports": [],
                         "applications": []}
-            # Existing Compose port mappings are authoritative; application
-            # definitions are optional friendly labels, never publication rules.
+            # Docker port discovery is diagnostic only. Application
+            # bookmarks are explicit and never depend on these mappings.
             mappings = self.backend.private_published_ports(
                 identifier, state["generation"], host,
             )
-            with self.coordinator.database.transaction() as con:
-                defined = con.execute(
-                    "SELECT name,service,port FROM applications WHERE project_id=? "
-                    "ORDER BY name", (identifier,),
-                ).fetchall()
-            applications = []
-            for app in defined:
-                matches = [
-                    row for row in mappings if row["service"] == app["service"]
-                    and (app["port"] is None
-                         or row["container_port"] == app["port"])
-                ]
-                if matches:
-                    candidate = matches[0]
-                    applications.append({
-                        "name": app["name"], "service": app["service"],
-                        "container_port": candidate["container_port"],
-                        "host_port": candidate["host_port"],
-                        "url": candidate["url"],
-                    })
             return {"project_id": identifier, "active": True,
                     "tailscale_available": True, "ports": mappings,
-                    "applications": applications}
+                    "applications": []}
