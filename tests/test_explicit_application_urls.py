@@ -77,14 +77,18 @@ class ApplicationURLPersistenceTests(unittest.TestCase):
             {"name":"Django Admin","url":"http://{host}:5173/b/admin/"},
         ]
         actual = self.controller.configuration.replace_settings(self.id,apps,[])
-        self.assertEqual(actual["applications"],apps)
+        expected = sorted(apps, key=lambda app: app["name"])
+        self.assertEqual(actual["applications"], expected)
         detail = self.controller.handle({"op":"project_detail","project_id":self.id})
-        self.assertEqual(detail["applications"],apps)
-        self.assertEqual(self.controller.configuration.settings_review(self.id)["applications"],apps)
+        self.assertEqual(detail["applications"], expected)
+        self.assertEqual(
+            self.controller.configuration.settings_review(self.id)["applications"],
+            expected,
+        )
         with self.assertRaises(Exception):
             self.controller.configuration.replace_settings(
                 self.id,[{"name":"unsafe","url":"javascript:alert(1)"}],[])
-        self.assertEqual(self.controller.configuration.settings(self.id)["applications"],apps)
+        self.assertEqual(self.controller.configuration.settings(self.id)["applications"], expected)
 
     def test_upgrade_v12_preserves_old_apps_and_every_other_project_record(self):
         path=self.root / "controller.sqlite3"
