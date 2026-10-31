@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import tomllib
 
+from devstack.adapters.github import GitHubSourceError, parse_github_url
+
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
 _MAX_FILE = 128 * 1024
 
@@ -31,10 +33,18 @@ class TaskSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class RepositorySpec:
+    name: str
+    url: str
+    branch: str
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectTemplate:
     applications: tuple[ApplicationSpec, ...]
     tasks: tuple[TaskSpec, ...]
     managed_files: dict[str, bytes]
+    repositories: tuple[RepositorySpec, ...] = ()
 
 
 def _name(value: object, label: str, *, max_length: int = 80) -> str:
@@ -139,6 +149,47 @@ def _tasks(raw: bytes) -> tuple[TaskSpec, ...]:
     return tuple(result)
 
 
+
+def _repositories(raw: bytes) -> tuple[RepositorySpec, ...]:
+    """Validate optional additional GitHub repositories (never local paths)."""
+    parsed = _toml(raw)
+    if set(parsed) != {"repositories"} or not isinstance(parsed["repositories"], list):
+        raise ManifestError("Repository template must contain only [[repositories]]")
+    result = []
+    seen_names = set()
+    seen_urls = set()
+    for row in parsed["repositories"]:
+        if not isinstance(row, dict) or set(row) - {"name", "url", "branch"}:
+            raise ManifestError("Invalid repository declaration")
+        name = _name(row.get("name"), "repository name")
+        url = row.get("url")
+        if not isinstance(url, str) or not url or url != url.strip():
+            raise ManifestError("Invalid repository URL")
+        try:
+            location = parse_github_url(url)
+        except (GitHubSourceError, ValueError) as exc:
+            raise ManifestError("Only validated GitHub repository URLs are allowed") from exc
+        if location.tree is not None:
+            raise ManifestError("Repository declaration must not use GitHub tree URLs")
+        branch = row.get("branch", "")
+        if (not isinstance(branch, str) or len(branch) > 240
+                or (branch and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]*", branch)
+                                or ".." in branch or "//" in branch
+                                or branch.endswith(("/", ".", ".lock"))
+                                or "@{" in branch
+                                or any(part in ("", ".", "..") or part.endswith(".lock")
+                                       for part in branch.split("/"))))):
+            raise ManifestError("Invalid repository branch")
+        if name in seen_names or location.clone_url in seen_urls:
+            raise ManifestError("Duplicate repository name or GitHub source")
+        seen_names.add(name)
+        seen_urls.add(location.clone_url)
+        result.append(RepositorySpec(name, location.clone_url, branch))
+        if len(result) > 24:
+            raise ManifestError("Too many repositories in project manifest")
+    return tuple(result)
+
+
 def parse_template(source: Path) -> ProjectTemplate:
     """Snapshot source declarations; never modify the Git checkout."""
     if source.is_symlink() or not source.is_dir():
@@ -149,6 +200,7 @@ def parse_template(source: Path) -> ProjectTemplate:
     app_raw = _read(config, "project.toml", required=True)
     task_raw = _read(config, "tasks.toml")
     compose_raw = _read(config, "compose.yaml")
+    repositories_raw = _read(config, "repositories.toml")
     applications = _apps(app_raw)
     tasks = _tasks(task_raw) if task_raw is not None else ()
     files = {"project.toml": app_raw}
@@ -160,4 +212,6 @@ def parse_template(source: Path) -> ProjectTemplate:
         except UnicodeDecodeError as exc:
             raise ManifestError("Compose YAML must be UTF-8 text") from exc
         files["compose.yaml"] = compose_raw
-    return ProjectTemplate(applications, tasks, files)
+    repositories = (_repositories(repositories_raw)
+                    if repositories_raw is not None else ())
+    return ProjectTemplate(applications, tasks, files, repositories)
