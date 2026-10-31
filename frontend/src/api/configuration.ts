@@ -1,9 +1,10 @@
 import { apiRequest } from "./client";
 import { isProjectId } from "../navigation/routes";
+import { resolveApplicationUrl } from "../lib/applicationUrls";
 
 const project=(id:string)=>{if(!isProjectId(id))throw Error("Invalid project ID");return "/api/v2/projects/"+id;};
 export interface ComposeDocument {content:string;revision:string}
-export interface ApplicationDefinition {name:string;service:string;port?:number|null}
+export interface ApplicationDefinition {name:string;url?:string;service?:string;port?:number|null}
 export interface TaskDefinition {name:string;service:string;mode:string;image:string;network:string;command:string[]}
 export interface SettingsCollection {applications:ApplicationDefinition[];tasks:TaskDefinition[]}
 export interface ReviewedSettings extends SettingsCollection {revision:string}
@@ -54,8 +55,11 @@ export function validateCollection(value:unknown):value is SettingsCollection {
   const apps=row.applications.every((a:unknown)=>{
     if(!a||typeof a!=="object"||Array.isArray(a))return false;
     const obj=a as Record<string,unknown>;
+    if(typeof obj.name!=="string")return false;
+    if(Object.keys(obj).sort().join(",")==="name,url")
+      return typeof obj.url==="string" && resolveApplicationUrl(obj.url,"devstack.example")!==null;
     return Object.keys(obj).every(k=>["name","service","port"].includes(k)) &&
-      typeof obj.name==="string"&&typeof obj.service==="string" &&
+      typeof obj.service==="string" &&
       (obj.port===undefined||(Number.isInteger(obj.port)&&Number(obj.port)>0&&Number(obj.port)<=65535));
   });
   const tasks=row.tasks.every((t:unknown)=>{

@@ -12,7 +12,7 @@ import re
 import tempfile
 
 from devstack.domain.models import project_id
-from devstack.projects.manifest import _apps, _tasks, ManifestError
+from devstack.projects.manifest import _apps, _tasks, ManifestError, application_row
 from devstack.storage.projects import ProjectRegistry
 
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -120,7 +120,7 @@ class ConfigurationService:
         self.registry.get(identifier)
         with self.registry.database.transaction() as con:
             apps = con.execute(
-                "SELECT name,service,port FROM applications WHERE project_id=? "
+                "SELECT name,service,port,url FROM applications WHERE project_id=? "
                 "ORDER BY name", (identifier,),
             ).fetchall()
             tasks = con.execute(
@@ -128,7 +128,7 @@ class ConfigurationService:
                 "WHERE project_id=? ORDER BY name", (identifier,),
             ).fetchall()
         return {
-            "applications": [dict(a) for a in apps],
+            "applications": [application_row(a["name"], a["service"], a["port"], a["url"]) for a in apps],
             "tasks": [{
                 "name": t["name"], "service": t["service"],
                 "mode": t["mode"], "image": t["image"],
@@ -159,7 +159,9 @@ class ConfigurationService:
         # Use the same spec validator as the GitHub importer. Validate via
         # our canonical allowlist of fields, not SQL insertion exceptions.
         for row in applications:
-            if not isinstance(row, dict) or set(row) - {"name", "service", "port"}:
+            if not isinstance(row, dict) or set(row) not in (
+                {"name", "url"}, {"name", "service"}, {"name", "service", "port"},
+            ):
                 raise ConfigurationInvalid("Invalid application properties")
         for row in tasks:
             if not isinstance(row, dict) or set(row) - {
@@ -174,13 +176,16 @@ class ConfigurationService:
         app_doc = []
         for app in applications:
             app_doc.append("[[applications]]")
-            for key in ("name", "service"):
-                app_doc.append(f"{key} = {q(app.get(key))}")
-            if "port" in app:
-                value = app["port"]
-                if type(value) is not int or not 1 <= value <= 65535:
-                    raise ConfigurationInvalid("Invalid application port")
-                app_doc.append(f"port = {value}")
+            app_doc.append(f"name = {q(app.get('name'))}")
+            if "url" in app:
+                app_doc.append(f"url = {q(app['url'])}")
+            else:
+                app_doc.append(f"service = {q(app.get('service'))}")
+                if "port" in app:
+                    value = app["port"]
+                    if type(value) is not int or not 1 <= value <= 65535:
+                        raise ConfigurationInvalid("Invalid application port")
+                    app_doc.append(f"port = {value}")
         task_doc = []
         for task in tasks:
             task_doc.append("[[tasks]]")
@@ -213,8 +218,9 @@ class ConfigurationService:
                 con.execute("DELETE FROM tasks WHERE project_id=?", (identifier,))
                 for app in validated_apps:
                     con.execute(
-                        "INSERT INTO applications(project_id,name,service,port) "
-                        "VALUES(?,?,?,?)", (identifier, app.name, app.service, app.port)
+                        "INSERT INTO applications(project_id,name,service,port,url) "
+                        "VALUES(?,?,?,?,?)",
+                        (identifier, app.name, app.service, app.port, app.url)
                     )
                 for task in validated_tasks:
                     con.execute(

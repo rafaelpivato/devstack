@@ -5,6 +5,7 @@ import json
 import time
 from uuid import uuid4
 
+from devstack.projects.manifest import application_row
 from devstack.domain.models import (
     Project, Repository, project_id, slug, display_name, repo_name, repo_path,
 )
@@ -171,9 +172,9 @@ class ProjectRegistry:
                 )
                 for app in applications:
                     con.execute(
-                        "INSERT INTO applications(project_id,name,service,port)"
-                        " VALUES(?,?,?,?)",
-                        (entry.id, app.name, app.service, app.port),
+                        "INSERT INTO applications(project_id,name,service,port,url)"
+                        " VALUES(?,?,?,?,?)",
+                        (entry.id, app.name, app.service, app.port, app.url),
                     )
                 for task in tasks:
                     con.execute(
@@ -232,7 +233,7 @@ class ProjectRegistry:
             if source is None:
                 raise ProjectNotFound("Project has no linked source")
             apps = con.execute(
-                "SELECT name,service,port FROM applications WHERE project_id=?"
+                "SELECT name,service,port,url FROM applications WHERE project_id=?"
                 " ORDER BY name", (identifier,),
             ).fetchall()
             tasks = con.execute(
@@ -243,7 +244,10 @@ class ProjectRegistry:
             "repository_id": source["repository_id"],
             "subdirectory": source["subdirectory"],
             "branch": source["branch"],
-            "applications": tuple(dict(row) for row in apps),
+            "applications": tuple(
+                application_row(row["name"], row["service"], row["port"], row["url"])
+                for row in apps
+            ),
             "tasks": tuple({
                 **{key: row[key] for key in ("name", "service", "mode",
                                              "image", "network")},

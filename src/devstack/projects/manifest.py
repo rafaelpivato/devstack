@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 import re
 import tomllib
 
@@ -18,8 +19,9 @@ class ManifestError(ValueError):
 @dataclass(frozen=True, slots=True)
 class ApplicationSpec:
     name: str
-    service: str
-    port: int | None
+    service: str = ""
+    port: int | None = None
+    url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +79,47 @@ def _toml(raw: bytes) -> dict:
     return parsed
 
 
+def validate_application_url(value: object) -> str:
+    """Application bookmarks are explicit URLs, never Docker-discovered.
+
+    {host} may replace the entire hostname; the web client substitutes the
+    hostname by which the owner opened their DevStack workstation.
+    """
+    if (not isinstance(value, str) or not 1 <= len(value) <= 2048
+            or value != value.strip()
+            or any(ord(ch) < 33 or ord(ch) == 127 for ch in value)
+            or "\\" in value):
+        raise ManifestError("Invalid application URL")
+    if "{host}" in value:
+        if value.count("{host}") != 1:
+            raise ManifestError("Invalid application host placeholder")
+        candidate = value.replace("{host}", "devstack.example")
+    else:
+        candidate = value
+    if "{" in candidate or "}" in candidate:
+        raise ManifestError("Unknown application URL placeholder")
+    try:
+        parsed = urlsplit(candidate)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or not parsed.netloc or parsed.username is not None
+                or parsed.password is not None or parsed.fragment or parsed.query):
+            raise ValueError("Unsafe application URL")
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            raise ValueError("Invalid application port")
+        if value.count("{host}") and parsed.hostname != "devstack.example":
+            raise ValueError("Placeholder must replace the whole hostname")
+    except ValueError as exc:
+        raise ManifestError("Invalid application URL") from exc
+    return value
+
+
+def application_row(name: str, service: str, port: int | None, url: str | None) -> dict:
+    """Keep legacy definitions visible, but never synthesize URLs for them."""
+    return {"name": name, "url": url} if url is not None else {
+        "name": name, "service": service, "port": port,
+    }
+
+
 def _apps(raw: bytes) -> tuple[ApplicationSpec, ...]:
     parsed = _toml(raw)
     if set(parsed) != {"applications"} or not isinstance(parsed["applications"], list):
@@ -84,20 +127,28 @@ def _apps(raw: bytes) -> tuple[ApplicationSpec, ...]:
     result = []
     seen = set()
     for row in parsed["applications"]:
-        if not isinstance(row, dict) or set(row) - {"name", "service", "port"}:
+        if not isinstance(row, dict) or set(row) not in (
+            {"name", "url"}, {"name", "service"}, {"name", "service", "port"},
+        ):
             raise ManifestError("Invalid application entry")
         name = row.get("name")
         if (not isinstance(name, str) or not name or len(name) > 64
                 or name != name.strip() or any(ord(c) < 32 for c in name)):
             raise ManifestError("Invalid application label")
-        service = _name(row.get("service"), "Compose service")
-        port = row.get("port")
-        if port is not None and (type(port) is not int or not 1 <= port <= 65535):
-            raise ManifestError("Application port must be 1-65535")
+        if "url" in row:
+            url = validate_application_url(row["url"])
+            service, port = "", None
+        else:
+            # Legacy import compatibility; no automatic link generation.
+            url = None
+            service = _name(row.get("service"), "Compose service")
+            port = row.get("port")
+            if port is not None and (type(port) is not int or not 1 <= port <= 65535):
+                raise ManifestError("Application port must be 1-65535")
         if name in seen:
             raise ManifestError("Duplicate application")
         seen.add(name)
-        result.append(ApplicationSpec(name, service, port))
+        result.append(ApplicationSpec(name, service, port, url))
     if len(result) > 30:
         raise ManifestError("Too many applications")
     return tuple(result)

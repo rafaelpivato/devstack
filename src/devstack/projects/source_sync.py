@@ -33,7 +33,9 @@ _ALLOWED_FILES = {
 
 
 def _application(value):
-    return {"name": value.name, "service": value.service, "port": value.port}
+    return {"name": value.name, "url": value.url} if value.url is not None else {
+        "name": value.name, "service": value.service, "port": value.port,
+    }
 
 
 def _task(value):
@@ -103,7 +105,7 @@ class SourceReviewService:
             data = entries[name]
             rows.append("[[" + kind + "]]")
             if kind == "applications":
-                keys = ("name", "service", "port")
+                keys = ("name", "url") if "url" in data else ("name", "service", "port")
             else:
                 keys = ("name", "service", "mode", "image", "network", "command")
             for key in keys:
@@ -323,9 +325,10 @@ class SourceReviewService:
                         (identifier, row["name"]),
                     )
                     con.execute(
-                        "INSERT INTO applications(project_id,name,service,port) "
-                        "VALUES(?,?,?,?)",
-                        (identifier, row["name"], row["service"], row["port"]),
+                        "INSERT INTO applications(project_id,name,service,port,url) "
+                        "VALUES(?,?,?,?,?)",
+                        (identifier, row["name"], row.get("service", ""),
+                         row.get("port"), row.get("url")),
                     )
                 for row in changes_tasks:
                     con.execute(

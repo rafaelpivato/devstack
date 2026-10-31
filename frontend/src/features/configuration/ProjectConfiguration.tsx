@@ -93,9 +93,9 @@ export function DefinitionsEditor({id,runtime,navigation}:{
   const [success,setSuccess]=useState<string|null>(null);
   const current=state.kind==="ready"?state.data:null;
   const initial=current?JSON.stringify({
-    applications:current.applications.map(a=>({
-      name:a.name,service:a.service,...(a.port==null?{}:{port:a.port}),
-    })),
+    applications:current.applications.map(a=>a.url
+      ?{name:a.name,url:a.url}
+      :{name:a.name,service:a.service,...(a.port==null?{}:{port:a.port})}),
     tasks:current.tasks,
   },null,2):"";
   const text=raw??initial;
@@ -116,6 +116,7 @@ export function DefinitionsEditor({id,runtime,navigation}:{
   };
   return <ConfigShell title="Applications & tasks" id={id} navigation={navigation}>
     <EditGuard runtime={runtime}/>
+    <Notice title="Explicit application URLs">Applications are named bookmarks with a complete HTTP(S) URL, for example http://&#123;host&#125;:5173/a/login. The optional &#123;host&#125; placeholder uses the hostname from which you opened this dashboard. No Docker service or port discovery is used for application links. Legacy service/port entries remain visible until replaced.</Notice>
     <Notice title="Whole-collection replacement">This editor submits both lists together, not individual rows. The controller compares the reviewed revision under its transition lock, rejecting concurrent edits.</Notice>
     {state.kind==="loading"&&<Skeleton/>}
     {state.kind==="error"&&<Notice title="Definitions unavailable" role="alert">{state.error.message}</Notice>}
