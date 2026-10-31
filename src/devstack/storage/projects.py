@@ -118,7 +118,7 @@ class ProjectRegistry:
     def reserve_import(
         self, identifier: str, project_slug: str, name: str,
         repository_name: str, clone_url: str, branch: str, subdirectory: str,
-        applications: tuple, tasks: tuple,
+        applications: tuple, tasks: tuple, *, extra_repositories: tuple = (),
     ) -> Project:
         """Atomically reserve metadata before publishing an imported workspace.
 
@@ -154,6 +154,15 @@ class ProjectRegistry:
                      repository.relative_path, repository.clone_url,
                      repository.created_at),
                 )
+                for extra in extra_repositories:
+                    repo_name(extra.name)
+                    con.execute(
+                        "INSERT INTO repositories"
+                        "(id,project_id,name,relative_path,clone_url,created_at)"
+                        " VALUES(?,?,?,?,?,?)",
+                        (str(uuid4()), identifier, extra.name, "repos/" + extra.name,
+                         extra.url, time.time_ns()),
+                    )
                 con.execute(
                     "INSERT INTO project_sources"
                     "(project_id,repository_id,subdirectory,branch)"

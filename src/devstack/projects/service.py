@@ -10,7 +10,7 @@ from uuid import uuid4
 from devstack.adapters.github import GitHubSource
 from devstack.domain.models import display_name, slug, repo_path, project_id
 from devstack.storage.projects import ProjectConflict, ProjectRegistry
-from .manifest import parse_template
+from .manifest import ManifestError, parse_template
 from .workspaces import WorkspaceError, WorkspaceStore
 
 
@@ -76,11 +76,21 @@ class ProjectProvisioner:
                     or not checkout.manifest_dir.resolve().is_relative_to(checkout_path.resolve())):
                 raise ProjectProvisionError("Manifest path escapes the checkout")
             template = parse_template(checkout.manifest_dir)
+            # Stage the complete repository set before publishing a project.
+            # An unsuccessful clone never leaves a visible partial project.
+            declared_urls = {checkout.clone_url}
+            for extra in template.repositories:
+                if extra.name == checkout.repository or extra.url in declared_urls:
+                    raise ManifestError("Additional repository duplicates the source repository")
+                declared_urls.add(extra.url)
+                target = self.workspaces.checkout_path(staging, extra.name)
+                self.github.clone_repository(extra.url, target, extra.branch)
             self.workspaces.install_template(staging, template)
             self.registry.reserve_import(
                 identifier, project_slug, name, parsed.repository,
                 parsed.clone_url, checkout.branch, checkout.subdirectory,
                 template.applications, template.tasks,
+                extra_repositories=template.repositories,
             )
             reserved = True
             self._publish(identifier)
@@ -122,6 +132,17 @@ class ProjectProvisioner:
                         "WHERE s.project_id=?", (entry.id,),
                     ).fetchone()
                 if source is not None:
+                    # Before recovering a published pending import, verify
+                    # that every repository in its durable registration exists.
+                    for row in con.execute(
+                        "SELECT relative_path FROM repositories WHERE project_id=?",
+                        (entry.id,),
+                    ).fetchall():
+                        relative_repo = repo_path(row["relative_path"])
+                        clone = root.joinpath(*relative_repo.split("/"))
+                        if (clone.is_symlink() or not clone.is_dir()
+                                or not clone.resolve().is_relative_to(root.resolve())):
+                            raise ProjectProvisionError("Missing imported repository checkout")
                     relative = repo_path(source["relative_path"])
                     checkout = root.joinpath(*relative.split("/"))
                     if checkout.is_symlink() or not checkout.is_dir():
