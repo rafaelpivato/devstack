@@ -13,7 +13,7 @@ from mcp import Client
 
 from devstack.control.daemon import ControlServer
 from devstack.mcp_gateway import (
-    PingState, probe_controller, public_host, transport_security,
+    MCP_SERVER_INSTRUCTIONS, PingState, probe_controller, public_host, transport_security,
 )
 
 
@@ -85,7 +85,24 @@ class ProtocolTests(unittest.TestCase):
 
                     async def exercise():
                         async with Client(f"http://127.0.0.1:{mcp_port}/mcp") as client:
-                            names = {t.name for t in (await client.list_tools()).tools}
+                            # Assert actual MCP initialize/tools-list discovery, without
+                            # ChatGPT memory, prompt injection or extra tool calls.
+                            self.assertEqual(client.instructions, MCP_SERVER_INSTRUCTIONS)
+                            self.assertIn("Only ONE project runtime", client.instructions)
+                            self.assertIn("devstack_project_import_status", client.instructions)
+                            tools = (await client.list_tools()).tools
+                            metadata = {tool.name: tool for tool in tools}
+                            importer = metadata["devstack_project_import"]
+                            self.assertIn("umbrella repository", importer.description)
+                            self.assertIn(".devstack/repositories.toml", importer.description)
+                            self.assertIn("devstack_project_import_status", importer.description)
+                            self.assertIn("does NOT activate", importer.description)
+                            self.assertIn("operation.project_id",
+                                          metadata["devstack_project_import_status"].description)
+                            self.assertIn("canonical IDs", metadata["devstack_projects"].description)
+                            self.assertIn("ONE globally active",
+                                          metadata["devstack_transition"].description)
+                            names = set(metadata)
                             self.assertEqual(names, {
                                 "devstack_status", "devstack_ping",
                                 "devstack_projects", "devstack_runtime", "devstack_project",
