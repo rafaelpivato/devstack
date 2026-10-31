@@ -131,13 +131,14 @@ class ProjectProvisioner:
                         "JOIN repositories AS r ON r.id=s.repository_id "
                         "WHERE s.project_id=?", (entry.id,),
                     ).fetchone()
+                    registered = con.execute(
+                        "SELECT relative_path FROM repositories WHERE project_id=?",
+                        (entry.id,),
+                    ).fetchall()
                 if source is not None:
                     # Before recovering a published pending import, verify
                     # that every repository in its durable registration exists.
-                    for row in con.execute(
-                        "SELECT relative_path FROM repositories WHERE project_id=?",
-                        (entry.id,),
-                    ).fetchall():
+                    for row in registered:
                         relative_repo = repo_path(row["relative_path"])
                         clone = root.joinpath(*relative_repo.split("/"))
                         if (clone.is_symlink() or not clone.is_dir()
