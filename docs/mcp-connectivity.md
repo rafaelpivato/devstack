@@ -133,3 +133,40 @@ disposable Compose/image commands; no arbitrary host shell, host filesystem,
 direct Docker socket, raw IPC operation tool or new permission system. The
 public MCP request body cap is 64 KiB, consistent with existing controller
 message limits; particularly large Compose files may still exceed the cap.
+
+## MCP-native self-description (works without ChatGPT memory)
+
+DevStack teaches a newly connected AI client what it is through the standard
+MCP `initialize.instructions` field. This explains DevStack's project model,
+single-active-runtime limit, canonical project IDs, GitHub umbrella import,
+operation receipts, and when *not* to assume success. The same important
+requirements appear in the corresponding `tools/list` descriptions, because
+some MCP hosts may not present server-level instructions to the model.
+
+The MCP server supplies this guidance regardless of the ChatGPT conversation or
+project. No custom GPT instructions, account memory, MCP guide tool, special
+permissions, additional daemon, or separately maintained knowledge store is
+required.
+
+### Fresh-client import example
+
+1. Resolve an actual GitHub umbrella repository URL from the user or an
+   available GitHub connector. DevStack MCP does not discover arbitrary
+   GitHub repositories or reliably resolve private repository nicknames.
+2. Call `devstack_project_import(url, slug, name)`. The source repository
+   must contain `.devstack/project.toml`. It can also declare additional Git
+   repositories in `.devstack/repositories.toml`, Compose services in
+   `.devstack/compose.yaml`, and saved tasks in `.devstack/tasks.toml`.
+3. Capture the returned `operation.id` and call
+   `devstack_project_import_status(operation_id)` until a terminal result.
+   Only `succeeded` confirms import; obtain its `operation.project_id` and
+   call `devstack_project(project_id)` to verify registration.
+4. Import does not activate the project. If activation is requested, read
+   `devstack_runtime`, then call `devstack_transition` using the canonical
+   project ID and verify the receipt with `devstack_transition_status`.
+
+The protocol test `tests/test_v070_mcp_gateway.py` connects a fresh MCP
+client over Streamable HTTP, checks actual initialization instructions and
+import tool descriptions, and preserves the existing controller IPC health
+and ping checks. A compatible MCP client can discover the same metadata even
+when it has no prior knowledge of DevStack.
