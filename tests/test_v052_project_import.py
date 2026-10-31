@@ -262,14 +262,14 @@ url = 'https://github.com/rafaelpivato/devstack'
 
     def test_rejects_duplicate_names_urls_invalid_branches_and_external_urls(self):
         manifests = (
-            "[[repositories]]\\nname='a'\\nurl='https://github.com/x/one'\\n"
-            "[[repositories]]\\nname='a'\\nurl='https://github.com/x/two'\\n",
-            "[[repositories]]\\nname='a'\\nurl='https://github.com/x/one'\\n"
-            "[[repositories]]\\nname='b'\\nurl='https://github.com/x/one.git'\\n",
-            "[[repositories]]\\nname='a'\\nurl='https://example.com/x/one'\\n",
-            "[[repositories]]\\nname='a'\\nurl='https://github.com/x/one/tree/main'\\n",
-            "[[repositories]]\\nname='a'\\nurl='https://github.com/x/one'\\n"
-            "branch='--upload-pack=bad'\\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one'\n"
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/two'\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one'\n"
+            "[[repositories]]\nname='b'\nurl='https://github.com/x/one.git'\n",
+            "[[repositories]]\nname='a'\nurl='https://example.com/x/one'\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one/tree/main'\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one'\n"
+            "branch='--upload-pack=bad'\n",
         )
         for manifest in manifests:
             with self.subTest(manifest=manifest), self.assertRaises(ManifestError):
