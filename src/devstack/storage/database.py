@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -36,6 +36,7 @@ _SCHEMA = (
            name TEXT NOT NULL,
            service TEXT NOT NULL,
            port INTEGER,
+           url TEXT,
            PRIMARY KEY(project_id,name))""",
     """CREATE TABLE IF NOT EXISTS runtime_state (
            singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -201,7 +202,7 @@ class Database:
                 row = con.execute(
                     "SELECT version FROM schema_version WHERE singleton=1"
                 ).fetchone()
-                if row is None or row[0] not in (10, 11, SCHEMA_VERSION):
+                if row is None or row[0] not in (10, 11, 12, SCHEMA_VERSION):
                     raise StorageError("Unsupported database schema version")
                 if not {"projects", "repositories", "project_sources",
                         "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending", "repository_add_operations", "repository_bulk_updates"}.issubset(existing):
@@ -211,10 +212,20 @@ class Database:
                     "service_reaction_policies", "service_reaction_events",
                 }.issubset(existing):
                     raise StorageError("Repository synchronization schema is incomplete")
+            if existing and row[0] == SCHEMA_VERSION and "url" not in {
+                field[1] for field in con.execute("PRAGMA table_info(applications)")
+            }:
+                raise StorageError("Application URL schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)
-            if existing and row[0] in (10, 11):
-                # Atomic in-place upgrade from the v0.6.6 or v0.6.7 controller DB.
+            if existing and row[0] in (10, 11, 12):
+                # Atomic v12 -> v13 migration; old labels remain registered
+                # with url=NULL, and cannot acquire fabricated Docker links.
+                columns = {field[1] for field in con.execute(
+                    "PRAGMA table_info(applications)"
+                )}
+                if "url" not in columns:
+                    con.execute("ALTER TABLE applications ADD COLUMN url TEXT")
                 con.execute("UPDATE schema_version SET version=? WHERE singleton=1",
                             (SCHEMA_VERSION,))
             if not existing:
