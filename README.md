@@ -39,6 +39,11 @@ with `:8443`; no migration button or SSH is required. See
 
 ## Main workflows
 
+An imported GitHub project can optionally declare multiple independent GitHub
+repositories in `.devstack/repositories.toml`. All declared repositories are
+staged before the project becomes visible. See [declarative repository imports](docs/declarative-repositories.md).
+
+
 Create or import projects from GitHub, register multiple repositories per project, inspect repository status, safely update them individually or in a single background batch, and preview/confirm per-repository or project-wide Git branch switches. If a requested branch does not exist in a repository, switching falls back to that repository's **verified remote default branch**; unsafe local changes are never discarded.
 
 Configure each repository's optional service reactions (None / Restart / Redeploy), manually restart or redeploy individual services without switching projects, and maintain a project's Compose files, applications and saved tasks; review/selectively apply managed `.devstack/` source configuration; activate/deactivate/switch the runtime. See service/container state, health, bounded logs and private Tailscale links on mobile. Queue independent background container commands with history and cancellation.

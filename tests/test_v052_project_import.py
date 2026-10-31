@@ -170,6 +170,134 @@ class ProjectProvisionTests(unittest.TestCase):
                          (source / ".devstack" / "compose.yaml").read_bytes())
 
 
+
+class DeclarativeRepositoryImportTests(unittest.TestCase):
+    """GitHub source templates declare independent, validated repos."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        self.registry = ProjectRegistry(Database(self.base / "db" / "control.sqlite3"))
+        self.workspaces = WorkspaceStore(self.base / "workspaces")
+
+    def _adapter(self, manifest, *, fail_name=None):
+        class MultiGitHub(FakeGitHub):
+            def clone_and_resolve(self, url, destination):
+                checkout = super().clone_and_resolve(url, destination)
+                (checkout.manifest_dir / ".devstack" / "repositories.toml").write_text(
+                    manifest, encoding="utf-8",
+                )
+                return checkout
+
+            def clone_repository(self, url, destination, branch=""):
+                if destination.name == fail_name:
+                    raise GitHubSourceError("Simulated inaccessible additional repository")
+                destination.mkdir()
+                (destination / ".git").mkdir()
+                return "a" * 40
+
+        return MultiGitHub()
+
+    def _import(self, manifest, *, fail_name=None):
+        service = ProjectProvisioner(
+            self.registry, self.workspaces, self._adapter(manifest, fail_name=fail_name),
+        )
+        return service.import_github(URL, "outreach", "TrustedOutreach")
+
+    def test_one_import_registers_source_and_three_independent_repositories(self):
+        manifest = """
+[[repositories]]
+name = 'beacon-django'
+url = 'git@github.com:example/beacon-django.git'
+branch = 'main'
+
+[[repositories]]
+name = 'beacon-react'
+url = 'https://github.com/example/beacon-react'
+
+[[repositories]]
+name = 'conduit-elixir'
+url = 'git@github.com:example/conduit-elixir.git'
+"""
+        entry = self._import(manifest)
+        repos = self.registry.repositories(entry.id)
+        self.assertEqual(
+            {r.name for r in repos},
+            {"devstack", "beacon-django", "beacon-react", "conduit-elixir"},
+        )
+        for name in ("beacon-django", "beacon-react", "conduit-elixir"):
+            self.assertTrue(self.workspaces.repository(entry.id, "repos/" + name).is_dir())
+        self.assertEqual(
+            {r.name: r.clone_url for r in repos}["beacon-react"],
+            "https://github.com/example/beacon-react.git",
+        )
+        self.assertEqual(self.registry.import_metadata(entry.id)["subdirectory"], "examples/smoke")
+
+    def test_failed_extra_clone_keeps_project_invisible(self):
+        manifest = """
+[[repositories]]
+name = 'beacon-django'
+url = 'git@github.com:example/beacon-django.git'
+
+[[repositories]]
+name = 'conduit-elixir'
+url = 'git@github.com:example/conduit-elixir.git'
+"""
+        with self.assertRaises(GitHubSourceError):
+            self._import(manifest, fail_name="conduit-elixir")
+        self.assertEqual(self.registry.list(), ())
+        self.assertEqual(self.registry.pending_imports(), ())
+        self.assertEqual(list(self.workspaces.base.glob(".pending-*")), [])
+
+    def test_rejects_repeating_the_umbrella_source(self):
+        manifest = """
+[[repositories]]
+name = 'other-alias'
+url = 'https://github.com/rafaelpivato/devstack'
+"""
+        with self.assertRaises(ManifestError):
+            self._import(manifest)
+        self.assertEqual(self.registry.list(), ())
+
+    def test_rejects_duplicate_names_urls_invalid_branches_and_external_urls(self):
+        manifests = (
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one'\n"
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/two'\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one'\n"
+            "[[repositories]]\nname='b'\nurl='https://github.com/x/one.git'\n",
+            "[[repositories]]\nname='a'\nurl='https://example.com/x/one'\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one/tree/main'\n",
+            "[[repositories]]\nname='a'\nurl='https://github.com/x/one'\n"
+            "branch='--upload-pack=bad'\n",
+        )
+        for manifest in manifests:
+            with self.subTest(manifest=manifest), self.assertRaises(ManifestError):
+                self._import(manifest)
+            self.assertFalse(self.registry.list())
+
+    def test_recovery_checks_every_imported_checkout_before_finalization(self):
+        manifest = """
+[[repositories]]
+name = 'beacon-django'
+url = 'git@github.com:example/beacon-django.git'
+"""
+        service = ProjectProvisioner(
+            self.registry, self.workspaces, self._adapter(manifest),
+        )
+        with patch.object(self.registry, "finalize_import",
+                          side_effect=RuntimeError("simulated crash")):
+            with self.assertRaisesRegex(RuntimeError, "simulated crash"):
+                service.import_github(URL, "outreach", "TrustedOutreach")
+        pending = self.registry.pending_imports()
+        self.assertEqual(len(pending), 1)
+        extra = self.workspaces.root(pending[0].id) / "repos" / "beacon-django"
+        shutil.rmtree(extra)
+        with self.assertRaisesRegex(ProjectProvisionError, "Missing imported repository checkout"):
+            service.recover_published_imports()
+        self.assertEqual(self.registry.list(), ())
+
+
 class GitHubParserTests(unittest.TestCase):
     def test_public_and_private_github_locations(self):
         public = parse_github_url(URL)
