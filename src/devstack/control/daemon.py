@@ -68,6 +68,7 @@ class Controller:
             database, self.registry, self.coordinator, self.backend, self.jobs,
         )
         self.repository_sync.reactions = self.reactions
+        self.repositories.reactions = self.reactions
         self.repository_add = RepositoryAddSupervisor(database, self.registry, workspaces, self.coordinator)
         self.bulk_repositories = BulkRepositoryUpdater(
             database, self.registry, self.coordinator, self.repositories,
@@ -207,10 +208,14 @@ class Controller:
                 request["project_id"], request["branch"], request["repository_id"],
             )
         if operation == "branch_apply":
-            return self.repositories.branch_apply(
+            result = self.repositories.branch_apply(
                 request["project_id"], request["branch"],
                 request["repository_id"], request["revision"],
             )
+            # Dispatch only after the source-write lock is released. The
+            # reaction supervisor checks generation and active owner again.
+            self.reactions.dispatch_pending()
+            return result
         if operation == "repository_bulk_submit":
             return self.bulk_repositories.submit(
                 request["project_id"], request["request_key"],
