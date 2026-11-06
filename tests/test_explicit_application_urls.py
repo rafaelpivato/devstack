@@ -105,7 +105,7 @@ class ApplicationURLPersistenceTests(unittest.TestCase):
         upgraded=Database(path)
         self.assertEqual(SCHEMA_VERSION,14)
         with upgraded.transaction() as con:
-            self.assertEqual(con.execute("SELECT version FROM schema_version").fetchone()[0],13)
+            self.assertEqual(con.execute("SELECT version FROM schema_version").fetchone()[0],14)
             row=con.execute("SELECT name,service,port,url FROM applications").fetchone()
             self.assertEqual(tuple(row),("Existing","web",8000,None))
             self.assertIsNotNone(con.execute("SELECT id FROM projects WHERE id=?",(self.id,)).fetchone())
