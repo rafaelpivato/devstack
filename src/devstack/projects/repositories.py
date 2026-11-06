@@ -9,6 +9,7 @@ import re
 import subprocess
 import hashlib
 import json
+from uuid import uuid4
 
 from devstack.domain.models import project_id
 
@@ -47,6 +48,7 @@ class RepositoryGitService:
         self.registry = registry
         self.workspaces = workspaces
         self.coordinator = coordinator
+        self.reactions = None  # Wired by Controller after both supervisors exist.
 
     def _checkout(self, identifier: str, repository_id: str) -> tuple[object, Path]:
         project_id(identifier)
@@ -109,17 +111,10 @@ class RepositoryGitService:
         }
 
 
-    def _source_editable(self) -> None:
-        state = self.coordinator.status()
-        if state["phase"] != "inactive" or state["project_id"] is not None:
-            raise RepositoryGitError("Deactivate the runtime before changing Git branches")
-        self.coordinator._verify_clear()
-
     def _sync_editable(self, identifier: str) -> None:
-        """Allow only the inactive runtime or the matching active owner.
+        """Allow source changes for the matching active project or no active project.
 
-        Caller holds the coordinator's global source-write lock. This is not
-        the branch-switch permission: branch switching remains inactive-only.
+        Caller must hold the coordinator's global source-write lock.
         """
         project_id(identifier)
         state = self.coordinator.status()
@@ -173,6 +168,12 @@ class RepositoryGitService:
         local_head = self._ref(checkout, "refs/heads/" + target)
         if remote_head is None:
             raise RepositoryGitError("Verified target branch is unavailable")
+        active = self.coordinator.status()
+        reactions = (
+            self.reactions.configured(identifier, repository.id)
+            if self.reactions is not None and active["phase"] == "active"
+            and active["project_id"] == identifier else []
+        )
         return {
             "repository_id": repository.id,
             "name": repository.name,
@@ -185,6 +186,7 @@ class RepositoryGitService:
             "target_head": local_head or remote_head,
             "remote_head": remote_head,
             "local_exists": local_head is not None,
+            "reactions": reactions,
             "action": ("blocked" if current["dirty"] or not current["branch"]
                        else "already" if current["branch"] == target else "switch"),
         }
@@ -205,7 +207,7 @@ class RepositoryGitService:
         if repository_id is not None:
             project_id(repository_id)
         with self.coordinator.locked():
-            self._source_editable()
+            self._sync_editable(identifier)
             repositories = self.registry.repositories(identifier)
             if repository_id is not None:
                 repositories = tuple(repo for repo in repositories
@@ -236,7 +238,9 @@ class RepositoryGitService:
         if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{64}", revision):
             raise RepositoryGitInvalid("Expected reviewed branch revision")
         with self.coordinator.locked():
-            self._source_editable()
+            self._sync_editable(identifier)
+            if self.reactions is not None and self.reactions.maintenance_busy_locked(identifier):
+                raise RepositoryGitError("Compose maintenance or reaction is in progress")
             repositories = self.registry.repositories(identifier)
             if repository_id is not None:
                 repositories = tuple(repo for repo in repositories
@@ -272,6 +276,24 @@ class RepositoryGitService:
                     after = self.status(identifier, row["repository_id"])
                     if after["branch"] != row["target_branch"]:
                         raise RepositoryGitError("Git did not reach reviewed branch")
+                    if row["action"] == "switch" and self.reactions is not None:
+                        # Revisit the same HEAD and still react to a real switch.
+                        # Keep the actual HEAD in receipts and a unique event key.
+                        try:
+                            with self.reactions.database.transaction(write=True) as con:
+                                self.reactions.capture(
+                                    con, identifier, row["repository_id"], after["head"],
+                                    event_key="branch:" + uuid4().hex,
+                                )
+                        except Exception:
+                            # Checkout succeeded but recording reactions failed.
+                            results.append({
+                                "repository_id": row["repository_id"], "name": row["name"],
+                                "target_branch": row["target_branch"],
+                                "fallback": row["fallback"],
+                                "status": "switched_reaction_failed", "head": after["head"],
+                            })
+                            break
                     results.append({
                         "repository_id": row["repository_id"], "name": row["name"],
                         "target_branch": row["target_branch"],

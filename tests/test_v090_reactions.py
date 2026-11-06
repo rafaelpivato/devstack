@@ -156,6 +156,66 @@ class ReactionsTests(unittest.TestCase):
         self.assertEqual(len(c.reactions.get(self.a, self.repo.id)["events"]), 1)
         c.coordinator.deactivate()
 
+    def test_active_branch_switch_dispatches_configured_reactions_on_every_visit(self):
+        c = self.controller
+        git("-C", self.source, "checkout", "-b", "feature/outreach-revamp")
+        (self.source / "outreach.txt").write_text("outreach")
+        git("-C", self.source, "add", ".")
+        git("-C", self.source, "commit", "-m", "feature")
+        git("-C", self.source, "push", "-u", "origin", "feature/outreach-revamp")
+        git("-C", self.source, "checkout", "main")
+        c.reactions.set_policy(self.a, self.repo.id, "api", "redeploy")
+        c.coordinator.activate(self.a)
+
+        for index, branch_name in enumerate([
+            "feature/outreach-revamp", "main", "feature/outreach-revamp",
+        ], 1):
+            reviewed = c.handle({
+                "op": "branch_preview", "project_id": self.a,
+                "repository_id": self.repo.id, "branch": branch_name,
+            })
+            self.assertTrue(reviewed["ready"])
+            self.assertEqual(reviewed["entries"][0]["reactions"], [
+                {"service": "api", "action": "redeploy"},
+            ])
+            self.assertEqual(len(self.submissions), index - 1)
+            applied = c.handle({
+                "op": "branch_apply", "project_id": self.a,
+                "repository_id": self.repo.id, "branch": branch_name,
+                "revision": reviewed["revision"],
+            })
+            self.assertTrue(applied["complete"], applied)
+            self.assertEqual(c.repositories.status(self.a, self.repo.id)["branch"], branch_name)
+            job = self.wait_job(index)
+            self.assertEqual(job[1], self.a)
+            self.assertEqual(job[3][-1], "api")
+            with self.db.transaction(write=True) as con:
+                con.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (job[0],))
+            self.assertEqual(c.coordinator.status()["project_id"], self.a)
+        events = c.reactions.get(self.a, self.repo.id)["events"]
+        self.assertEqual(len(events), 3)
+        self.assertEqual(len({x["head"] for x in events}), 2)
+        self.assertTrue(all(event["status"] == "submitted" for event in events))
+        c.coordinator.deactivate()
+
+    def test_branch_apply_waits_for_active_maintenance(self):
+        c = self.controller
+        git("-C", self.source, "checkout", "-b", "feature/safe")
+        (self.source / "safe.txt").write_text("new content")
+        git("-C", self.source, "add", ".")
+        git("-C", self.source, "commit", "-m", "safe")
+        git("-C", self.source, "push", "-u", "origin", "feature/safe")
+        git("-C", self.source, "checkout", "main")
+        c.coordinator.activate(self.a)
+        reviewed = c.repositories.branch_preview(self.a, "feature/safe", self.repo.id)
+        c.jobs.submit_service(self.a, "api", "restart")
+        self.wait_job()
+        with self.assertRaisesRegex(Exception, "Compose maintenance"):
+            c.repositories.branch_apply(self.a, "feature/safe", self.repo.id,
+                                        reviewed["revision"])
+        self.assertEqual(c.repositories.status(self.a, self.repo.id)["branch"], "main")
+        c.coordinator.deactivate()
+
     def test_multiple_repositories_coalesce_to_one_service_job(self):
         c = self.controller
         checkout = c.provisioner.workspaces.path(self.a) / "repos" / "second"
@@ -257,6 +317,44 @@ class ReactionsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.wait_job()
         c.coordinator.deactivate()
+
+    def test_v13_reaction_event_migration_keeps_history_and_allows_revisits(self):
+        c = self.controller
+        c.reactions.set_policy(self.a, self.repo.id, "api", "restart")
+        head = c.repositories.status(self.a, self.repo.id)["head"]
+        with self.db.transaction(write=True) as con:
+            con.execute("DROP TABLE service_reaction_events")
+            con.execute("""CREATE TABLE service_reaction_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+                service TEXT NOT NULL,
+                action TEXT NOT NULL CHECK(action IN ('restart','redeploy')),
+                head TEXT NOT NULL,
+                generation TEXT,
+                status TEXT NOT NULL CHECK(status IN ('pending','submitted','skipped','interrupted')),
+                reason TEXT,
+                job_id TEXT REFERENCES jobs(id),
+                at_ns INTEGER NOT NULL,
+                UNIQUE(project_id,repository_id,service,head))""")
+            con.execute("""INSERT INTO service_reaction_events
+                (project_id,repository_id,service,action,head,generation,status,reason,at_ns)
+                VALUES (?,?,?,?,?,NULL,'skipped','inactive_project',1)""",
+                (self.a, self.repo.id, "api", "restart", head))
+            con.execute("UPDATE schema_version SET version=13 WHERE singleton=1")
+        migrated = Database(self.db.path)
+        with migrated.transaction() as con:
+            old = con.execute("SELECT head,event_key,status FROM service_reaction_events").fetchone()
+            self.assertEqual((old["head"], old["event_key"], old["status"]),
+                             (head, head, "skipped"))
+            self.assertEqual(con.execute("SELECT version FROM schema_version").fetchone()[0],
+                             SCHEMA_VERSION)
+        with migrated.transaction(write=True) as con:
+            c.reactions.capture(con, self.a, self.repo.id, head,
+                                event_key="branch:test-revisit")
+        with migrated.transaction() as con:
+            self.assertEqual(con.execute(
+                "SELECT count(*) FROM service_reaction_events").fetchone()[0], 2)
 
     def test_schema_v11_upgrade_preserves_policies_and_projects(self):
         # Simulate v0.6.7 by dropping the new tables before opening the database.

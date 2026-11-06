@@ -51,6 +51,21 @@ class ReactionSupervisor:
             {"name": name, "action": policy.get(name, "none")} for name in services
         ], "events": [dict(row) for row in events]}
 
+    def configured(self, identifier, repository_id):
+        """Stable configured reactions included in a reviewed branch revision.
+
+        No Docker operation is executed by preview. An active repository switch
+        uses these declared policies, while an inactive switch does not run them.
+        """
+        self._repository(identifier, repository_id)
+        with self.database.transaction() as con:
+            rows = con.execute(
+                "SELECT service,action FROM service_reaction_policies "
+                "WHERE project_id=? AND repository_id=? ORDER BY service",
+                (identifier, repository_id),
+            ).fetchall()
+        return [{"service":row["service"], "action":row["action"]} for row in rows]
+
     def set_policy(self, identifier, repository_id, service, action):
         if (not isinstance(service, str) or not isinstance(action, str)
                 or action not in ("none", "restart", "redeploy")):
@@ -101,7 +116,7 @@ class ReactionSupervisor:
                 (identifier,),
             ).fetchone())
 
-    def capture(self, con, identifier, repository_id, head):
+    def capture(self, con, identifier, repository_id, head, *, event_key=None):
         """Called in the same SQLite transaction as a successful sync receipt.
 
         Never promote a read-only check, unchanged HEAD or inactive runtime to
@@ -114,13 +129,17 @@ class ReactionSupervisor:
             "WHERE project_id=? AND repository_id=? ORDER BY service",
             (identifier, repository_id),
         ).fetchall()
+        # Fast-forward updates use their commit as the idempotency key;
+        # checked branch changes supply a distinct event key so returning to
+        # an earlier commit still triggers the explicitly configured reaction.
+        key = head if event_key is None else event_key
         for item in policies:
             con.execute(
                 "INSERT OR IGNORE INTO service_reaction_events "
-                "(project_id,repository_id,service,action,head,generation,status,reason,at_ns) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "(project_id,repository_id,service,action,head,event_key,generation,status,reason,at_ns) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (identifier, repository_id, item["service"], item["action"],
-                 head, state["generation"] if active else None,
+                 head, key, state["generation"] if active else None,
                  "pending" if active else "skipped",
                  None if active else "inactive_project", time.time_ns()),
             )

@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 _SCHEMA = (
     """CREATE TABLE IF NOT EXISTS schema_version (
            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -155,12 +155,13 @@ _SCHEMA = (
             service TEXT NOT NULL,
             action TEXT NOT NULL CHECK(action IN ('restart','redeploy')),
             head TEXT NOT NULL,
+            event_key TEXT NOT NULL,
             generation TEXT,
             status TEXT NOT NULL CHECK(status IN ('pending','submitted','skipped','interrupted')),
             reason TEXT,
             job_id TEXT REFERENCES jobs(id),
             at_ns INTEGER NOT NULL,
-            UNIQUE(project_id,repository_id,service,head))""",
+            UNIQUE(project_id,repository_id,service,event_key))""",
     "CREATE INDEX IF NOT EXISTS service_reaction_pending ON service_reaction_events(status,at_ns)",
     """CREATE TABLE IF NOT EXISTS tasks (
            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -202,7 +203,7 @@ class Database:
                 row = con.execute(
                     "SELECT version FROM schema_version WHERE singleton=1"
                 ).fetchone()
-                if row is None or row[0] not in (10, 11, 12, SCHEMA_VERSION):
+                if row is None or row[0] not in (10, 11, 12, 13, SCHEMA_VERSION):
                     raise StorageError("Unsupported database schema version")
                 if not {"projects", "repositories", "project_sources",
                         "applications", "tasks", "runtime_state", "jobs", "import_operations", "webhook_routes", "webhook_leases", "source_sync_pending", "repository_add_operations", "repository_bulk_updates"}.issubset(existing):
@@ -218,14 +219,44 @@ class Database:
                 raise StorageError("Application URL schema is incomplete")
             for sql in _SCHEMA:
                 con.execute(sql)
-            if existing and row[0] in (10, 11, 12):
-                # Atomic v12 -> v13 migration; old labels remain registered
-                # with url=NULL, and cannot acquire fabricated Docker links.
+            if existing and row[0] in (10, 11, 12, 13):
+                # Atomic upgrade; preserve previous application URLs and
+                # reaction receipts across the v13 -> v14 schema change.
                 columns = {field[1] for field in con.execute(
                     "PRAGMA table_info(applications)"
                 )}
                 if "url" not in columns:
                     con.execute("ALTER TABLE applications ADD COLUMN url TEXT")
+                if row[0] == 13:
+                    # Prior reaction uniqueness by commit prevented a second
+                    # branch switch back to a previously deployed commit.
+                    # Preserve all existing receipts and job references while
+                    # replacing uniqueness with a per-change event key.
+                    con.execute("""CREATE TABLE service_reaction_events_v14 (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                        repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+                        service TEXT NOT NULL,
+                        action TEXT NOT NULL CHECK(action IN ('restart','redeploy')),
+                        head TEXT NOT NULL,
+                        event_key TEXT NOT NULL,
+                        generation TEXT,
+                        status TEXT NOT NULL CHECK(status IN ('pending','submitted','skipped','interrupted')),
+                        reason TEXT,
+                        job_id TEXT REFERENCES jobs(id),
+                        at_ns INTEGER NOT NULL,
+                        UNIQUE(project_id,repository_id,service,event_key))""")
+                    con.execute("""INSERT INTO service_reaction_events_v14
+                        (id,project_id,repository_id,service,action,head,event_key,
+                         generation,status,reason,job_id,at_ns)
+                        SELECT id,project_id,repository_id,service,action,head,head,
+                               generation,status,reason,job_id,at_ns
+                        FROM service_reaction_events""")
+                    con.execute("DROP TABLE service_reaction_events")
+                    con.execute("ALTER TABLE service_reaction_events_v14 "
+                                "RENAME TO service_reaction_events")
+                    con.execute("CREATE INDEX service_reaction_pending "
+                                "ON service_reaction_events(status,at_ns)")
                 con.execute("UPDATE schema_version SET version=? WHERE singleton=1",
                             (SCHEMA_VERSION,))
             if not existing:
