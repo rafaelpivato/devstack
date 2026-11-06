@@ -185,6 +185,28 @@ class BranchSwitchingTests(unittest.TestCase):
             )
         self.assertEqual(self._status(backend)["branch"], "main")
 
+    def test_switch_matching_active_project_without_deactivating(self):
+        backend = self._clone(self.a, self.backend, "backend")
+        self._publish_branch(self.backend, "feature/outreach-revamp")
+        self.controller.coordinator.activate(self.a)
+        reviewed = self.controller.handle({
+            "op": "branch_preview", "project_id": self.a,
+            "repository_id": backend.id, "branch": "feature/outreach-revamp",
+        })
+        self.assertTrue(reviewed["ready"])
+        self.assertEqual(reviewed["entries"][0]["action"], "switch")
+        self.assertEqual(reviewed["entries"][0]["reactions"], [])
+        result = self.controller.handle({
+            "op": "branch_apply", "project_id": self.a,
+            "repository_id": backend.id, "branch": "feature/outreach-revamp",
+            "revision": reviewed["revision"],
+        })
+        self.assertTrue(result["complete"])
+        self.assertEqual(self._status(backend)["branch"], "feature/outreach-revamp")
+        self.assertEqual(self.controller.coordinator.status()["project_id"], self.a)
+        self.assertEqual(self.docker.owned()[0]["project"], self.a)
+        self.controller.coordinator.deactivate()
+
     def test_active_runtime_and_other_project_repository_rejected(self):
         backend = self._clone(self.a, self.backend, "backend")
         with self.assertRaises(RepositoryNotFound):
