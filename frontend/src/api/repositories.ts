@@ -25,6 +25,7 @@ export interface BranchEntry {
   repository_id:string;name:string;current_branch:string|null;head:string;dirty:boolean;
   default_branch:string;target_branch:string;fallback:boolean;target_head:string;remote_head:string;
   local_exists:boolean;action:"blocked"|"already"|"switch";
+  reactions:{service:string;action:"restart"|"redeploy"}[];
 }
 export interface BranchPreview {project_id:string;requested_branch:string;repository_id:string|null;
   entries:BranchEntry[];ready:boolean;revision:string}
