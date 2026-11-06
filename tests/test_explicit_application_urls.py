@@ -103,7 +103,7 @@ class ApplicationURLPersistenceTests(unittest.TestCase):
                        (self.id,"Existing","web",8000))
             db.execute("UPDATE schema_version SET version=12")
         upgraded=Database(path)
-        self.assertEqual(SCHEMA_VERSION,13)
+        self.assertEqual(SCHEMA_VERSION,14)
         with upgraded.transaction() as con:
             self.assertEqual(con.execute("SELECT version FROM schema_version").fetchone()[0],13)
             row=con.execute("SELECT name,service,port,url FROM applications").fetchone()
