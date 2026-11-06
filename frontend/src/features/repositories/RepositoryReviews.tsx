@@ -19,7 +19,7 @@ import {
 } from "../../lib/repositorySubmission";
 
 
-import { Context, WriteBoundary, ActionButton, ActionError, canWriteRepository, verifyInactive, errorMessage } from './RepositoryCommon';
+import { Context, WriteBoundary, ActionButton, ActionError, canWriteRepository, canUpdateRepository, verifyInactive, verifyRepositoryUpdate, errorMessage } from './RepositoryCommon';
 export function BranchReview({id,runtime,navigation}:{id:string;runtime:RuntimeSnapshot;navigation:Navigator}) {
   const load=useCallback((signal:AbortSignal)=>readProject(id,signal),[id]);
   const project=useResource(load,30000);
@@ -31,24 +31,24 @@ export function BranchReview({id,runtime,navigation}:{id:string;runtime:RuntimeS
   const [error,setError]=useState<string|null>(null);
   const change=()=>{setPreview(null);setResult(null);setError(null);};
   const inspect=async()=>{
-    if(!canWriteRepository(runtime)||!branch.trim()||busy)return;
+    if(!canUpdateRepository(runtime,id)||!branch.trim()||busy)return;
     setBusy(true);change();
-    try{await verifyInactive();setPreview(await previewBranch(id,branch,scope||null));}
+    try{await verifyRepositoryUpdate(id);setPreview(await previewBranch(id,branch,scope||null));}
     catch(e){setError(errorMessage(e));}finally{setBusy(false);}
   };
   const apply=async()=>{
-    if(!preview?.ready||busy||!canWriteRepository(runtime))return;
+    if(!preview?.ready||busy||!canUpdateRepository(runtime,id))return;
     setBusy(true);setError(null);
     const reviewed=preview;setPreview(null); // Prevent reapplying stale inputs on an unknown POST outcome.
     try{
-      await verifyInactive();
+      await verifyRepositoryUpdate(id);
       setResult(await applyBranch(id,reviewed.requested_branch,reviewed.repository_id,reviewed.revision));
     }catch(e){setError(errorMessage(e)+" Inspect repository states and preview again; do not blindly retry.");}
     finally{setBusy(false);}
   };
   return <Context id={id} title="Review branch" navigation={navigation}>
-    <WriteBoundary runtime={runtime}/>
-    <Notice title="Inactive runtime required">Preview fetches remote references. Applying changes requires the exact reviewed revision and a clean checkout.</Notice>
+    {!canUpdateRepository(runtime,id)&&<Notice title="Branch switch unavailable">Activate this project or deactivate the different active project first.</Notice>}
+    <Notice title="Switch while active">Switch a clean repository without stopping the project. A successful switch can trigger its configured service restart or redeploy. No service action is run unless configured; jobs are tracked separately.</Notice>
     <div className="form-stack">
       <label>Branch<input value={branch} maxLength={200} autoCapitalize="off" autoCorrect="off"
         onChange={e=>{setBranch(e.target.value);change();}} placeholder="feature/my-change"/></label>
@@ -59,7 +59,7 @@ export function BranchReview({id,runtime,navigation}:{id:string;runtime:RuntimeS
         </select>
       </label>}
     </div>
-    <ActionButton onClick={()=>void inspect()} disabled={!canWriteRepository(runtime)||busy||!branch.trim()}>
+    <ActionButton onClick={()=>void inspect()} disabled={!canUpdateRepository(runtime,id)||busy||!branch.trim()}>
       {busy?"Working…":"Preview branch"}
     </ActionButton>
     {preview&&<>
@@ -68,15 +68,16 @@ export function BranchReview({id,runtime,navigation}:{id:string;runtime:RuntimeS
         <div key={row.repository_id} className="item-static">
           <div className="item-text">
             <strong>{row.name}</strong><small>{row.current_branch??"Detached"} → {row.target_branch}{row.fallback?" (default fallback)":""}</small>
+            {row.action==="switch"&&<small>Post-switch: {row.reactions.length?row.reactions.map(r=>r.service+" ("+r.action+")").join(", "):"no service action configured"}</small>}
           </div><Status text={row.action} kind={row.action==="blocked"?"warning":"neutral"}/>
         </div>)}</div>
       <p className="text-muted">Branch fallback and blocked entries are shown explicitly. Revision: {preview.revision.slice(0,12)}</p>
-      <ActionButton disabled={!preview.ready||busy||!canWriteRepository(runtime)} onClick={()=>void apply()}>
+      <ActionButton disabled={!preview.ready||busy||!canUpdateRepository(runtime,id)} onClick={()=>void apply()}>
         Apply reviewed branch change
       </ActionButton>
     </>}
     {result&&<Notice title={result.complete?"Branch change completed":"Partial branch result"} role={result.complete?"status":"alert"}>
-      {result.results.map(r=>r.name+": "+r.status+(r.fallback?" (fallback)":"")).join("; ")}
+      {result.results.map(r=>r.name+": "+r.status+(r.fallback?" (fallback)":"")).join("; ")}. Configured service reactions are tracked as separate jobs.
     </Notice>}
     <ActionError message={error}/>
   </Context>;
